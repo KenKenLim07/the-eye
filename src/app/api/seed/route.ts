@@ -51,7 +51,7 @@ export async function POST() {
     }
 
     return NextResponse.json({ ok: true, inserted: articlesToInsert.length });
-  } catch (error: any) {
-    return NextResponse.json({ ok: false, error: { message: error.message, details: error?.details, code: error?.code, hint: error?.hint } }, { status: 500 });
+  } catch (error: unknown) {
+    return NextResponse.json({ ok: false, error: { message: error instanceof Error ? error.message : "Unknown error" } }, { status: 500 });
   }
 } 

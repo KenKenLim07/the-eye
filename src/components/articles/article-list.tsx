@@ -12,7 +12,7 @@ interface Article {
   category: string | null;
 }
 
-async function loadArticles(): Promise<{ data: Article[] | null; error: any | null }> {
+async function loadArticles(): Promise<{ data: Article[] | null; error: unknown | null }> {
   const { data, error } = await supabaseServer
     .from("articles")
     .select("id,title,url,content,published_at,source,category")

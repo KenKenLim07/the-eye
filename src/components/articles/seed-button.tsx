@@ -20,8 +20,8 @@ export default function SeedButton() {
       const count = typeof json.inserted === "number" ? json.inserted : undefined;
       setMessage(count !== undefined ? `Seeded ${count} article(s). Refreshing...` : "Mock data seeded. Refreshing...");
       setTimeout(() => window.location.reload(), 600);
-    } catch (e: any) {
-      const text = typeof e?.message === "string" ? e.message : JSON.stringify(e, null, 2);
+    } catch (e: unknown) {
+      const text = e instanceof Error ? e.message : JSON.stringify(e, null, 2);
       setMessage(text);
     } finally {
       setLoading(false);

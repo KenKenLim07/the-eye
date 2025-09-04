@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -36,7 +37,7 @@ export default function LayoutDemo() {
               </CardHeader>
               <CardContent>
                 <p className="text-muted-foreground">
-                  This layout variant uses the 'sm' container size, providing an optimal reading width
+                  This layout variant uses the &apos;sm&apos; container size, providing an optimal reading width
                   that prevents eye strain while maintaining content focus.
                 </p>
               </CardContent>
@@ -147,7 +148,7 @@ export default function LayoutDemo() {
       {/* Back to Home */}
       <div className="text-center">
         <Button asChild>
-          <a href="/">← Back to Home</a>
+          <Link href="/">← Back to Home</Link>
         </Button>
       </div>
     </MainLayout>
