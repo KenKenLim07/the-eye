@@ -1,0 +1,672 @@
+import time
+import logging
+import random
+from typing import List, Optional, Dict, Any, Tuple
+from urllib.parse import urljoin, urlparse, urlparse as parse_url, parse_qs
+from dataclasses import dataclass
+from playwright.sync_api import Browser
+from bs4 import BeautifulSoup
+from app.pipeline.normalize import build_article, NormalizedArticle
+from app.scrapers.base import launch_browser
+from datetime import datetime
+import re
+import urllib.request
+import json
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Module-level cooldown for sitemap attempts (seconds)
+SITEMAP_COOLDOWN_SECONDS = 24 * 3600
+_last_sitemap_404_at: Optional[float] = None
+
+
+@dataclass
+class ScrapingResult:
+    articles: List[NormalizedArticle]
+    errors: List[str]
+    performance: Dict[str, float]
+    metadata: Dict[str, Any]
+
+
+class ManilaBulletinScraper:
+    """Stealth scraper for Manila Bulletin with conservative crawling and sanitization."""
+
+    BASE_URL = "https://mb.com.ph"
+    START_PATHS = [
+        "/latest",
+        "/news",
+        "/nation",
+        "/business",
+        "/sports",
+        "/entertainment",
+        "/technology",
+    ]
+    FEED_PATHS: List[str] = []
+    SITEMAP_PATHS = [
+        "/sitemap_index.xml",
+        "/sitemap.xml",
+        "/news-sitemap.xml",
+    ]
+    GOOGLE_NEWS_RSS = "https://news.google.com/rss/search?q=site:mb.com.ph&hl=en-PH&gl=PH&ceid=PH:en"
+
+    # Descriptive UA with contact pointer
+    USER_AGENT = (
+        "ph-eye-bot/1.0 (+https://example.com/contact) "
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/125.0.0.0 Safari/537.36"
+    )
+
+    MIN_DELAY = 8.0
+    MAX_DELAY = 14.0
+
+    # Robots.txt disallow-derived patterns (must NOT fetch)
+    DISALLOW_PATTERNS = [
+        r"/ajax(/|$)",
+        r"/print",
+        r"/getRelatedArticles",
+        r"/getMostReadArticles",
+        r"/article_count/",
+        r"/get-menu-header",
+        r"/article\.php",
+        r"/login-mgt",
+        r"/[^/]+\.php($|\?)",
+        r"/widget/",
+        r"[?&]page=",
+        r"/test-ads",
+        r"/api/",
+        r"/redirect-email",
+        r"[?&]s=",
+        r"/search-results\?s=",
+    ]
+
+    SELECTORS = {
+        "article_links": [
+            "article h2 a",
+            "h2 a",
+            "a[href*='/news/']",
+            "a[href*='/latest/']",
+            ".post-title a",
+            ".jeg_post_title a",
+            ".jeg_inner_content a",
+            ".jeg_list_post a",
+            ".jeg_heroblock a",
+        ],
+        "title": [
+            "h1.entry-title",
+            "h1.post-title",
+            "h1.article-title",
+            "h1",
+            "title",
+        ],
+        "content": [
+            ".entry-content p",
+            ".post-content p",
+            ".article-content p",
+            "article p",
+            "p",
+        ],
+        "published_date": [
+            "time[datetime]",
+            ".entry-meta time",
+            ".post-meta time",
+            ".date",
+            "time",
+        ],
+    }
+
+    def _human_delay(self):
+        delay = random.uniform(self.MIN_DELAY, self.MAX_DELAY)
+        logger.info(f"Manila Bulletin: waiting {delay:.1f}s (stealth)")
+        time.sleep(delay)
+
+    def _is_disallowed(self, path_and_query: str) -> bool:
+        for pattern in self.DISALLOW_PATTERNS:
+            if re.search(pattern, path_and_query):
+                return True
+        return False
+
+    def _validate_url(self, url: str) -> bool:
+        if not url:
+            return False
+        parsed = urlparse(url)
+        if not parsed.scheme or not parsed.netloc:
+            return False
+        if not parsed.netloc.endswith("mb.com.ph"):
+            return False
+        # Check path+query against disallow rules
+        path_q = parsed.path + (f"?{parsed.query}" if parsed.query else "")
+        if self._is_disallowed(path_q):
+            return False
+        if url.lower().startswith(("javascript:", "data:")):
+            return False
+        return True
+
+    def _extract_with_fallbacks(self, soup: BeautifulSoup, selectors: List[str]) -> Optional[str]:
+        for sel in selectors:
+            try:
+                el = soup.select_one(sel)
+                if el:
+                    text = el.get_text().strip()
+                    if text:
+                        return text
+            except Exception:
+                continue
+        return None
+
+    def _sanitize_text(self, text: str) -> str:
+        if not text:
+            return ""
+        text = text.replace("<script>", "").replace("</script>", "")
+        text = text.replace("javascript:", "").replace("data:", "")
+        text = text.replace("<", "&lt;").replace(">", "&gt;")
+        return text.strip()
+
+    def _find_article_container(self, soup: BeautifulSoup) -> Optional[BeautifulSoup]:
+        container_selectors = [
+            "article",
+            "main[role='main'] article",
+            ".single-post",
+            ".single-article",
+            ".post-single",
+            ".post",
+            ".entry-content",
+            ".post-content",
+            ".article-content",
+            ".story-content",
+            "#content article",
+        ]
+        candidates: List[BeautifulSoup] = []
+        for sel in container_selectors:
+            try:
+                for el in soup.select(sel):
+                    candidates.append(el)
+            except Exception:
+                continue
+        if not candidates:
+            return None
+        # Score by total text length of <p> inside
+        def score(el: BeautifulSoup) -> int:
+            try:
+                text = "\n".join(p.get_text(" ", strip=True) for p in el.select("p"))
+                return len(text)
+            except Exception:
+                return 0
+        best = max(candidates, key=score)
+        return best if score(best) > 0 else None
+
+    def _extract_content(self, soup: BeautifulSoup) -> str:
+        # Boilerplate class/section blacklist
+        blacklist_selectors = [
+            "nav", "footer", "aside", ".newsletter", ".subscribe", ".subscription", ".share",
+            ".social", ".related", ".recommend", ".tags", ".breadcrumbs", ".author", ".byline",
+            ".comments", "#comments", ".ad", "[class*='advert']", "[id*='advert']",
+        ]
+        boilerplate_phrases = [
+            "sign up by email", "all rights reserved", "©", "copyright", "read next", "related stories",
+            "follow us", "advertisement", "subscribe", "share this", "newsletter",
+            "published", "updated", "read more",
+            "press escape to quit searching",
+        ]
+        # Regex-based skip rules for header widgets (temperature, time, date)
+        header_skip_patterns = [
+            re.compile(r"^\s*(?:[A-Z][a-z]+\s*)?\d{1,2}°[CF]\b"),                # Manila 27°C
+            re.compile(r"^\s*\d{1,2}:\d{2}\s*(?:AM|PM)\b", re.IGNORECASE),       # 10:37 PM
+            re.compile(r"\b(January|February|March|April|May|June|July|August|September|October|November|December)\b\s+\d{1,2},\s+\d{4}", re.IGNORECASE),  # September 3, 2025
+        ]
+        # Remove blacklisted sections from a copy soup for cleaner scoring
+        try:
+            for sel in blacklist_selectors:
+                for el in soup.select(sel):
+                    el.decompose()
+        except Exception:
+            pass
+        # Exclude script/style/template/noscript content from consideration
+        try:
+            for el in soup.find_all(["script", "style", "template", "noscript"]):
+                el.decompose()
+        except Exception:
+            pass
+        # Prefer a scoped article container
+        container = self._find_article_container(soup) or soup
+        parts: List[str] = []
+        try:
+            paragraphs = container.select("p")
+        except Exception:
+            paragraphs = []
+        def should_skip_text(txt: str) -> bool:
+            low = txt.lower()
+            if any(phrase in low for phrase in boilerplate_phrases):
+                return True
+            if "{{" in txt and "}}" in txt:
+                return True
+            for pat in header_skip_patterns:
+                if pat.search(txt):
+                    return True
+            return False
+        for p in paragraphs:
+            try:
+                parent_name = (p.parent.name or "").lower() if p.parent else ""
+                if parent_name in {"script", "style", "template", "noscript"}:
+                    continue
+                txt = (p.get_text(" ", strip=True) or "").strip()
+            except Exception:
+                txt = ""
+            if not txt:
+                continue
+            if should_skip_text(txt):
+                continue
+            # Less strict threshold to avoid dropping valid short lead lines
+            if len(txt) < 25 and not (txt.endswith(".") or txt.endswith("!") or txt.endswith("?")):
+                continue
+            parts.append(self._sanitize_text(txt))
+            if len(parts) >= 40:
+                break
+        content = "\n\n".join(parts)
+        # Relaxed second pass if too short
+        if len(content) < 250:
+            parts = []
+            for p in paragraphs:
+                try:
+                    parent_name = (p.parent.name or "").lower() if p.parent else ""
+                    if parent_name in {"script", "style", "template", "noscript"}:
+                        continue
+                    txt = (p.get_text(" ", strip=True) or "").strip()
+                except Exception:
+                    txt = ""
+                if not txt:
+                    continue
+                if should_skip_text(txt):
+                    continue
+                parts.append(self._sanitize_text(txt))
+                if len(parts) >= 40:
+                    break
+            content = "\n\n".join(parts)
+        # Fallback to original broad selectors if still empty
+        if not content:
+            parts = []
+            for sel in self.SELECTORS["content"]:
+                try:
+                    for p in soup.select(sel):
+                        parent_name = (p.parent.name or "").lower() if p.parent else ""
+                        if parent_name in {"script", "style", "template", "noscript"}:
+                            continue
+                        txt = (p.get_text(" ", strip=True) or "").strip()
+                        if not txt:
+                            continue
+                        if should_skip_text(txt):
+                            continue
+                        parts.append(self._sanitize_text(txt))
+                        if len(parts) >= 40:
+                            break
+                    if parts:
+                        break
+                except Exception:
+                    continue
+            content = "\n\n".join(parts)
+        # Meta description fallback
+        if len(content) < 120:
+            try:
+                meta = soup.select_one("meta[property='og:description']") or soup.select_one("meta[name='description']")
+                if meta:
+                    desc = (meta.get("content") or "").strip()
+                    if desc and ("{{" not in desc and "}}" not in desc) and not any(p.search(desc) for p in header_skip_patterns):
+                        content = desc if not content else content + "\n\n" + desc
+            except Exception:
+                pass
+        # Final text fallback: take top-level text from container
+        if len(content) < 120:
+            try:
+                text = container.get_text(" ", strip=True)
+                if text and ("{{" not in text and "}}" not in text):
+                    # Remove obvious header tokens
+                    lines = [ln for ln in text.splitlines() if ln.strip() and not should_skip_text(ln.strip())]
+                    content = ("\n\n".join(lines))[:1500]
+            except Exception:
+                pass
+        # Cap to avoid oversized rows
+        return (content or "")[:20000]
+
+    def _parse_published(self, raw: Optional[str]) -> Optional[str]:
+        if not raw:
+            return None
+        try:
+            if re.search(r"\d{4}-\d{2}-\d{2}", raw):
+                return raw
+        except Exception:
+            pass
+        try:
+            return datetime.utcnow().isoformat()
+        except Exception:
+            return None
+
+    def _fetch_url(self, url: str, timeout: int = 15) -> Optional[bytes]:
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": self.USER_AGENT, "Accept": "*/*", "Referer": self.BASE_URL})
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return resp.read()
+        except Exception as e:
+            logger.warning(f"fetch failed {url}: {e}")
+            return None
+
+    def _fetch_url_with_status(self, url: str, timeout: int = 15) -> Tuple[Optional[bytes], Optional[int]]:
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": self.USER_AGENT, "Accept": "*/*", "Referer": self.BASE_URL})
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return resp.read(), getattr(resp, 'status', 200)
+        except urllib.error.HTTPError as he:  # type: ignore
+            return None, he.code
+        except Exception:
+            return None, None
+
+    def _discover_links_from_google_news(self, max_links: int = 50) -> List[str]:
+        data = self._fetch_url(self.GOOGLE_NEWS_RSS)
+        if not data:
+            return []
+        soup = BeautifulSoup(data, "xml")
+        links: List[str] = []
+        for item in soup.select("item > link"):
+            href = (item.get_text() or "").strip()
+            if not href:
+                continue
+            try:
+                p = parse_url(href)
+                qs = parse_qs(p.query)
+                direct = (qs.get("url") or [None])[0]
+                candidate = direct or href
+            except Exception:
+                candidate = href
+            if self._validate_url(candidate):
+                links.append(candidate)
+            if len(links) >= max_links:
+                break
+        # unique
+        seen = set()
+        unique: List[str] = []
+        for u in links:
+            if u not in seen:
+                seen.add(u)
+                unique.append(u)
+        return unique
+
+    def _discover_links_from_sitemaps(self, max_links: int = 100) -> List[str]:
+        global _last_sitemap_404_at
+        # Cooldown check
+        if _last_sitemap_404_at and (time.time() - _last_sitemap_404_at) < SITEMAP_COOLDOWN_SECONDS:
+            logger.debug("Skipping sitemap discovery due to cooldown")
+            return []
+
+        discovered: List[str] = []
+        saw_404 = False
+        for path in self.SITEMAP_PATHS:
+            url = urljoin(self.BASE_URL, path)
+            data, status = self._fetch_url_with_status(url)
+            if status == 404:
+                saw_404 = True
+                logger.debug(f"sitemap 404: {url}")
+                continue
+            if not data:
+                logger.debug(f"sitemap fetch failed: {url}")
+                continue
+            try:
+                soup = BeautifulSoup(data, "xml")
+                for loc in soup.select("sitemap > loc"):
+                    child = (loc.get_text() or "").strip()
+                    cdata, cstatus = self._fetch_url_with_status(child)
+                    if cstatus == 404:
+                        logger.debug(f"sitemap child 404: {child}")
+                        continue
+                    if not cdata:
+                        logger.debug(f"sitemap child fetch failed: {child}")
+                        continue
+                    child_soup = BeautifulSoup(cdata, "xml")
+                    for url_el in child_soup.select("url > loc"):
+                        href = (url_el.get_text() or "").strip()
+                        if self._validate_url(href):
+                            discovered.append(href)
+                            if len(discovered) >= max_links:
+                                break
+                    if len(discovered) >= max_links:
+                        break
+                if not discovered:
+                    for url_el in soup.select("url > loc"):
+                        href = (url_el.get_text() or "").strip()
+                        if self._validate_url(href):
+                            discovered.append(href)
+                            if len(discovered) >= max_links:
+                                break
+            except Exception as e:
+                logger.debug(f"sitemap parse failed {url}: {e}")
+        if saw_404 and not discovered:
+            _last_sitemap_404_at = time.time()
+        # unique
+        seen = set()
+        unique: List[str] = []
+        for u in discovered:
+            if u not in seen:
+                seen.add(u)
+                unique.append(u)
+        return unique
+
+    def _discover_links_from_html(self, html: str) -> List[str]:
+        soup = BeautifulSoup(html, "html.parser")
+        links: List[str] = []
+        for sel in self.SELECTORS["article_links"]:
+            for a in soup.select(sel):
+                href = a.get("href")
+                if not href:
+                    continue
+                full = urljoin(self.BASE_URL, href)
+                if self._validate_url(full):
+                    links.append(full)
+        # Fallback: scan all anchors and pick likely article URLs (year in path)
+        if not links:
+            for a in soup.select("a[href]"):
+                href = a.get("href")
+                if not href:
+                    continue
+                full = urljoin(self.BASE_URL, href)
+                if not self._validate_url(full):
+                    continue
+                path = urlparse(full).path or ""
+                if re.search(r"/20\d{2}/", path) or re.search(r"/(news|nation|business|sports|entertainment|technology)/", path):
+                    links.append(full)
+        seen = set()
+        unique = []
+        for u in links:
+            if u not in seen:
+                seen.add(u)
+                unique.append(u)
+        return unique
+
+    def _extract_json_ld(self, soup: BeautifulSoup) -> Dict[str, Any]:
+        data: Dict[str, Any] = {}
+        try:
+            for script in soup.select('script[type="application/ld+json"]'):
+                try:
+                    payload = json.loads(script.get_text(strip=True))
+                    if isinstance(payload, dict):
+                        if payload.get("@type") in ["NewsArticle", "Article", "BlogPosting"]:
+                            data["headline"] = payload.get("headline")
+                            data["datePublished"] = payload.get("datePublished")
+                            data["articleBody"] = payload.get("articleBody")
+                            break
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        return data
+
+    def _scrape_article(self, url: str, browser: Browser) -> Optional[NormalizedArticle]:
+        try:
+            attempts = 0
+            last_error: Optional[Exception] = None
+            while attempts < 2:
+                attempts += 1
+                context = browser.new_context(
+                    user_agent=self.USER_AGENT,
+                    extra_http_headers={"Referer": self.BASE_URL}
+                )
+                page = context.new_page()
+                # Block heavy/static resources and third-party requests to reduce timeouts
+                try:
+                    page.route("**/*", lambda route: (
+                        route.abort()
+                        if any(route.request.url.lower().endswith(ext) for ext in (
+                            ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".ico", ".css", ".woff", ".woff2", ".ttf", ".otf"))
+                        or (not route.request.url.startswith(self.BASE_URL))
+                        else route.continue_()
+                    ))
+                except Exception:
+                    pass
+                page.set_default_navigation_timeout(30_000)
+                page.set_default_timeout(30_000)
+                self._human_delay()
+                try:
+                    # Prefer domcontentloaded for speed; load can hang on ads/analytics
+                    page.goto(url, wait_until="domcontentloaded")
+                except Exception as e:
+                    last_error = e
+                    try:
+                        page.goto(url)
+                        page.wait_for_load_state("domcontentloaded", timeout=15_000)
+                    except Exception as e2:
+                        last_error = e2
+                        context.close()
+                        continue
+                # Attempt to wait for some content to appear but don't block too long
+                try:
+                    page.wait_for_selector("article, .entry-content, .post-content", timeout=5_000)
+                except Exception:
+                    pass
+                soup = BeautifulSoup(page.content(), "html.parser")
+                jsonld = self._extract_json_ld(soup)
+
+                title = jsonld.get("headline") or self._extract_with_fallbacks(soup, self.SELECTORS["title"]) or ""
+                if not title:
+                    context.close()
+                    continue
+                content = self._sanitize_text(jsonld.get("articleBody") or self._extract_content(soup))
+                raw_published = jsonld.get("datePublished") or self._extract_with_fallbacks(soup, self.SELECTORS["published_date"]) or None
+                published_iso = self._parse_published(raw_published)
+                article = build_article(
+                    source="Manila Bulletin",
+                    category="General",
+                    title=title,
+                    url=url,
+                    content=content,
+                    published_at=published_iso,
+                )
+                context.close()
+                return article
+            # All attempts failed
+            if last_error:
+                logger.error(f"Manila Bulletin scrape failed for {url}: {last_error}")
+            return None
+        except Exception as e:
+            logger.error(f"Manila Bulletin scrape failed for {url}: {e}")
+            return None
+
+
+    def _discover_links_from_homepage(self, max_links: int = 20) -> List[str]:
+        """Discover links directly from Manila Bulletin homepage."""
+        try:
+            data = self._fetch_url(self.BASE_URL)
+            if not data:
+                return []
+            
+            html = data.decode('utf-8', errors='ignore')
+            links = self._discover_links_from_html(html)
+            return links[:max_links]
+        except Exception as e:
+            logger.error(f'Homepage discovery failed: {e}')
+            return []
+
+    def scrape_latest(self, max_articles: int = 3) -> ScrapingResult:
+        start = time.time()
+        articles: List[NormalizedArticle] = []
+        errors: List[str] = []
+        discovered: List[str] = []
+        
+        # 1) First try homepage discovery (fastest and most reliable)
+        homepage_links = []
+        try:
+            logger.info('Trying homepage discovery')
+            homepage_links = self._discover_links_from_homepage(max_links=max_articles * 10)
+            discovered.extend(homepage_links)
+            logger.info(f'Homepage found {len(homepage_links)} links')
+        except Exception as e:
+            errors.append(f'homepage:{e}')
+            logger.error(f'Homepage discovery failed: {e}')
+
+        # 2) Then try section HTML discovery if still low
+        html_links_found = 0
+        if len(discovered) < max_articles * 2:
+            try:
+                with launch_browser() as browser:
+                    for path in self.START_PATHS[:2]:  # only first 2 sections
+                        try:
+                            self._human_delay()
+                            context = browser.new_context(
+                                user_agent=self.USER_AGENT,
+                                extra_http_headers={'Referer': self.BASE_URL}
+                            )
+                            page = context.new_page()
+                            page.set_default_navigation_timeout(20_000)
+                            page.set_default_timeout(20_000)
+                            url = urljoin(self.BASE_URL, path)
+                            try:
+                                page.goto(url, wait_until='networkidle')
+                            except Exception:
+                                page.goto(url, wait_until='domcontentloaded')
+                            new_links = self._discover_links_from_html(page.content())[:5]  # cap per section
+                            html_links_found += len(new_links)
+                            discovered.extend(new_links)
+                            context.close()
+                        except Exception as e:
+                            errors.append(f'discover@{path}:{e}')
+                            try:
+                                context.close()
+                            except Exception:
+                                pass
+            except Exception as e:
+                errors.append(f'sections:{e}')
+
+        # 3) Finally sitemaps if not cooled down
+        sitemap_links = []
+        if len(discovered) < max_articles * 2:
+            try:
+                sitemap_links = self._discover_links_from_sitemaps(max_links=max_articles * 10)
+                discovered.extend(sitemap_links)
+            except Exception as e:
+                errors.append(f'sitemaps:{e}')
+
+        # Dedup and validate
+        candidates: List[str] = []
+        seen = set()
+        for u in discovered:
+            if u not in seen and self._validate_url(u):
+                seen.add(u)
+                candidates.append(u)
+
+        logger.info(
+            f'MB discovery: homepage={len(homepage_links)}, html={html_links_found}, sitemaps={len(sitemap_links)}, candidates={len(candidates)}'
+        )
+
+        # Scrape articles
+        try:
+            with launch_browser() as browser:
+                for url in candidates:
+                    if len(articles) >= max_articles:
+                        break
+                    art = self._scrape_article(url, browser)
+                    if art:
+                        articles.append(art)
+        except Exception as e:
+            errors.append(str(e))
+        
+        duration = time.time() - start
+        perf = {'duration_s': round(duration, 2), 'count': len(articles)}
+        meta = {'domain': 'mb.com.ph', 'candidates': len(discovered)}
+        return ScrapingResult(articles=articles, errors=errors, performance=perf, metadata=meta) 

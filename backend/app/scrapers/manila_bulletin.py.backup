@@ -1,0 +1,464 @@
+import time
+import logging
+import random
+from typing import List, Optional, Dict, Any, Tuple
+from urllib.parse import urljoin, urlparse, urlparse as parse_url, parse_qs
+from dataclasses import dataclass
+from playwright.sync_api import Browser
+from bs4 import BeautifulSoup
+from app.pipeline.normalize import build_article, NormalizedArticle
+from app.scrapers.base import launch_browser
+from datetime import datetime
+import re
+import urllib.request
+import json
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Module-level cooldown for sitemap attempts (seconds)
+SITEMAP_COOLDOWN_SECONDS = 24 * 3600
+_last_sitemap_404_at: Optional[float] = None
+
+
+@dataclass
+class ScrapingResult:
+    articles: List[NormalizedArticle]
+    errors: List[str]
+    performance: Dict[str, float]
+    metadata: Dict[str, Any]
+
+
+class ManilaBulletinScraper:
+    """Stealth scraper for Manila Bulletin with conservative crawling and sanitization."""
+
+    BASE_URL = "https://mb.com.ph"
+    START_PATHS = [
+        "/latest",
+        "/news",
+        "/nation",
+        "/business",
+        "/sports",
+        "/entertainment",
+        "/technology",
+    ]
+    FEED_PATHS: List[str] = []
+    SITEMAP_PATHS = [
+        "/sitemap_index.xml",
+        "/sitemap.xml",
+        "/news-sitemap.xml",
+    ]
+    GOOGLE_NEWS_RSS = "https://news.google.com/rss/search?q=site:mb.com.ph&hl=en-PH&gl=PH&ceid=PH:en"
+
+    # Descriptive UA with contact pointer
+    USER_AGENT = (
+        "ph-eye-bot/1.0 (+https://example.com/contact) "
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/125.0.0.0 Safari/537.36"
+    )
+
+    MIN_DELAY = 8.0
+    MAX_DELAY = 14.0
+
+    # Robots.txt disallow-derived patterns (must NOT fetch)
+    DISALLOW_PATTERNS = [
+        r"/ajax(/|$)",
+        r"/print",
+        r"/getRelatedArticles",
+        r"/getMostReadArticles",
+        r"/article_count/",
+        r"/get-menu-header",
+        r"/article\.php",
+        r"/login-mgt",
+        r"/[^/]+\.php($|\?)",
+        r"/widget/",
+        r"[?&]page=",
+        r"/test-ads",
+        r"/api/",
+        r"/redirect-email",
+        r"[?&]s=",
+        r"/search-results\?s=",
+    ]
+
+    SELECTORS = {
+        "article_links": [
+            "article h2 a",
+            "h2 a",
+            "a[href*='/news/']",
+            "a[href*='/latest/']",
+            ".post-title a",
+            ".jeg_post_title a",
+            ".jeg_inner_content a",
+            ".jeg_list_post a",
+            ".jeg_heroblock a",
+        ],
+        "title": [
+            "h1.entry-title",
+            "h1.post-title",
+            "h1.article-title",
+            "h1",
+            "title",
+        ],
+        "content": [
+            ".entry-content p",
+            ".post-content p",
+            ".article-content p",
+            "article p",
+            "p",
+        ],
+        "published_date": [
+            "time[datetime]",
+            ".entry-meta time",
+            ".post-meta time",
+            ".date",
+            "time",
+        ],
+    }
+
+    def _human_delay(self):
+        delay = random.uniform(self.MIN_DELAY, self.MAX_DELAY)
+        logger.info(f"Manila Bulletin: waiting {delay:.1f}s (stealth)")
+        time.sleep(delay)
+
+    def _is_disallowed(self, path_and_query: str) -> bool:
+        for pattern in self.DISALLOW_PATTERNS:
+            if re.search(pattern, path_and_query):
+                return True
+        return False
+
+    def _validate_url(self, url: str) -> bool:
+        if not url:
+            return False
+        parsed = urlparse(url)
+        if not parsed.scheme or not parsed.netloc:
+            return False
+        if not parsed.netloc.endswith("mb.com.ph"):
+            return False
+        # Check path+query against disallow rules
+        path_q = parsed.path + (f"?{parsed.query}" if parsed.query else "")
+        if self._is_disallowed(path_q):
+            return False
+        if url.lower().startswith(("javascript:", "data:")):
+            return False
+        return True
+
+    def _extract_with_fallbacks(self, soup: BeautifulSoup, selectors: List[str]) -> Optional[str]:
+        for sel in selectors:
+            try:
+                el = soup.select_one(sel)
+                if el:
+                    text = el.get_text().strip()
+                    if text:
+                        return text
+            except Exception:
+                continue
+        return None
+
+    def _sanitize_text(self, text: str) -> str:
+        if not text:
+            return ""
+        text = text.replace("<script>", "").replace("</script>", "")
+        text = text.replace("javascript:", "").replace("data:", "")
+        text = text.replace("<", "&lt;").replace(">", "&gt;")
+        return text.strip()
+
+    def _extract_content(self, soup: BeautifulSoup) -> str:
+        parts: List[str] = []
+        for sel in self.SELECTORS["content"]:
+            try:
+                for p in soup.select(sel):
+                    txt = (p.get_text() or "").strip()
+                    if txt and len(txt) > 30:
+                        parts.append(self._sanitize_text(txt))
+                if parts:
+                    break
+            except Exception:
+                continue
+        content = "\n\n".join(parts[:20])
+        return content
+
+    def _parse_published(self, raw: Optional[str]) -> Optional[str]:
+        if not raw:
+            return None
+        try:
+            if re.search(r"\d{4}-\d{2}-\d{2}", raw):
+                return raw
+        except Exception:
+            pass
+        try:
+            return datetime.utcnow().isoformat()
+        except Exception:
+            return None
+
+    def _fetch_url(self, url: str, timeout: int = 15) -> Optional[bytes]:
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": self.USER_AGENT, "Accept": "*/*", "Referer": self.BASE_URL})
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return resp.read()
+        except Exception as e:
+            logger.warning(f"fetch failed {url}: {e}")
+            return None
+
+    def _fetch_url_with_status(self, url: str, timeout: int = 15) -> Tuple[Optional[bytes], Optional[int]]:
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": self.USER_AGENT, "Accept": "*/*", "Referer": self.BASE_URL})
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return resp.read(), getattr(resp, 'status', 200)
+        except urllib.error.HTTPError as he:  # type: ignore
+            return None, he.code
+        except Exception:
+            return None, None
+
+    def _discover_links_from_google_news(self, max_links: int = 50) -> List[str]:
+        data = self._fetch_url(self.GOOGLE_NEWS_RSS)
+        if not data:
+            return []
+        soup = BeautifulSoup(data, "xml")
+        links: List[str] = []
+        for item in soup.select("item > link"):
+            href = (item.get_text() or "").strip()
+            if not href:
+                continue
+            try:
+                p = parse_url(href)
+                qs = parse_qs(p.query)
+                direct = (qs.get("url") or [None])[0]
+                candidate = direct or href
+            except Exception:
+                candidate = href
+            if self._validate_url(candidate):
+                links.append(candidate)
+            if len(links) >= max_links:
+                break
+        # unique
+        seen = set()
+        unique: List[str] = []
+        for u in links:
+            if u not in seen:
+                seen.add(u)
+                unique.append(u)
+        return unique
+
+    def _discover_links_from_sitemaps(self, max_links: int = 100) -> List[str]:
+        global _last_sitemap_404_at
+        # Cooldown check
+        if _last_sitemap_404_at and (time.time() - _last_sitemap_404_at) < SITEMAP_COOLDOWN_SECONDS:
+            logger.debug("Skipping sitemap discovery due to cooldown")
+            return []
+
+        discovered: List[str] = []
+        saw_404 = False
+        for path in self.SITEMAP_PATHS:
+            url = urljoin(self.BASE_URL, path)
+            data, status = self._fetch_url_with_status(url)
+            if status == 404:
+                saw_404 = True
+                logger.debug(f"sitemap 404: {url}")
+                continue
+            if not data:
+                logger.debug(f"sitemap fetch failed: {url}")
+                continue
+            try:
+                soup = BeautifulSoup(data, "xml")
+                for loc in soup.select("sitemap > loc"):
+                    child = (loc.get_text() or "").strip()
+                    cdata, cstatus = self._fetch_url_with_status(child)
+                    if cstatus == 404:
+                        logger.debug(f"sitemap child 404: {child}")
+                        continue
+                    if not cdata:
+                        logger.debug(f"sitemap child fetch failed: {child}")
+                        continue
+                    child_soup = BeautifulSoup(cdata, "xml")
+                    for url_el in child_soup.select("url > loc"):
+                        href = (url_el.get_text() or "").strip()
+                        if self._validate_url(href):
+                            discovered.append(href)
+                            if len(discovered) >= max_links:
+                                break
+                    if len(discovered) >= max_links:
+                        break
+                if not discovered:
+                    for url_el in soup.select("url > loc"):
+                        href = (url_el.get_text() or "").strip()
+                        if self._validate_url(href):
+                            discovered.append(href)
+                            if len(discovered) >= max_links:
+                                break
+            except Exception as e:
+                logger.debug(f"sitemap parse failed {url}: {e}")
+        if saw_404 and not discovered:
+            _last_sitemap_404_at = time.time()
+        # unique
+        seen = set()
+        unique: List[str] = []
+        for u in discovered:
+            if u not in seen:
+                seen.add(u)
+                unique.append(u)
+        return unique
+
+    def _discover_links_from_html(self, html: str) -> List[str]:
+        soup = BeautifulSoup(html, "html.parser")
+        links: List[str] = []
+        for sel in self.SELECTORS["article_links"]:
+            for a in soup.select(sel):
+                href = a.get("href")
+                if not href:
+                    continue
+                full = urljoin(self.BASE_URL, href)
+                if self._validate_url(full):
+                    links.append(full)
+        # Fallback: scan all anchors and pick likely article URLs (year in path)
+        if not links:
+            for a in soup.select("a[href]"):
+                href = a.get("href")
+                if not href:
+                    continue
+                full = urljoin(self.BASE_URL, href)
+                if not self._validate_url(full):
+                    continue
+                path = urlparse(full).path or ""
+                if re.search(r"/20\d{2}/", path) or re.search(r"/(news|nation|business|sports|entertainment|technology)/", path):
+                    links.append(full)
+        seen = set()
+        unique = []
+        for u in links:
+            if u not in seen:
+                seen.add(u)
+                unique.append(u)
+        return unique
+
+    def _extract_json_ld(self, soup: BeautifulSoup) -> Dict[str, Any]:
+        data: Dict[str, Any] = {}
+        try:
+            for script in soup.select('script[type="application/ld+json"]'):
+                try:
+                    payload = json.loads(script.get_text(strip=True))
+                    if isinstance(payload, dict):
+                        if payload.get("@type") in ["NewsArticle", "Article", "BlogPosting"]:
+                            data["headline"] = payload.get("headline")
+                            data["datePublished"] = payload.get("datePublished")
+                            data["articleBody"] = payload.get("articleBody")
+                            break
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        return data
+
+    def _scrape_article(self, url: str, browser: Browser) -> Optional[NormalizedArticle]:
+        try:
+            context = browser.new_context(
+                user_agent=self.USER_AGENT,
+                extra_http_headers={"Referer": self.BASE_URL}
+            )
+            page = context.new_page()
+            page.set_default_navigation_timeout(40_000)
+            page.set_default_timeout(40_000)
+            self._human_delay()
+            try:
+                page.goto(url, wait_until="domcontentloaded")
+            except Exception:
+                page.goto(url)
+                page.wait_for_load_state("domcontentloaded", timeout=15_000)
+            soup = BeautifulSoup(page.content(), "html.parser")
+            jsonld = self._extract_json_ld(soup)
+
+            title = jsonld.get("headline") or self._extract_with_fallbacks(soup, self.SELECTORS["title"]) or ""
+            if not title:
+                context.close()
+                return None
+            content = self._sanitize_text(jsonld.get("articleBody") or self._extract_content(soup))
+            raw_published = jsonld.get("datePublished") or self._extract_with_fallbacks(soup, self.SELECTORS["published_date"]) or None
+            published_iso = self._parse_published(raw_published)
+            article = build_article(
+                source="Manila Bulletin",
+                category="General",
+                title=title,
+                url=url,
+                content=content,
+                published_at=published_iso,
+            )
+            context.close()
+            return article
+        except Exception as e:
+            logger.error(f"Manila Bulletin scrape failed for {url}: {e}")
+            return None
+
+    def scrape_latest(self, max_articles: int = 3) -> ScrapingResult:
+        start = time.time()
+        articles: List[NormalizedArticle] = []
+        errors: List[str] = []
+        discovered: List[str] = []
+        try:
+            # 1) Prefer conservative section HTML discovery (strict caps)
+            html_links_found = 0
+            with launch_browser() as browser:
+                for path in self.START_PATHS[:2]:  # only first 2 sections
+                    try:
+                        self._human_delay()
+                        context = browser.new_context(
+                            user_agent=self.USER_AGENT,
+                            extra_http_headers={"Referer": self.BASE_URL}
+                        )
+                        page = context.new_page()
+                        page.set_default_navigation_timeout(20_000)
+                        page.set_default_timeout(20_000)
+                        url = urljoin(self.BASE_URL, path)
+                        try:
+                            page.goto(url, wait_until="networkidle")
+                        except Exception:
+                            page.goto(url, wait_until="domcontentloaded")
+                        new_links = self._discover_links_from_html(page.content())[:5]  # cap per section
+                        html_links_found += len(new_links)
+                        discovered.extend(new_links)
+                        context.close()
+                    except Exception as e:
+                        errors.append(f"discover@{path}:{e}")
+                        try:
+                            context.close()
+                        except Exception:
+                            pass
+                # 2) Then Google News hints if still low
+                gnews_links = []
+                if len(discovered) < max_articles * 2:
+                    try:
+                        gnews_links = self._discover_links_from_google_news(max_links=max_articles * 10)
+                        discovered.extend(gnews_links)
+                    except Exception as e:
+                        errors.append(f"gnews:{e}")
+                # 3) Finally sitemaps if not cooled down
+                sitemap_links = []
+                if len(discovered) < max_articles * 2:
+                    try:
+                        sitemap_links = self._discover_links_from_sitemaps(max_links=max_articles * 10)
+                        discovered.extend(sitemap_links)
+                    except Exception as e:
+                        errors.append(f"sitemaps:{e}")
+
+                # Dedup and validate
+                candidates: List[str] = []
+                seen = set()
+                for u in discovered:
+                    if u not in seen and self._validate_url(u):
+                        seen.add(u)
+                        candidates.append(u)
+
+                logger.info(
+                    f"MB discovery: html={html_links_found}, gnews={len(gnews_links)}, sitemaps={len(sitemap_links)}, candidates={len(candidates)}"
+                )
+
+                for url in candidates:
+                    if len(articles) >= max_articles:
+                        break
+                    art = self._scrape_article(url, browser)
+                    if art:
+                        articles.append(art)
+        except Exception as e:
+            errors.append(str(e))
+        duration = time.time() - start
+        perf = {"duration_s": round(duration, 2), "count": len(articles)}
+        meta = {"domain": "mb.com.ph", "candidates": len(discovered)}
+        return ScrapingResult(articles=articles, errors=errors, performance=perf, metadata=meta) 

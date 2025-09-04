@@ -1,0 +1,584 @@
+import time
+import logging
+import random
+from typing import List, Optional, Dict, Any, Tuple
+from urllib.parse import urljoin, urlparse, parse_qs
+from dataclasses import dataclass
+from playwright.sync_api import Browser
+from bs4 import BeautifulSoup
+from app.pipeline.normalize import build_article, NormalizedArticle
+from app.scrapers.base import launch_browser
+from datetime import datetime
+import re
+import urllib.request
+import json
+import httpx
+from app.scrapers.utils import resolve_category_pair
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+@dataclass
+class ScrapingResult:
+    articles: List[NormalizedArticle]
+    errors: List[str]
+    performance: Dict[str, float]
+    metadata: Dict[str, Any]
+
+
+class RapplerScraper:
+    """Advanced stealth scraper for Rappler with senior dev + black hat techniques."""
+
+    BASE_URL = "https://www.rappler.com"
+    FEED_URL = "https://www.rappler.com/feed/"
+    SECTIONS = [
+        "/latest/",
+        "/newsbreak/", 
+        "/nation/",
+        "/business/",
+        "/sports/",
+        "/technology/",
+        "/world/",
+        "/entertainment/",
+    ]
+    GOOGLE_NEWS_RSS = "https://news.google.com/rss/search?q=site:rappler.com&hl=en-PH&gl=PH&ceid=PH:en"
+
+    # User-Agent rotation for stealth
+    USER_AGENTS = [
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4.1 Safari/605.1.15",
+    ]
+
+    # Respectful crawling delays
+    MIN_DELAY = 4.0
+    MAX_DELAY = 8.0
+
+    # Content selectors for Rappler
+    SELECTORS = {
+        "article_links": [
+            "h2 a[href*='/news/']",
+            "h3 a[href*='/newsbreak/']", 
+            "h2 a[href*='/nation/']",
+            "h2 a[href*='/business/']",
+            "h2 a[href*='/sports/']",
+            "h2 a[href*='/technology/']",
+            "h2 a[href*='/world/']",
+            "h2 a[href*='/entertainment/']",
+            ".post-card__title a",
+            ".archive-article h3 a",
+            ".trending-header a",
+            "a[href*='/20']",  # year-based URLs
+            "article h2 a",
+            "article h3 a",
+        ],
+        "title": [
+            "h1.post-single__title",
+            "h1.entry-title", 
+            "h1.article-title",
+            "h1",
+            "title",
+        ],
+        "content": [
+            ".entry-content p",
+            ".post-single__content p",
+            ".single-article p",
+            ".article-content p",
+            "article p",
+        ],
+        "published_date": [
+            "time[datetime]",
+            ".post-single__date",
+            ".entry-meta time",
+            "time",
+            ".date",
+        ],
+    }
+
+    def _get_random_ua(self) -> str:
+        return random.choice(self.USER_AGENTS)
+
+    def _human_delay(self):
+        delay = random.uniform(self.MIN_DELAY, self.MAX_DELAY)
+        logger.info(f"Rappler: stealth delay {delay:.1f}s")
+        time.sleep(delay)
+
+    def _validate_url(self, url: str) -> bool:
+        """Validate if URL is a legitimate Rappler article."""
+        if not url:
+            return False
+        parsed = urlparse(url)
+        if not parsed.scheme or not parsed.netloc:
+            return False
+        if not ("rappler.com" in parsed.netloc):
+            return False
+        
+        # Filter out non-article URLs
+        blacklist_patterns = [
+            r"/feed/",
+            r"/search",
+            r"/tag/",
+            r"/author/",
+            r"/newsletter",
+            r"/subscribe", 
+            r"/login",
+            r"/register",
+            r"/wp-",
+            r"\.css",
+            r"\.js",
+            r"\.png",
+            r"\.jpg",
+            r"\.jpeg",
+            r"\.gif",
+            r"\.svg",
+        ]
+        
+        for pattern in blacklist_patterns:
+            if re.search(pattern, url, re.IGNORECASE):
+                return False
+        
+        # Must have date pattern or be in valid sections
+        path = parsed.path
+        if not (
+            re.search(r"/20\d{2}/", path) or  # year pattern
+            any(section in path for section in ["/news/", "/newsbreak/", "/nation/", "/business/", "/sports/", "/technology/", "/world/", "/entertainment/"])
+        ):
+            return False
+            
+        return True
+
+    def _extract_with_fallbacks(self, soup: BeautifulSoup, selectors: List[str]) -> Optional[str]:
+        """Extract text using fallback selectors."""
+        for sel in selectors:
+            try:
+                el = soup.select_one(sel)
+                if el:
+                    text = el.get_text().strip()
+                    if text:
+                        return text
+            except Exception:
+                continue
+        return None
+
+    def _sanitize_text(self, text: str) -> str:
+        """Sanitize and clean text content."""
+        if not text:
+            return ""
+        # Remove script/style content
+        text = re.sub(r'<script[^>]*>.*?</script>', '', text, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r'<style[^>]*>.*?</style>', '', text, flags=re.DOTALL | re.IGNORECASE)
+        
+        # Remove HTML tags
+        text = re.sub(r'<[^>]+>', '', text)
+        
+        # Clean up whitespace
+        text = re.sub(r'\s+', ' ', text)
+        text = text.strip()
+        
+        return text
+
+    def _extract_content(self, soup: BeautifulSoup) -> str:
+        """Extract article content with advanced filtering."""
+        # Remove unwanted elements
+        unwanted_selectors = [
+            "nav", "footer", "aside", ".share", ".social", ".related", 
+            ".newsletter", ".subscribe", ".ad", ".advertisement",
+            ".comments", "#comments", ".author-info", ".tags",
+            ".breadcrumbs", ".rappler-speechify", "[class*='ad-']"
+        ]
+        
+        for sel in unwanted_selectors:
+            for el in soup.select(sel):
+                el.decompose()
+
+        # Extract from content containers
+        parts = []
+        for sel in self.SELECTORS["content"]:
+            try:
+                for p in soup.select(sel):
+                    text = p.get_text(" ", strip=True)
+                    if text and len(text) > 20:  # Min length filter
+                        # Skip boilerplate text
+                        if not any(skip in text.lower() for skip in [
+                            "rappler", "subscribe", "newsletter", "share this",
+                            "follow us", "advertisement", "read more",
+                            "related stories", "comments", "copyright"
+                        ]):
+                            parts.append(self._sanitize_text(text))
+                    
+                    if len(parts) >= 20:  # Limit paragraphs
+                        break
+                        
+                if parts:
+                    break
+            except Exception:
+                continue
+
+        content = "\n\n".join(parts)
+        
+        # Fallback to meta description if content too short
+        if len(content) < 100:
+            try:
+                meta = soup.select_one("meta[property='og:description']") or soup.select_one("meta[name='description']")
+                if meta:
+                    desc = meta.get("content", "").strip()
+                    if desc:
+                        content = desc if not content else content + "\n\n" + desc
+            except Exception:
+                pass
+
+        return (content or "")[:15000]  # Cap length
+
+    def _parse_published_date(self, raw_date: Optional[str]) -> Optional[str]:
+        """Parse and normalize published date."""
+        if not raw_date:
+            return None
+            
+        try:
+            # Try to find ISO format
+            if re.search(r'\d{4}-\d{2}-\d{2}', raw_date):
+                return raw_date
+            
+            # Fallback to current time if parsing fails
+            return datetime.utcnow().isoformat()
+        except Exception:
+            return None
+
+    def _extract_json_ld(self, soup: BeautifulSoup) -> Dict[str, Any]:
+        """Extract structured data from JSON-LD."""
+        data = {}
+        try:
+            for script in soup.select('script[type="application/ld+json"]'):
+                try:
+                    payload = json.loads(script.get_text(strip=True))
+                    if isinstance(payload, dict):
+                        if payload.get("@type") in ["NewsArticle", "Article", "BlogPosting"]:
+                            data["headline"] = payload.get("headline")
+                            data["datePublished"] = payload.get("datePublished")
+                            data["articleBody"] = payload.get("articleBody")
+                            break
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        return data
+
+    def _fetch_with_httpx(self, url: str, timeout: int = 15) -> Optional[str]:
+        """Fetch URL with httpx and stealth headers."""
+        try:
+            headers = {
+                "User-Agent": self._get_random_ua(),
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.5",
+                "Accept-Encoding": "gzip, deflate, br",
+                "Referer": self.BASE_URL,
+                "Connection": "keep-alive",
+                "Upgrade-Insecure-Requests": "1",
+            }
+            
+            with httpx.Client(timeout=timeout, follow_redirects=True) as client:
+                response = client.get(url, headers=headers)
+                response.raise_for_status()
+                return response.text
+        except Exception as e:
+            logger.warning(f"HTTP fetch failed for {url}: {e}")
+            return None
+
+    def _discover_from_rss(self, max_links: int = 30) -> List[str]:
+        """Discover article links from RSS feed."""
+        try:
+            logger.info("Discovering from RSS feed")
+            xml_content = self._fetch_with_httpx(self.FEED_URL)
+            if not xml_content:
+                return []
+            
+            soup = BeautifulSoup(xml_content, "xml")
+            links = []
+            
+            for item in soup.select("item"):
+                link_el = item.select_one("link")
+                if link_el:
+                    url = link_el.get_text().strip()
+                    if self._validate_url(url):
+                        links.append(url)
+                        
+                if len(links) >= max_links:
+                    break
+            
+            logger.info(f"RSS discovered {len(links)} links")
+            return links
+        except Exception as e:
+            logger.error(f"RSS discovery failed: {e}")
+            return []
+
+    def _discover_from_google_news(self, max_links: int = 20) -> List[str]:
+        """Discover from Google News RSS."""
+        try:
+            logger.info("Discovering from Google News")
+            xml_content = self._fetch_with_httpx(self.GOOGLE_NEWS_RSS)
+            if not xml_content:
+                return []
+            
+            soup = BeautifulSoup(xml_content, "xml")
+            links = []
+            
+            for item in soup.select("item"):
+                link_el = item.select_one("link")
+                if link_el:
+                    gn_url = link_el.get_text().strip()
+                    # Extract actual URL from Google News redirect
+                    try:
+                        parsed = urlparse(gn_url)
+                        qs = parse_qs(parsed.query)
+                        actual_url = (qs.get("url") or [None])[0]
+                        if actual_url and self._validate_url(actual_url):
+                            links.append(actual_url)
+                    except Exception:
+                        continue
+                        
+                if len(links) >= max_links:
+                    break
+            
+            logger.info(f"Google News discovered {len(links)} links")
+            return links
+        except Exception as e:
+            logger.error(f"Google News discovery failed: {e}")
+            return []
+
+    def _discover_from_sections(self, max_links: int = 20) -> List[str]:
+        """Discover from section pages using Playwright."""
+        links = []
+        try:
+            logger.info("Discovering from section pages")
+            with launch_browser() as browser:
+                for section in self.SECTIONS[:3]:  # Limit to first 3 sections
+                    try:
+                        context = browser.new_context(
+                            user_agent=self._get_random_ua(),
+                            extra_http_headers={"Referer": self.BASE_URL}
+                        )
+                        page = context.new_page()
+                        
+                        # Block heavy resources for speed
+                        page.route("**/*", lambda route: (
+                            route.abort() if any(
+                                route.request.url.lower().endswith(ext) 
+                                for ext in [".png", ".jpg", ".jpeg", ".gif", ".css", ".woff", ".woff2"]
+                            ) else route.continue_()
+                        ))
+                        
+                        url = urljoin(self.BASE_URL, section)
+                        page.goto(url, wait_until="domcontentloaded", timeout=20000)
+                        
+                        # Wait for content to load
+                        try:
+                            page.wait_for_selector("article, .post-card", timeout=10000)
+                        except Exception:
+                            pass
+                        
+                        soup = BeautifulSoup(page.content(), "html.parser")
+                        section_links = self._extract_links_from_html(soup)
+                        links.extend(section_links[:10])  # Limit per section
+                        
+                        context.close()
+                        self._human_delay()
+                        
+                        if len(links) >= max_links:
+                            break
+                            
+                    except Exception as e:
+                        logger.warning(f"Section discovery failed for {section}: {e}")
+                        try:
+                            context.close()
+                        except Exception:
+                            pass
+                        continue
+            
+            logger.info(f"Sections discovered {len(links)} links")
+            return links
+        except Exception as e:
+            logger.error(f"Section discovery failed: {e}")
+            return []
+
+    def _extract_links_from_html(self, soup: BeautifulSoup) -> List[str]:
+        """Extract article links from HTML."""
+        links = []
+        
+        for sel in self.SELECTORS["article_links"]:
+            try:
+                for a in soup.select(sel):
+                    href = a.get("href")
+                    if href:
+                        full_url = urljoin(self.BASE_URL, href)
+                        if self._validate_url(full_url):
+                            links.append(full_url)
+            except Exception:
+                continue
+        
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_links = []
+        for link in links:
+            if link not in seen:
+                seen.add(link)
+                unique_links.append(link)
+        
+        return unique_links
+
+    def _scrape_article(self, url: str, browser: Browser) -> Optional[NormalizedArticle]:
+        """Scrape individual article with stealth techniques."""
+        try:
+            context = browser.new_context(
+                user_agent=self._get_random_ua(),
+                locale="en-PH",
+                timezone_id="Asia/Manila",
+                extra_http_headers={"Referer": self.BASE_URL}
+            )
+            page = context.new_page()
+            
+            # Block heavy resources
+            page.route("**/*", lambda route: (
+                route.abort() if any(
+                    route.request.url.lower().endswith(ext) 
+                    for ext in [".png", ".jpg", ".jpeg", ".gif", ".css", ".woff", ".woff2", ".svg"]
+                ) or not route.request.url.startswith("https://www.rappler.com")
+                else route.continue_()
+            ))
+            
+            page.set_default_timeout(25000)
+            
+            # Random delay before navigation
+            self._human_delay()
+            
+            page.goto(url, wait_until="domcontentloaded")
+            
+            # Wait for content
+            try:
+                page.wait_for_selector("h1, .post-single__title", timeout=10000)
+            except Exception:
+                pass
+            
+            soup = BeautifulSoup(page.content(), "html.parser")
+            context.close()
+            
+            # Extract structured data
+            json_ld = self._extract_json_ld(soup)
+            
+            # Extract article data
+            title = (
+                json_ld.get("headline") or 
+                self._extract_with_fallbacks(soup, self.SELECTORS["title"]) or 
+                ""
+            )
+            
+            if not title:
+                logger.warning(f"No title found for {url}")
+                return None
+            
+            content = (
+                json_ld.get("articleBody") or 
+                self._extract_content(soup)
+            )
+            
+            raw_date = (
+                json_ld.get("datePublished") or 
+                self._extract_with_fallbacks(soup, self.SELECTORS["published_date"])
+            )
+            published_at = self._parse_published_date(raw_date)
+            
+            # Build normalized article
+            norm_cat, raw_cat = resolve_category_pair(url, soup)
+            article = build_article(
+                source="Rappler",
+                title=title,
+                url=url,
+                content=content,
+                category=norm_cat,
+                published_at=published_at,
+                raw_category=raw_cat,
+            )
+            
+            return article
+            
+        except Exception as e:
+            logger.error(f"Failed to scrape {url}: {e}")
+            return None
+
+    def scrape_latest(self, max_articles: int = 3) -> ScrapingResult:
+        """Main scraping method with multiple discovery strategies."""
+        start_time = time.time()
+        articles = []
+        errors = []
+        
+        # Multi-source discovery strategy
+        all_links = []
+        
+        # 1. RSS Feed (most reliable)
+        try:
+            rss_links = self._discover_from_rss(max_articles * 5)
+            all_links.extend(rss_links)
+        except Exception as e:
+            errors.append(f"RSS: {e}")
+        
+        # 2. Google News RSS (backup)
+        if len(all_links) < max_articles * 2:
+            try:
+                gn_links = self._discover_from_google_news(max_articles * 3)
+                all_links.extend(gn_links)
+            except Exception as e:
+                errors.append(f"Google News: {e}")
+        
+        # 3. Section pages (if still need more)
+        if len(all_links) < max_articles * 2:
+            try:
+                section_links = self._discover_from_sections(max_articles * 2)
+                all_links.extend(section_links)
+            except Exception as e:
+                errors.append(f"Sections: {e}")
+        
+        # Deduplicate and limit
+        seen = set()
+        candidates = []
+        for link in all_links:
+            if link not in seen and self._validate_url(link):
+                seen.add(link)
+                candidates.append(link)
+                
+        candidates = candidates[:max_articles * 3]  # Give some buffer
+        
+        logger.info(f"Rappler discovered {len(candidates)} candidate articles")
+        
+        # Scrape articles
+        try:
+            with launch_browser() as browser:
+                for url in candidates:
+                    if len(articles) >= max_articles:
+                        break
+                    
+                    article = self._scrape_article(url, browser)
+                    if article:
+                        articles.append(article)
+                        logger.info(f"Successfully scraped: {article.title[:50]}...")
+        except Exception as e:
+            errors.append(f"Scraping: {e}")
+        
+        duration = time.time() - start_time
+        performance = {
+            "duration_s": round(duration, 2),
+            "articles_scraped": len(articles),
+            "candidates_found": len(candidates)
+        }
+        
+        metadata = {
+            "domain": "rappler.com",
+            "discovery_sources": ["rss", "google_news", "sections"],
+            "total_links_discovered": len(all_links)
+        }
+        
+        return ScrapingResult(
+            articles=articles,
+            errors=errors,
+            performance=performance,
+            metadata=metadata
+        )

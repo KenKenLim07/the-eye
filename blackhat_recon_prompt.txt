@@ -1,0 +1,102 @@
+# BLACK HAT RECONNAISSANCE PROMPT FOR WEBSITE STRUCTURE ANALYSIS
+
+## PHASE 1: INITIAL RECONNAISSANCE
+```bash
+# Basic site structure analysis
+curl -s "https://TARGET_DOMAIN" | head -20
+curl -s "https://TARGET_DOMAIN" | grep -E 'href="[^"]*TARGET_DOMAIN[^"]*"' | head -10
+```
+
+## PHASE 2: RSS/XML FEED DISCOVERY
+```bash
+# Standard RSS feed attempts
+curl -s "https://TARGET_DOMAIN/feed/" | head -20
+curl -s "https://TARGET_DOMAIN/feed/" | grep -E "<item>" -A 20 | head -30
+curl -s "https://TARGET_DOMAIN/rss/" | head -20
+curl -s "https://TARGET_DOMAIN/rss.xml" | head -20
+curl -s "https://TARGET_DOMAIN/feed.xml" | head -20
+```
+
+## PHASE 3: API ENDPOINT DISCOVERY
+```bash
+# Search for API references in HTML
+curl -s "https://TARGET_DOMAIN" | grep -i "api\|rss\|feed\|xml" | head -10
+curl -s "https://TARGET_DOMAIN" | grep -E 'api|rss|feed|xml' | head -10
+
+# Common API patterns
+curl -s "https://TARGET_DOMAIN/api/v1/collections/home.rss" | head -20
+curl -s "https://TARGET_DOMAIN/api/v1/posts.rss" | head -20
+curl -s "https://TARGET_DOMAIN/api/feed" | head -20
+curl -s "https://TARGET_DOMAIN/api/rss" | head -20
+```
+
+## PHASE 4: CONTENT EXTRACTION & ANALYSIS
+```bash
+# Extract titles and links from RSS
+curl -s "https://TARGET_DOMAIN/api/v1/collections/home.rss" | grep -E "<title>|<link>" | head -20
+curl -s "https://TARGET_DOMAIN/api/v1/collections/home.rss" | sed -n 's/<title>\(.*\)<\/title>/\1/p' | grep -v "SITE_NAME" | head -10
+
+# Analyze RSS structure
+curl -s "https://TARGET_DOMAIN/api/v1/collections/home.rss" | grep -E "<item>" -A 20 | head -30
+```
+
+## PHASE 5: ADVANCED RECONNAISSANCE
+```bash
+# Check for sitemaps
+curl -s "https://TARGET_DOMAIN/sitemap.xml" | head -20
+curl -s "https://TARGET_DOMAIN/sitemap_index.xml" | head -20
+
+# Check robots.txt for hidden endpoints
+curl -s "https://TARGET_DOMAIN/robots.txt"
+
+# Look for JSON endpoints
+curl -s "https://TARGET_DOMAIN/api/v1/posts.json" | head -20
+curl -s "https://TARGET_DOMAIN/api/posts" | head -20
+
+# Check for GraphQL endpoints
+curl -s "https://TARGET_DOMAIN/graphql" | head -20
+```
+
+## PHASE 6: CONTENT STRUCTURE ANALYSIS
+```bash
+# Analyze article structure
+curl -s "https://TARGET_DOMAIN/api/v1/collections/home.rss" | grep -E "<item>" -A 30 | head -50
+
+# Extract publication dates
+curl -s "https://TARGET_DOMAIN/api/v1/collections/home.rss" | grep -E "<pubDate>|<dc:date>" | head -10
+
+# Extract categories/tags
+curl -s "https://TARGET_DOMAIN/api/v1/collections/home.rss" | grep -E "<category>|<dc:subject>" | head -10
+```
+
+## PHASE 7: RATE LIMITING & ACCESS CONTROL TESTING
+```bash
+# Test rate limits
+for i in {1..10}; do curl -s "https://TARGET_DOMAIN/api/v1/collections/home.rss" | wc -l; sleep 1; done
+
+# Check for authentication requirements
+curl -s "https://TARGET_DOMAIN/api/v1/collections/home.rss" | grep -i "auth\|login\|token"
+```
+
+## PHASE 8: DATA EXTRACTION PATTERNS
+```bash
+# Extract specific data fields
+curl -s "https://TARGET_DOMAIN/api/v1/collections/home.rss" | sed -n 's/<title>\(.*\)<\/title>/\1/p' | head -20
+curl -s "https://TARGET_DOMAIN/api/v1/collections/home.rss" | sed -n 's/<link>\(.*\)<\/link>/\1/p' | head -20
+curl -s "https://TARGET_DOMAIN/api/v1/collections/home.rss" | sed -n 's/<description>\(.*\)<\/description>/\1/p' | head -20
+```
+
+## USAGE INSTRUCTIONS:
+1. Replace TARGET_DOMAIN with the actual domain
+2. Replace SITE_NAME with the actual site name for filtering
+3. Run commands sequentially to build understanding
+4. Adapt patterns based on discovered structure
+5. Use results to build targeted scraping scripts
+
+## BLACK HAT PRINCIPLES:
+- Always start with reconnaissance
+- Understand the target before attacking
+- Use multiple approaches for discovery
+- Test rate limits and access controls
+- Document findings for future reference
+- Respect robots.txt and rate limits in production
