@@ -1,7 +1,11 @@
 import MainLayout from "@/components/layout/main-layout";
-import ArticleRow from "../components/articles/article-row";
+import ArticleRowServer from "../components/articles/article-row-server";
+import { fetchAllArticles } from "@/lib/articles";
 
-export default function Home() {
+export default async function Home() {
+  // Fetch all articles server-side in parallel
+  const articlesBySource = await fetchAllArticles(20);
+
   return (
     <MainLayout>
       <div className="space-y-8 mt-10">
@@ -11,13 +15,36 @@ export default function Home() {
         </div>
 
         <div className="space-y-8">
-          <ArticleRow sourceValue="GMA" title="GMA News" limit={20} />
-          <ArticleRow sourceValue="Rappler" title="Rappler" limit={20} />
-          <ArticleRow sourceValue="Inquirer" title="Inquirer" limit={20} />
-          <ArticleRow sourceValue="Philstar" title="Philstar" limit={20} />
-          <ArticleRow sourceValue="Sunstar" title="Sunstar" limit={20} />
-          <ArticleRow sourceValue="Manila Bulletin" title="Manila Bulletin" limit={20} />
-
+          <ArticleRowServer 
+            articles={articlesBySource["GMA"] || []} 
+            title="GMA News" 
+            sourceValue="GMA" 
+          />
+          <ArticleRowServer 
+            articles={articlesBySource["Rappler"] || []} 
+            title="Rappler" 
+            sourceValue="Rappler" 
+          />
+          <ArticleRowServer 
+            articles={articlesBySource["Inquirer"] || []} 
+            title="Inquirer" 
+            sourceValue="Inquirer" 
+          />
+          <ArticleRowServer 
+            articles={articlesBySource["Philstar"] || []} 
+            title="Philstar" 
+            sourceValue="Philstar" 
+          />
+          <ArticleRowServer 
+            articles={articlesBySource["Sunstar"] || []} 
+            title="Sunstar" 
+            sourceValue="Sunstar" 
+          />
+          <ArticleRowServer 
+            articles={articlesBySource["Manila Bulletin"] || []} 
+            title="Manila Bulletin" 
+            sourceValue="Manila Bulletin" 
+          />
         </div>
       </div>
     </MainLayout>

@@ -1,5 +1,6 @@
 import { ReactNode } from "react";
 import { getResponsivePadding, getContainerSize } from "@/lib/design-system";
+import Footer from "./footer";
 
 interface MainLayoutProps {
   children: ReactNode;
@@ -13,14 +14,17 @@ export default function MainLayout({
   containerSize = 'lg' 
 }: MainLayoutProps) {
   return (
-    <main className={`min-h-screen bg-background ${className}`}>
-      {/* Responsive padding using design system constants */}
-      <div className={getResponsivePadding()}>
-        {/* Container with max-width constraints and responsive margins */}
-        <div className={`mx-auto ${getContainerSize(containerSize)} space-y-8`}>
-          {children}
+    <div className="min-h-screen bg-background flex flex-col">
+      <main className={`flex-1 ${className}`}>
+        {/* Responsive padding using design system constants */}
+        <div className={getResponsivePadding()}>
+          {/* Container with max-width constraints and responsive margins */}
+          <div className={`mx-auto ${getContainerSize(containerSize)} space-y-8`}>
+            {children}
+          </div>
         </div>
-      </div>
-    </main>
+      </main>
+      <Footer />
+    </div>
   );
 } 
