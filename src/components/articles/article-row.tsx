@@ -1,6 +1,6 @@
-"use server";
+"use client";
 
-import { supabaseServer } from "@/lib/supabase/server";
+import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { formatDate } from "@/lib/utils/date";
 import { Badge } from "@/components/ui/badge";
@@ -15,21 +15,57 @@ interface Article {
   category: string | null;
 }
 
-async function loadArticlesBySource(sourceValue: string, limit: number = 20) {
-  const { data, error } = await supabaseServer
-    .from("articles")
-    .select("id,title,url,content,published_at,source,category")
-    .eq("source", sourceValue)
-    .order("published_at", { ascending: false })
-    .limit(limit);
-  return { data: (data as unknown) as Article[] | null, error };
+interface ArticleRowProps {
+  sourceValue: string;
+  title?: string;
+  limit?: number;
 }
 
-
-
-export default async function ArticleRow({ sourceValue, title, limit = 20 }: { sourceValue: string; title?: string; limit?: number; }) {
+export default function ArticleRow({ sourceValue, title, limit = 20 }: ArticleRowProps) {
+  const [articles, setArticles] = useState<Article[] | null>(null);
+  const [error, setError] = useState<unknown | null>(null);
+  const [loading, setLoading] = useState(true);
+  
   const label = title ?? sourceValue;
-  const { data: articles, error } = await loadArticlesBySource(sourceValue, limit);
+
+  useEffect(() => {
+    async function fetchArticles() {
+      try {
+        setLoading(true);
+        const response = await fetch(`/api/articles?source=${encodeURIComponent(sourceValue)}&pageSize=${limit}`);
+        const result = await response.json();
+        
+        if (result.ok) {
+          setArticles(result.data);
+        } else {
+          setError(result.error);
+        }
+      } catch (err) {
+        setError(err);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    fetchArticles();
+  }, [sourceValue, limit]);
+
+  if (loading) {
+    return (
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold tracking-tight">{label}</h2>
+          <Badge variant="secondary">Loading...</Badge>
+        </div>
+        <Card>
+          <CardHeader>
+            <CardTitle>Loading {label} articles...</CardTitle>
+            <CardDescription>Please wait while we fetch the latest news.</CardDescription>
+          </CardHeader>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-3">
