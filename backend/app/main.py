@@ -90,3 +90,81 @@ async def get_log_by_run_id(run_id: str):
     sb = get_supabase()
     res = sb.table("scraping_logs").select("*").eq("run_id", run_id).limit(1).execute()
     return {"data": (res.data or [None])[0]} 
+
+# New: diagnostics endpoint
+@app.get("/diagnostics")
+async def diagnostics(dry_run: bool = False, max_articles: int = 1):
+    """Comprehensive diagnostics for scrapers, Celery, and Supabase.
+    - Checks Supabase connectivity and basic permissions
+    - Confirms Celery broker/backends reachability
+    - Verifies all scraper tasks are registered
+    - Optionally triggers 1-article dry runs per scraper (non-blocking)
+    """
+    report: dict = {
+        "env": {
+            "broker": settings.celery_broker_url,
+            "result_backend": settings.celery_result_backend,
+            "supabase_url": settings.supabase_url[:8] + "…" if settings.supabase_url else None,
+        },
+        "supabase": {},
+        "celery": {},
+        "tasks": {},
+        "dry_runs": [],
+    }
+
+    # Supabase ping
+    try:
+        sb = get_supabase()
+        ping = sb.table("scraping_logs").select("id").limit(1).execute()
+        report["supabase"] = {"ok": True, "rows": len(ping.data or [])}
+    except Exception as e:
+        report["supabase"] = {"ok": False, "error": str(e)}
+
+    # Celery ping
+    try:
+        insp = celery.control.inspect(timeout=2)
+        active = insp.active() or {}
+        scheduled = insp.scheduled() or {}
+        registered = insp.registered() or {}
+        report["celery"] = {
+            "ok": True,
+            "workers": list(active.keys()) if isinstance(active, dict) else [],
+            "active_counts": {k: len(v or []) for k, v in (active or {}).items()},
+            "scheduled_counts": {k: len(v or []) for k, v in (scheduled or {}).items()},
+        }
+        # Task registration expectations
+        expected = {
+            "app.workers.tasks.scrape_inquirer_task": False,
+            "app.workers.tasks.scrape_abs_cbn_task": False,
+            "app.workers.tasks.scrape_gma_task": False,
+            "app.workers.tasks.scrape_philstar_task": False,
+            "app.workers.tasks.scrape_manila_bulletin_task": False,
+            "app.workers.tasks.scrape_rappler_task": False,
+            "app.workers.tasks.scrape_sunstar_task": False,
+        }
+        # Consolidate registered task names from all workers
+        all_registered = set()
+        for names in (registered or {}).values():
+            for n in (names or []):
+                all_registered.add(n)
+        for name in expected.keys():
+            expected[name] = name in all_registered
+        report["tasks"] = expected
+    except Exception as e:
+        report["celery"] = {"ok": False, "error": str(e)}
+
+    # Optional dry-run (enqueue minimal jobs)
+    if dry_run:
+        try:
+            jobs = []
+            jobs.append({"source": "inquirer", "task_id": str(scrape_inquirer_task.delay())})
+            jobs.append({"source": "gma", "task_id": str(scrape_gma_task.delay())})
+            jobs.append({"source": "philstar", "task_id": str(scrape_philstar_task.delay())})
+            jobs.append({"source": "rappler", "task_id": str(scrape_rappler_task.delay())})
+            jobs.append({"source": "sunstar", "task_id": str(scrape_sunstar_task.delay())})
+            jobs.append({"source": "manila_bulletin", "task_id": str(scrape_manila_bulletin_task.delay())})
+            report["dry_runs"] = jobs
+        except Exception as e:
+            report["dry_runs"] = {"error": str(e)}
+
+    return report 

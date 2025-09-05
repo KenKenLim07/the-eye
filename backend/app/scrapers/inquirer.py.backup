@@ -200,31 +200,10 @@ class InquirerScraper:
                 
         return list(urls)
     
-    def _new_context(self, browser: Browser):
-        """Create browser context with resource blocking for better performance."""
-        context = browser.new_context(
-            user_agent=self.USER_AGENT,
-            locale='en-PH',
-            viewport={"width": 1366, "height": 768},
-            java_script_enabled=True,
-        )
-        
-        # Block heavy resources to improve performance
-        context.route("**/*", lambda route: (
-            route.abort() if route.request.resource_type in ["image", "media", "font", "stylesheet"] 
-            or any(domain in route.request.url for domain in [
-                "google-analytics.com", "googletagmanager.com", "facebook.com", 
-                "doubleclick.net", "googlesyndication.com", "adsystem.com"
-            ]) else route.continue_()
-        ))
-        
-        return context
-    
     def _scrape_article_page(self, url: str, browser: Browser) -> Optional[NormalizedArticle]:
         """Scrape individual article page with enhanced content extraction."""
         try:
-            context = self._new_context(browser)
-            page = context.new_page()
+            page = browser.new_page()
             page.set_extra_http_headers({
                 'User-Agent': self.USER_AGENT,
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -237,26 +216,10 @@ class InquirerScraper:
             page.set_default_timeout(30000)
             page.set_default_navigation_timeout(30000)
             
-            # Retry logic for page.goto
-            resp = None
-            for attempt in range(2):
-                try:
-                    resp = page.goto(url, wait_until='domcontentloaded')
-                    if resp and resp.status < 400:
-                        break
-                    if attempt == 0:
-                        logger.warning(f"Inquirer: attempt {attempt + 1} failed for {url}, retrying...")
-                        time.sleep(2)
-                except Exception as e:
-                    if attempt == 0:
-                        logger.warning(f"Inquirer: attempt {attempt + 1} error for {url}: {e}, retrying...")
-                        time.sleep(2)
-                    else:
-                        raise e
-            
-            if not resp or resp.status >= 400:
-                logger.warning(f"HTTP {resp.status if resp else 'unknown'} for {url}")
-                context.close()
+            # Navigate with error handling
+            response = page.goto(url, wait_until='domcontentloaded')
+            if not response or response.status >= 400:
+                logger.warning(f"HTTP {response.status if response else 'unknown'} for {url}")
                 return None
             
             # Wait for content to load
@@ -272,7 +235,6 @@ class InquirerScraper:
             title = self._extract_with_fallbacks(soup, self.SELECTORS["title"])
             if not title:
                 logger.warning(f"No title found for {url}")
-                context.close()
                 return None
                 
             # Enhanced content extraction
@@ -294,7 +256,7 @@ class InquirerScraper:
                 raw_category=raw_cat,
             )
             
-            context.close()
+            page.close()
             return article
             
         except Exception as e:
@@ -313,8 +275,7 @@ class InquirerScraper:
                 logger.info("Starting Inquirer scraping session")
                 
                 # Get homepage
-                context = self._new_context(browser)
-                page = context.new_page()
+                page = browser.new_page()
                 page.set_extra_http_headers({'User-Agent': self.USER_AGENT})
                 
                 try:
@@ -350,7 +311,7 @@ class InquirerScraper:
                             logger.error(error_msg)
                             continue
                             
-                    context.close()
+                    page.close()
                     
                 except Exception as e:
                     error_msg = f"Failed to scrape homepage: {str(e)}"

@@ -22,13 +22,16 @@ class ScrapingResult:
     performance: Dict[str, float]
     metadata: Dict[str, Any]
 
-class GMAScraper:
-    """Stealth scraper for GMA News Online (v1)."""
+class PhilStarScraper:
+    """Stealth scraper for PhilStar."""
 
-    BASE_URL = "https://www.gmanetwork.com"
+    BASE_URL = "https://www.philstar.com"
     START_PATHS = [
-        "/news/",
-        "/news/latest/",
+        "/headlines",   # main
+        "/nation",
+        "/business",
+        "/sports",
+        "/entertainment",
     ]
 
     USER_AGENT = (
@@ -42,43 +45,40 @@ class GMAScraper:
 
     SELECTORS = {
         "article_links": [
-            "article h3 a",
-            ".story-title a",
-            ".latest__list a",
-            "h3 a",
-            "a[href*='/news/']",
+            "article h2 a",
+            ".article__title a",
+            ".listing__item a",
+            ".headline__title a",
+            "h2 a",
+            "a[href*='/headlines']",
         ],
         "title": [
             "h1.article__title",
-            "h1.entry-title",
+            "h1.headline__title",
             "h1",
-            ".story__title",
             ".article-title",
             "title"
         ],
         "content": [
             ".article__content p",
-            ".story__content p",
             ".article-content p",
-            ".post-content p",
-            ".article-body p",
             ".story-content p",
-            ".content__article p",
+            ".content p",
             "article p",
-            "p",
+            "p"
         ],
         "published_date": [
-            "time[datetime]",
-            ".article__date time",
-            ".date",
-            "time",
+            ".article__date",
             ".article__meta",
+            "time[datetime]",
+            "time",
+            ".date"
         ]
     }
 
     def _human_delay(self):
         delay = random.uniform(self.MIN_DELAY, self.MAX_DELAY)
-        logger.info(f"GMA v1: waiting {delay:.1f}s before next request (stealth)")
+        logger.info(f"PhilStar: waiting {delay:.1f}s (stealth)")
         time.sleep(delay)
 
     def _validate_url(self, url: str) -> bool:
@@ -87,8 +87,7 @@ class GMAScraper:
         parsed = urlparse(url)
         if not parsed.scheme or not parsed.netloc:
             return False
-        if not parsed.netloc.endswith("gmanetwork.com"):
-            logger.debug(f"GMA v1: blocked external URL {url}")
+        if not parsed.netloc.endswith("philstar.com"):
             return False
         return True
 
@@ -96,13 +95,13 @@ class GMAScraper:
         try:
             parsed = urlparse(url)
             path = parsed.path or ""
-            if not path.startswith("/news/"):
-                return False
-            segments = [seg for seg in path.split('/') if seg]
-            blacklist = {"photo", "photos", "video", "videos", "balitambayan"}
+            # Typical: /headlines/2025/09/03/XXXX/slug
+            segments = [s for s in path.split('/') if s]
+            blacklist = {"photos", "photo", "videos", "video", "about", "section"}
             if any(seg in blacklist for seg in segments):
                 return False
-            return len(segments) >= 3
+            # Must include a section and a slug
+            return len(segments) >= 2
         except Exception:
             return False
 
@@ -126,14 +125,14 @@ class GMAScraper:
                 continue
         return None
 
-    def _extract_content(self, soup: BeautifulSoup, url: str) -> Optional[str]:
+    def _extract_content(self, soup: BeautifulSoup) -> Optional[str]:
         parts: List[str] = []
         for sel in self.SELECTORS["content"]:
             try:
                 for el in soup.select(sel):
-                    text = el.get_text().strip()
-                    if text and len(text) > 50 and not text.upper().startswith("ADVERTISEMENT"):
-                        parts.append(text)
+                    txt = el.get_text().strip()
+                    if txt and len(txt) > 50 and not txt.upper().startswith("ADVERTISEMENT"):
+                        parts.append(txt)
             except Exception:
                 continue
         if not parts:
@@ -147,20 +146,17 @@ class GMAScraper:
                 combined = combined[:1000] + "..."
             elif len(combined) > 500:
                 combined = combined[:500] + "..."
-            logger.info(f"GMA v1: content parts={len(parts)}, length={len(combined)}")
             return combined
-        logger.warning(f"GMA v1: no content extracted for {url}")
         return None
 
     def _parse_published(self, raw: Optional[str]) -> Optional[str]:
         if not raw:
             return None
         txt = raw.strip()
-        txt = re.sub(r"^(Published|Updated)\s*", "", txt, flags=re.IGNORECASE)
-        txt = re.sub(r"[•|]", " ", txt).strip()
+        # Common formats: "September 3, 2025 | 5:13pm" or "September 3, 2025 - 5:13pm"
+        txt = re.sub(r"\s*[|\-]\s*", " ", txt)
         candidates = [
             (txt, "%B %d, %Y %I:%M%p"),
-            (txt.replace(" at ", " "), "%B %d, %Y %I:%M%p"),
             (txt, "%B %d, %Y"),
         ]
         for val, fmt in candidates:
@@ -186,11 +182,11 @@ class GMAScraper:
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
             'Accept-Language': 'en-PH,en;q=0.9',
             'Connection': 'keep-alive',
-            'Referer': urljoin(self.BASE_URL, '/news/'),
+            'Referer': self.BASE_URL + '/',
             'Upgrade-Insecure-Requests': '1',
         })
 
-    def _extract_article_links(self, soup: BeautifulSoup) -> List[str]:
+    def _discover_links(self, soup: BeautifulSoup) -> List[str]:
         urls = []
         seen = set()
         for sel in self.SELECTORS["article_links"]:
@@ -229,12 +225,12 @@ class GMAScraper:
             if not title:
                 context.close()
                 return None
-            content = self._extract_content(soup, url)
+            content = self._extract_content(soup)
             raw_published = self._extract_with_fallbacks(soup, self.SELECTORS["published_date"]) or None
             published_iso = self._parse_published(raw_published)
             norm_cat, raw_cat = resolve_category_pair(url, soup)
             article = build_article(
-                source="GMA",
+                source="Philstar",
                 title=title,
                 url=url,
                 content=content,
@@ -245,7 +241,7 @@ class GMAScraper:
             context.close()
             return article
         except Exception as e:
-            logger.error(f"GMA v1: failed {url}: {e}")
+            logger.error(f"PhilStar: failed {url}: {e}")
             return None
 
     def scrape_latest(self, max_articles: int = 3) -> ScrapingResult:
@@ -266,23 +262,23 @@ class GMAScraper:
                         resp = page.goto(urljoin(self.BASE_URL, path), wait_until='domcontentloaded')
                         if resp and resp.status < 400:
                             break
-                        logger.warning(f"GMA v1: landing {path} returned {resp.status if resp else 'unknown'}")
+                        logger.warning(f"PhilStar: landing {path} returned {resp.status if resp else 'unknown'}")
                     except Exception as e:
-                        logger.warning(f"GMA v1: error loading {path}: {e}")
+                        logger.warning(f"PhilStar: error loading {path}: {e}")
                     self._human_delay()
 
                 if not resp or resp.status >= 400:
-                    raise RuntimeError(f"GMA v1: landing returned {resp.status if resp else 'unknown'}")
+                    raise RuntimeError(f"PhilStar: landing returned {resp.status if resp else 'unknown'}")
 
                 soup = BeautifulSoup(page.content(), 'html.parser')
-                urls = self._extract_article_links(soup)
-                logger.info(f"GMA v1: found {len(urls)} URLs")
+                urls = self._discover_links(soup)
+                logger.info(f"PhilStar: found {len(urls)} URLs")
 
                 for i, url in enumerate(urls[:max_articles]):
                     art = self._scrape_article(url, browser)
                     if art:
                         articles.append(art)
-                        logger.info(f"GMA v1: scraped {art.title}")
+                        logger.info(f"PhilStar: scraped {art.title}")
                     else:
                         errors.append(f"failed to extract {url}")
                     if i < len(urls[:max_articles]) - 1:
@@ -291,7 +287,7 @@ class GMAScraper:
                 context.close()
         except Exception as e:
             errors.append(str(e))
-            logger.error(f"GMA v1: critical error {e}")
+            logger.error(f"PhilStar: critical error {e}")
 
         total = time.time() - start
         performance = {
@@ -300,18 +296,18 @@ class GMAScraper:
             "success_rate": len(articles) / (len(articles) + len(errors)) if (len(articles) + len(errors)) > 0 else 0
         }
         metadata = {
-            "source": "GMA News Online",
+            "source": "Philippine Star",
             "scraped_at": time.strftime("%Y-%m-%d %H:%M:%S"),
             "total_articles_found": len(articles),
             "total_errors": len(errors)
         }
-        logger.info(f"GMA v1: completed {len(articles)} articles, {len(errors)} errors in {total:.2f}s")
+        logger.info(f"PhilStar: completed {len(articles)} articles, {len(errors)} errors in {total:.2f}s")
         return ScrapingResult(articles=articles, errors=errors, performance=performance, metadata=metadata)
 
 
-def scrape_gma_latest() -> List[NormalizedArticle]:
-    scraper = GMAScraper()
+def scrape_philstar_latest() -> List[NormalizedArticle]:
+    scraper = PhilStarScraper()
     result = scraper.scrape_latest(max_articles=3)
     if result.errors:
-        logger.warning(f"GMA v1: errors {result.errors}")
+        logger.warning(f"PhilStar: errors {result.errors}")
     return result.articles 

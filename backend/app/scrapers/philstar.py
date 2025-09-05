@@ -169,12 +169,23 @@ class PhilStarScraper:
         return None
 
     def _new_context(self, browser: Browser):
-        return browser.new_context(
+        context = browser.new_context(
             user_agent=self.USER_AGENT,
             locale='en-PH',
             viewport={"width": 1366, "height": 768},
             java_script_enabled=True,
         )
+        
+        # Block heavy resources to improve performance
+        context.route("**/*", lambda route: (
+            route.abort() if route.request.resource_type in ["image", "media", "font", "stylesheet"] 
+            or any(domain in route.request.url for domain in [
+                "google-analytics.com", "googletagmanager.com", "facebook.com", 
+                "doubleclick.net", "googlesyndication.com", "adsystem.com"
+            ]) else route.continue_()
+        ))
+        
+        return context
 
     def _set_headers(self, page):
         page.set_extra_http_headers({
@@ -212,10 +223,28 @@ class PhilStarScraper:
             self._set_headers(page)
             page.set_default_timeout(30000)
             page.set_default_navigation_timeout(30000)
-            resp = page.goto(url, wait_until='domcontentloaded')
+            
+            # Retry logic for page.goto
+            resp = None
+            for attempt in range(2):
+                try:
+                    resp = page.goto(url, wait_until='domcontentloaded')
+                    if resp and resp.status < 400:
+                        break
+                    if attempt == 0:
+                        logger.warning(f"PhilStar: attempt {attempt + 1} failed for {url}, retrying...")
+                        time.sleep(2)
+                except Exception as e:
+                    if attempt == 0:
+                        logger.warning(f"PhilStar: attempt {attempt + 1} error for {url}: {e}, retrying...")
+                        time.sleep(2)
+                    else:
+                        raise e
+            
             if not resp or resp.status >= 400:
                 context.close()
                 return None
+                
             try:
                 page.wait_for_selector('h1', timeout=8000)
             except:

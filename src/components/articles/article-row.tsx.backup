@@ -2,7 +2,6 @@
 
 import { supabaseServer } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { formatDate } from "@/lib/utils/date";
 import { Badge } from "@/components/ui/badge";
 
 interface Article {
@@ -24,8 +23,6 @@ async function loadArticlesBySource(sourceValue: string, limit: number = 20) {
     .limit(limit);
   return { data: (data as unknown) as Article[] | null, error };
 }
-
-
 
 export default async function ArticleRow({ sourceValue, title, limit = 20 }: { sourceValue: string; title?: string; limit?: number; }) {
   const label = title ?? sourceValue;
@@ -67,7 +64,7 @@ export default async function ArticleRow({ sourceValue, title, limit = 20 }: { s
                         {a.source} • {a.category || "Uncategorized"}
                       </CardDescription>
                     </div>
-                    <Badge variant="outline">{formatDate(a.published_at)}</Badge>
+                    <Badge variant="outline">{new Date(a.published_at || Date.now()).toLocaleDateString()}</Badge>
                   </div>
                 </CardHeader>
                 <CardContent>
@@ -85,4 +82,4 @@ export default async function ArticleRow({ sourceValue, title, limit = 20 }: { s
       )}
     </div>
   );
-}
+} 

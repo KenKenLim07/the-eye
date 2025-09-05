@@ -22,8 +22,8 @@ celery.autodiscover_tasks(["app.workers"])
 # You can tune these intervals or switch to crontab if desired.
 celery.conf.beat_schedule = {
     # Run GMA (v1) roughly every 45 minutes
-    "scrape_gma_v1": {
-        "task": "app.workers.tasks.scrape_gma_v1_task",
+    "scrape_gma": {
+        "task": "app.workers.tasks.scrape_gma_task",
         "schedule": schedule(65 * 60),
     },
     # Rappler every 60 minutes

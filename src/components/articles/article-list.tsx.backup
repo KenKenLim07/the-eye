@@ -2,7 +2,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { supabaseServer } from "@/lib/supabase/server";
 
-import { formatDate } from "@/lib/utils/date";
 interface Article {
   id: number;
   title: string;
@@ -21,8 +20,6 @@ async function loadArticles(): Promise<{ data: Article[] | null; error: unknown 
     .limit(12);
   return { data: (data as unknown) as Article[] | null, error };
 }
-
-
 
 export default async function ArticleList() {
   const { data: articles, error } = await loadArticles();
@@ -64,7 +61,7 @@ export default async function ArticleList() {
                   {a.source} • {a.category || "Uncategorized"}
                 </CardDescription>
               </div>
-              <Badge variant="secondary">{formatDate(a.published_at)}</Badge>
+              <Badge variant="secondary">{new Date(a.published_at || Date.now()).toLocaleDateString()}</Badge>
             </div>
           </CardHeader>
           <CardContent>
@@ -79,4 +76,4 @@ export default async function ArticleList() {
       ))}
     </div>
   );
-}
+} 

@@ -99,7 +99,7 @@ class GMAScraper:
             if not path.startswith("/news/"):
                 return False
             segments = [seg for seg in path.split('/') if seg]
-            blacklist = {"photo", "photos", "video", "videos", "balitambayan"}
+            blacklist = {"photo", "photos", "video", "videos", "balitambayan", "cbb"}
             if any(seg in blacklist for seg in segments):
                 return False
             return len(segments) >= 3
@@ -180,6 +180,20 @@ class GMAScraper:
             java_script_enabled=True,
         )
 
+    def _harden_page(self, page):
+        # Block heavy/static resources and 3rd-party domains
+        try:
+            allowed_host = urlparse(self.BASE_URL).netloc
+            blocked_extensions = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".ico", ".css", ".woff", ".woff2", ".ttf", ".otf")
+            page.route("**/*", lambda route: (
+                route.abort()
+                if (route.request.url.lower().endswith(blocked_extensions))
+                or (urlparse(route.request.url).netloc and allowed_host not in urlparse(route.request.url).netloc)
+                else route.continue_()
+            ))
+        except Exception:
+            pass
+
     def _set_headers(self, page):
         page.set_extra_http_headers({
             'User-Agent': self.USER_AGENT,
@@ -209,15 +223,28 @@ class GMAScraper:
                 continue
         return urls
 
+    def _goto_with_retry(self, page, url: str, wait_until: str = 'domcontentloaded') -> bool:
+        try:
+            page.goto(url, wait_until=wait_until)
+            return True
+        except Exception:
+            try:
+                page.goto(url)
+                page.wait_for_load_state("domcontentloaded", timeout=15_000)
+                return True
+            except Exception:
+                return False
+
     def _scrape_article(self, url: str, browser: Browser) -> Optional[NormalizedArticle]:
         try:
             context = self._new_context(browser)
             page = context.new_page()
+            self._harden_page(page)
             self._set_headers(page)
             page.set_default_timeout(30000)
             page.set_default_navigation_timeout(30000)
-            resp = page.goto(url, wait_until='domcontentloaded')
-            if not resp or resp.status >= 400:
+            ok = self._goto_with_retry(page, url, wait_until='domcontentloaded')
+            if not ok:
                 context.close()
                 return None
             try:
@@ -256,6 +283,7 @@ class GMAScraper:
             with launch_browser() as browser:
                 context = self._new_context(browser)
                 page = context.new_page()
+                self._harden_page(page)
                 self._set_headers(page)
                 page.set_default_timeout(30000)
                 page.set_default_navigation_timeout(30000)
@@ -263,16 +291,17 @@ class GMAScraper:
                 resp = None
                 for path in self.START_PATHS:
                     try:
-                        resp = page.goto(urljoin(self.BASE_URL, path), wait_until='domcontentloaded')
-                        if resp and resp.status < 400:
+                        ok = self._goto_with_retry(page, urljoin(self.BASE_URL, path), wait_until='domcontentloaded')
+                        if ok:
+                            resp = type('obj', (), {'status': 200})()
                             break
-                        logger.warning(f"GMA v1: landing {path} returned {resp.status if resp else 'unknown'}")
+                        logger.warning(f"GMA v1: error loading {path}")
                     except Exception as e:
                         logger.warning(f"GMA v1: error loading {path}: {e}")
                     self._human_delay()
 
-                if not resp or resp.status >= 400:
-                    raise RuntimeError(f"GMA v1: landing returned {resp.status if resp else 'unknown'}")
+                if not resp:
+                    raise RuntimeError("GMA v1: landing failed")
 
                 soup = BeautifulSoup(page.content(), 'html.parser')
                 urls = self._extract_article_links(soup)

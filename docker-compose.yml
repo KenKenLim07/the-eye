@@ -26,6 +26,9 @@ services:
       - "8000:8000"
     depends_on:
       - redis
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
 
   worker:
     build:
@@ -34,15 +37,21 @@ services:
     container_name: ph-eye-worker
     restart: unless-stopped
     working_dir: /app/backend
-    command: celery -A app.workers.celery_app:celery worker -l info -n worker1@%h
+    command: celery -A app.workers.celery_app:celery worker -l info -n worker1@%h -c 4 -Ofair
     env_file: .env
     environment:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - CELERYD_PREFETCH_MULTIPLIER=1
     volumes:
       - /Users/mac/ph-eye:/app
     depends_on:
       - redis
+    shm_size: "1gb"
+    ipc: host
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
 
   beat:
     build:
@@ -60,3 +69,8 @@ services:
       - /Users/mac/ph-eye:/app
     depends_on:
       - redis 
+    shm_size: "1gb"
+    ipc: host
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1 
