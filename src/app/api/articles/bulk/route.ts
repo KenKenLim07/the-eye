@@ -1,6 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
 
+interface Article {
+  id: string | number;
+  title: string;
+  url: string | null;
+  content: string | null;
+  published_at: string | null;
+  source: string;
+  category: string | null;
+}
+
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
@@ -30,7 +40,7 @@ export async function GET(req: NextRequest) {
     const results = await Promise.all(queries);
     
     // Process results and handle errors
-    const articlesBySource: Record<string, any[]> = {};
+    const articlesBySource: Record<string, Article[]> = {};
     const errors: string[] = [];
 
     results.forEach((result, index) => {
@@ -39,7 +49,7 @@ export async function GET(req: NextRequest) {
         errors.push(`${source}: ${result.error.message}`);
         articlesBySource[source] = [];
       } else {
-        articlesBySource[source] = result.data || [];
+        articlesBySource[source] = (result.data as Article[]) || [];
       }
     });
 

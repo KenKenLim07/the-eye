@@ -4,16 +4,6 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatDate } from "@/lib/utils/date";
 
-interface Article {
-  id: string | number;
-  title: string;
-  url: string | null;
-  content: string | null;
-  published_at: string | null;
-  source: string;
-  category: string | null;
-}
-
 interface ArticleRowSuspenseProps {
   sourceValue: string;
   title: string;
