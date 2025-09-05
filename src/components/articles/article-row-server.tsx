@@ -1,0 +1,76 @@
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { formatDate } from "@/lib/utils/date";
+import { Badge } from "@/components/ui/badge";
+
+interface Article {
+  id: string | number;
+  title: string;
+  url: string | null;
+  content: string | null;
+  published_at: string | null;
+  source: string;
+  category: string | null;
+}
+
+interface ArticleRowServerProps {
+  articles: Article[];
+  title: string;
+  sourceValue: string;
+}
+
+export default function ArticleRowServer({ articles, title, sourceValue }: ArticleRowServerProps) {
+  const label = title ?? sourceValue;
+
+  if (!articles?.length) {
+    return (
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold tracking-tight">{label}</h2>
+          <Badge variant="secondary">0</Badge>
+        </div>
+        <Card>
+          <CardHeader>
+            <CardTitle>No {label} articles</CardTitle>
+            <CardDescription>Try running the scraper for {label}.</CardDescription>
+          </CardHeader>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-semibold tracking-tight">{label}</h2>
+        <Badge variant="secondary">{articles.length}</Badge>
+      </div>
+      <div className="overflow-x-auto">
+        <div className="flex gap-4 pr-4">
+          {articles.map((a) => (
+            <Card key={a.id} className="min-w-[280px] max-w-[320px]">
+              <CardHeader>
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <CardTitle className="line-clamp-2 text-base">{a.title}</CardTitle>
+                    <CardDescription>
+                      {a.source} • {a.category || "Uncategorized"}
+                    </CardDescription>
+                  </div>
+                  <Badge variant="outline">{formatDate(a.published_at)}</Badge>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-muted-foreground line-clamp-3">{a.content || "No summary available."}</p>
+                {a.url && (
+                  <a className="text-sm underline mt-3 inline-block" href={a.url} target="_blank" rel="noreferrer">
+                    Read more →
+                  </a>
+                )}
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+} 
