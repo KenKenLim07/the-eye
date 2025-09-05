@@ -14,15 +14,15 @@ export async function GET(req: NextRequest) {
 
     let query = supabaseServer
       .from("articles")
-      .select("*, sources(name), categories(name)", { count: "exact" })
+      .select("*", { count: "exact" })
       .order("published_at", { ascending: false })
       .range(from, to);
 
     if (source) {
-      query = query.eq("sources.name", source);
+      query = query.eq("source", source);
     }
     if (category) {
-      query = query.eq("categories.name", category);
+      query = query.eq("category", category);
     }
 
     const { data, error, count } = await query;
@@ -32,4 +32,4 @@ export async function GET(req: NextRequest) {
   } catch (error: unknown) {
     return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "Unknown error" }, { status: 500 });
   }
-} 
+}
