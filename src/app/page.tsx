@@ -2,8 +2,11 @@ import MainLayout from "@/components/layout/main-layout";
 import ArticleRowServer from "../components/articles/article-row-server";
 import { fetchAllArticles } from "@/lib/articles";
 
+// Force fresh data on every page load - no caching
+export const dynamic = 'force-dynamic';
+
 export default async function Home() {
-  // Fetch all articles server-side in parallel
+  // Fetch all articles server-side in parallel - always fresh
   const articlesBySource = await fetchAllArticles(20);
 
   return (
