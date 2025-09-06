@@ -46,7 +46,17 @@ celery.conf.beat_schedule = {
         "task": "app.workers.tasks.scrape_sunstar_task",
         "schedule": schedule(90 * 60),
     },
+    # ABS-CBN every 75 minutes
+    "scrape_abs_cbn": {
+        "task": "app.workers.tasks.scrape_abs_cbn_task",
+        "schedule": schedule(75 * 60),
+    },
     # Manila Bulletin every 80 minutes
+    # Manila Times every 85 minutes
+    "scrape_manila_times": {
+        "task": "app.workers.tasks.scrape_manila_times_task",
+        "schedule": schedule(85 * 60),
+    },
     "scrape_manila_bulletin": {
         "task": "app.workers.tasks.scrape_manila_bulletin_task",
         "schedule": schedule(80 * 60),

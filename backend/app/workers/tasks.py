@@ -17,6 +17,8 @@ from app.scrapers.philstar import PhilStarScraper
 from app.scrapers.manila_bulletin import ManilaBulletinScraper
 
 # New import for Rappler
+# New import for Manila Times
+from app.scrapers.manila_times import ManilaTimesScraper
 from app.scrapers.rappler import RapplerScraper
 
 logger = logging.getLogger(__name__)
@@ -437,5 +439,66 @@ def scrape_sunstar_task(self):
                 "ok": False, 
                 "task_id": task_id, 
                 "error": error_msg, 
+                "retries_exhausted": True
+            }
+
+# Manila Times task
+@shared_task(bind=True, max_retries=3, default_retry_delay=60)
+def scrape_manila_times_task(self):
+    """Manila Times scraping task with stealth approach."""
+    task_id = self.request.id
+    logger.info(f"Starting Manila Times scraping task {task_id}")
+    log = start_run("manila_times")
+    
+    try:
+        scraper = ManilaTimesScraper()
+        import random
+        result = scraper.scrape_latest(max_articles=random.randint(3,5))
+        
+        logger.info(f"Task {task_id} - Manila Times scraped {len(result.articles)} articles, {len(result.errors)} errors")
+        
+        if result.articles:
+            store_result = insert_articles(result.articles)
+            logger.info(f"Task {task_id} - Manila Times storage result: {store_result}")
+            finalize_run(log["id"], status="success", articles_scraped=len(result.articles))
+            
+            return {
+                "ok": True,
+                "task_id": task_id,
+                "scraping": {
+                    "articles_found": len(result.articles),
+                    "errors": result.errors,
+                    "performance": result.performance,
+                    "metadata": result.metadata
+                },
+                "storage": store_result
+            }
+        else:
+            finalize_run(log["id"], status="success", articles_scraped=0)
+            return {
+                "ok": True,
+                "task_id": task_id,
+                "scraping": {
+                    "articles_found": 0,
+                    "errors": result.errors,
+                    "performance": result.performance,
+                    "metadata": result.metadata
+                },
+                "storage": {"checked": 0, "skipped": 0, "inserted": 0}
+            }
+            
+    except Exception as e:
+        error_msg = f"Manila Times task {task_id} failed: {str(e)}"
+        logger.error(error_msg)
+        finalize_run(log["id"], status="error", articles_scraped=(len(result.articles) if "result" in locals() else 0), error_message=str(e))
+        
+        if self.request.retries < self.max_retries:
+            logger.info(f"Task {task_id} - Retrying ({self.request.retries + 1}/{self.max_retries})")
+            raise self.retry(countdown=60 * (2 ** self.request.retries))
+        else:
+            return {
+                "ok": False,
+                "task_id": task_id,
+                "error": error_msg,
                 "retries_exhausted": True
             }

@@ -71,7 +71,7 @@ def extract_category_from_html(soup: Optional[BeautifulSoup]) -> Optional[str]:
         ("name", "category"),
     ]
     for attr, value in meta_candidates:
-        tag = soup.find("meta", attrs={attr: value})
+        tag = soup.find("meta", {attr: value})
         if tag and tag.get("content"):
             cat = normalize_category(tag.get("content"))
             if cat:
@@ -90,7 +90,7 @@ def extract_category_from_html(soup: Optional[BeautifulSoup]) -> Optional[str]:
             if cat:
                 return cat
     # Structured data
-    for script in soup.find_all("script", attrs={"type": "application/ld+json"}):
+    for script in soup.find_all("script", {"type": "application/ld+json"}):
         try:
             import json
             data = json.loads(script.string or "")
