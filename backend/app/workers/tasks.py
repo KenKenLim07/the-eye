@@ -7,7 +7,7 @@ import logging
 from app.observability.logs import start_run, finalize_run
 
 # New import for ABS-CBN
-from app.scrapers.abs_cbn import ABSCBNScraper
+from app.scrapers.abs_cbn import ABSCBNWorkingScraper
 # New import for GMA
 from app.scrapers.gma import GMAScraper
 # New import for Philstar
@@ -125,7 +125,7 @@ def scrape_abs_cbn_task(self):
     logger.info(f"Starting ABS-CBN scraping task {task_id}")
     log = start_run("abs_cbn")
     try:
-        scraper = ABSCBNScraper()
+        scraper = ABSCBNWorkingScraper()
         import random
         result = scraper.scrape_latest(max_articles=random.randint(3,5))
         logger.info(f"Task {task_id} - ABS-CBN scraped {len(result.articles)} articles, {len(result.errors)} errors")
