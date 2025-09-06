@@ -24,6 +24,11 @@ export default async function Home() {
             sourceValue="GMA" 
           />
           <ArticleRowServer 
+            articles={articlesBySource["ABS-CBN"] || []} 
+            title="ABS-CBN" 
+            sourceValue="ABS-CBN"
+          />
+          <ArticleRowServer 
             articles={articlesBySource["Rappler"] || []} 
             title="Rappler" 
             sourceValue="Rappler" 
@@ -32,6 +37,11 @@ export default async function Home() {
             articles={articlesBySource["Inquirer"] || []} 
             title="Inquirer" 
             sourceValue="Inquirer" 
+          />
+          <ArticleRowServer 
+            articles={articlesBySource["Manila Times"] || []} 
+            title="Manila Times" 
+            sourceValue="Manila Times"
           />
           <ArticleRowServer 
             articles={articlesBySource["Philstar"] || []} 

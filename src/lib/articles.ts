@@ -12,6 +12,8 @@ export interface Article {
 
 export async function fetchAllArticles(limit: number = 20): Promise<Record<string, Article[]>> {
   const sources = [
+    "ABS-CBN",
+    "Manila Times", 
     "GMA",
     "Rappler", 
     "Inquirer",
@@ -47,4 +49,4 @@ export async function fetchAllArticles(limit: number = 20): Promise<Record<strin
   });
 
   return articlesBySource;
-} 
+}
