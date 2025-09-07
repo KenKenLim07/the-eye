@@ -60,7 +60,7 @@ services:
     container_name: ph-eye-beat
     restart: unless-stopped
     working_dir: /app/backend
-    command: celery -A app.workers.celery_app:celery beat -l info
+    command: ./start_beat.sh
     env_file: .env
     environment:
       - CELERY_BROKER_URL=redis://redis:6379/0

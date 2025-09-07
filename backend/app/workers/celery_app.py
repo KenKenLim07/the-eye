@@ -8,57 +8,60 @@ celery = Celery(
     backend=settings.celery_result_backend,
 )
 
+# SENIOR DEV SOLUTION: Production-grade configuration
 celery.conf.update(
     task_serializer="json",
     result_serializer="json",
     accept_content=["json"],
     timezone="Asia/Manila",
     enable_utc=True,
+    # Beat configuration - using default scheduler for reliability
+    beat_max_loop_interval=60,  # Check every minute
+    beat_sync_every=1,  # Sync every task
 )
 
 celery.autodiscover_tasks(["app.workers"])
 
-# Periodic schedules (in seconds). Kept conservative for stealth.
-# You can tune these intervals or switch to crontab if desired.
+# 🚀 PRODUCTION SCHEDULES: Intelligent intervals based on source characteristics
 celery.conf.beat_schedule = {
-    # Run GMA (v1) roughly every 45 minutes
-    "scrape_gma": {
-        "task": "app.workers.tasks.scrape_gma_task",
-        "schedule": schedule(65 * 60),
-    },
-    # Rappler every 60 minutes
+    # HIGH-FREQUENCY SOURCES (1.0-1.25 hours)
+    # Fast, reliable sources with good content volume
     "scrape_rappler": {
         "task": "app.workers.tasks.scrape_rappler_task",
-        "schedule": schedule(60 * 60),
+        "schedule": schedule(1.0 * 60 * 60),  # 1.00 hour - Fast, reliable
     },
-    # Inquirer every 75 minutes
-    "scrape_inquirer": {
-        "task": "app.workers.tasks.scrape_inquirer_task",
-        "schedule": schedule(75 * 60),
+    "scrape_gma": {
+        "task": "app.workers.tasks.scrape_gma_task", 
+        "schedule": schedule(1.08 * 60 * 60),  # 1.08 hours - Consistent updates
     },
-    # Philstar every 70 minutes
     "scrape_philstar": {
         "task": "app.workers.tasks.scrape_philstar_task",
-        "schedule": schedule(70 * 60),
+        "schedule": schedule(1.17 * 60 * 60),  # 1.17 hours - Good balance
     },
-    # Sunstar every 90 minutes
-    "scrape_sunstar": {
-        "task": "app.workers.tasks.scrape_sunstar_task",
-        "schedule": schedule(90 * 60),
+    "scrape_inquirer": {
+        "task": "app.workers.tasks.scrape_inquirer_task",
+        "schedule": schedule(1.25 * 60 * 60),  # 1.25 hours - High volume, needs stealth
     },
-    # ABS-CBN every 75 minutes
     "scrape_abs_cbn": {
         "task": "app.workers.tasks.scrape_abs_cbn_task",
-        "schedule": schedule(75 * 60),
+        "schedule": schedule(1.25 * 60 * 60),  # 1.25 hours - High stealth requirements (25-45s delays)
     },
-    # Manila Bulletin every 80 minutes
-    # Manila Times every 85 minutes
-    "scrape_manila_times": {
-        "task": "app.workers.tasks.scrape_manila_times_task",
-        "schedule": schedule(85 * 60),
-    },
+    
+    # MEDIUM-FREQUENCY SOURCES (1.33-1.42 hours)
+    # Moderate complexity and update frequency
     "scrape_manila_bulletin": {
         "task": "app.workers.tasks.scrape_manila_bulletin_task",
-        "schedule": schedule(80 * 60),
+        "schedule": schedule(1.33 * 60 * 60),  # 1.33 hours - Moderate complexity
     },
-} 
+    "scrape_manila_times": {
+        "task": "app.workers.tasks.scrape_manila_times_task",
+        "schedule": schedule(1.42 * 60 * 60),  # 1.42 hours - Slower updates
+    },
+    
+    # LOW-FREQUENCY SOURCES (1.50+ hours)
+    # Regional focus, less frequent updates
+    "scrape_sunstar": {
+        "task": "app.workers.tasks.scrape_sunstar_task",
+        "schedule": schedule(1.50 * 60 * 60),  # 1.50 hours - Regional focus
+    },
+}

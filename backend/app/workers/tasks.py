@@ -7,7 +7,7 @@ import logging
 from app.observability.logs import start_run, finalize_run
 
 # New import for ABS-CBN
-from app.scrapers.abs_cbn import ABSCBNWorkingScraper
+from app.scrapers.abs_cbn import ABSCBNScraper
 # New import for GMA
 from app.scrapers.gma import GMAScraper
 # New import for Philstar
@@ -60,7 +60,7 @@ def scrape_inquirer_task(self):
         # Run the scraper
         scraper = InquirerScraper()
         import random
-        result = scraper.scrape_latest(max_articles=random.randint(3,5))
+        result = scraper.scrape_latest(max_articles=12)
         
         # Log scraping results
         logger.info(f"Task {task_id} - Scraping completed: {len(result.articles)} articles, {len(result.errors)} errors")
@@ -127,9 +127,9 @@ def scrape_abs_cbn_task(self):
     logger.info(f"Starting ABS-CBN scraping task {task_id}")
     log = start_run("abs_cbn")
     try:
-        scraper = ABSCBNWorkingScraper()
+        scraper = ABSCBNScraper()
         import random
-        result = scraper.scrape_latest(max_articles=random.randint(3,5))
+        result = scraper.scrape_latest(max_articles=12)
         logger.info(f"Task {task_id} - ABS-CBN scraped {len(result.articles)} articles, {len(result.errors)} errors")
         if result.articles:
             store_result = insert_articles(result.articles)
@@ -178,7 +178,7 @@ def scrape_gma_task(self):
     try:
         scraper = GMAScraper()
         import random
-        result = scraper.scrape_latest(max_articles=random.randint(3,5))
+        result = scraper.scrape_latest(max_articles=12)
         logger.info(f"Task {task_id} - GMA scraped {len(result.articles)} articles, {len(result.errors)} errors")
         if result.articles:
             store_result = insert_articles(result.articles)
@@ -226,7 +226,7 @@ def scrape_philstar_task(self):
     try:
         scraper = PhilStarScraper()
         import random
-        result = scraper.scrape_latest(max_articles=random.randint(3,5))
+        result = scraper.scrape_latest(max_articles=12)
         logger.info(f"Task {task_id} - Philstar scraped {len(result.articles)} articles, {len(result.errors)} errors")
         if result.articles:
             store_result = insert_articles(result.articles)
@@ -453,7 +453,7 @@ def scrape_manila_times_task(self):
     try:
         scraper = ManilaTimesScraper()
         import random
-        result = scraper.scrape_latest(max_articles=random.randint(3,5))
+        result = scraper.scrape_latest(max_articles=12)
         
         logger.info(f"Task {task_id} - Manila Times scraped {len(result.articles)} articles, {len(result.errors)} errors")
         
