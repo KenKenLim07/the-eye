@@ -35,6 +35,12 @@ class ManilaTimesScraper:
         "https://www.manilatimes.net/2025/09/07/news/15-drug-war-victims-cleared-to-join-dutertes-icc-case/2180040"
     ]
     
+    # Discovery entry points for latest news
+    DISCOVERY_PATHS = [
+        "/news/",
+        "/news/latest/"
+    ]
+    
     # Rotating User-Agents for stealth
     USER_AGENTS = [
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15",
@@ -111,6 +117,71 @@ class ManilaTimesScraper:
         except Exception as e:
             logger.error(f"Unexpected error fetching {url}: {e}")
             return None
+
+    def _validate_url(self, url: str) -> bool:
+        try:
+            parsed = urlparse(url)
+            if not parsed.scheme or not parsed.netloc:
+                return False
+            if not parsed.netloc.endswith("manilatimes.net"):
+                return False
+            return True
+        except Exception:
+            return False
+
+    def _is_probable_article(self, url: str) -> bool:
+        try:
+            parsed = urlparse(url)
+            path = parsed.path or ""
+            if not path.startswith("/2025/") and "/news/" not in path:
+                return False
+            bad_segments = {"video", "videos", "photo", "photos", "gallery", "opinion", "regions"}
+            segments = [seg for seg in path.split('/') if seg]
+            if any(seg in bad_segments for seg in segments):
+                return False
+            # Likely article if ends with numeric id or has long slug
+            return path.rstrip('/').split('/')[-1].isdigit() or len(path) > 40
+        except Exception:
+            return False
+
+    def _discover_latest_urls(self, limit: int = 10) -> List[str]:
+        urls: List[str] = []
+        seen = set()
+        try:
+            for path in self.DISCOVERY_PATHS:
+                html = self._fetch_with_httpx(urljoin(self.BASE_URL, path))
+                if not html:
+                    continue
+                soup = BeautifulSoup(html, 'html.parser')
+                # Broad selectors covering Manila Times listing blocks
+                link_selectors = [
+                    "h3 a",
+                    ".td-module-thumb a",
+                    ".tdb_module_loop a",
+                    "a.td-image-wrap",
+                    "a[href*='/2025/']",
+                    "a[href*='/news/']",
+                ]
+                for sel in link_selectors:
+                    for a in soup.select(sel):
+                        href = a.get('href')
+                        if not href:
+                            continue
+                        full = urljoin(self.BASE_URL, href)
+                        if full in seen:
+                            continue
+                        if self._validate_url(full) and self._is_probable_article(full):
+                            urls.append(full)
+                            seen.add(full)
+                        if len(urls) >= limit:
+                            break
+                    if len(urls) >= limit:
+                        break
+                if len(urls) >= limit:
+                    break
+        except Exception as e:
+            logger.warning(f"{self.name}: discovery failed: {e}")
+        return urls
 
     def _extract_title(self, soup: BeautifulSoup) -> Optional[str]:
         """Extract article title."""
@@ -243,7 +314,7 @@ class ManilaTimesScraper:
                 content=content,
                 url=url,
                 published_at=published_date,
-                source="manila_times",
+                source="Manila Times",
                 category="news"
             )
             
@@ -259,11 +330,10 @@ class ManilaTimesScraper:
         articles = []
         errors = []
         
-        logger.info(f"{self.name}: Starting stealth scraping with {len(self.STATIC_ARTICLE_URLS)} static URLs")
-        
-        # Use static URLs for reliability
-        candidate_urls = self.STATIC_ARTICLE_URLS[:max_articles]
-        logger.info(f"{self.name}: Processing {len(candidate_urls)} candidate articles")
+        # Try discovery first
+        discovered = self._discover_latest_urls(limit=max_articles * 3)
+        candidate_urls = discovered[:max_articles] if discovered else self.STATIC_ARTICLE_URLS[:max_articles]
+        logger.info(f"{self.name}: Using {len(candidate_urls)} candidate articles (discovered={len(discovered)})")
         
         for i, url in enumerate(candidate_urls, 1):
             try:

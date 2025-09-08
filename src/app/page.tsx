@@ -24,11 +24,6 @@ export default async function Home() {
             sourceValue="GMA" 
           />
           <ArticleRowServer 
-            articles={articlesBySource["ABS-CBN"] || []} 
-            title="ABS-CBN" 
-            sourceValue="ABS-CBN"
-          />
-          <ArticleRowServer 
             articles={articlesBySource["Rappler"] || []} 
             title="Rappler" 
             sourceValue="Rappler" 

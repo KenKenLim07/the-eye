@@ -12,7 +12,7 @@ export interface Article {
 
 export async function fetchAllArticles(limit: number = 20): Promise<Record<string, Article[]>> {
   const sources = [
-    "ABS-CBN",
+    // Removed "ABS-CBN"
     "Manila Times", 
     "GMA",
     "Rappler", 

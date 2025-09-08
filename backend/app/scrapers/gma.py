@@ -99,7 +99,7 @@ class GMAScraper:
             if not path.startswith("/news/"):
                 return False
             segments = [seg for seg in path.split('/') if seg]
-            blacklist = {"photo", "photos", "video", "videos", "balitambayan", "cbb"}
+            blacklist = {"photo", "photos", "video", "videos", "balitambayan", "cbb", "lotto"}
             if any(seg in blacklist for seg in segments):
                 return False
             return len(segments) >= 3
@@ -128,19 +128,42 @@ class GMAScraper:
 
     def _extract_content(self, soup: BeautifulSoup, url: str) -> Optional[str]:
         parts: List[str] = []
+        # Blacklist boilerplate/ads/lotto instructions commonly embedded in GMA pages
+        blacklist = re.compile(r"(how\s+to\s+play|pcso|\b4\s*-?\s*digit\b|lotto|lucky\s*pick|permutations?\s+of\s+the\s+number|advertisement)", re.IGNORECASE)
+        seen: set[str] = set()
         for sel in self.SELECTORS["content"]:
             try:
                 for el in soup.select(sel):
                     text = el.get_text().strip()
-                    if text and len(text) > 50 and not text.upper().startswith("ADVERTISEMENT"):
-                        parts.append(text)
+                    if not text:
+                        continue
+                    if text in seen:
+                        continue
+                    seen.add(text)
+                    if len(text) <= 50:
+                        continue
+                    if text.upper().startswith("ADVERTISEMENT"):
+                        continue
+                    if blacklist.search(text):
+                        continue
+                    parts.append(text)
             except Exception:
                 continue
         if not parts:
             for p in soup.find_all('p'):
                 t = p.get_text().strip()
-                if t and len(t) > 30 and not t.upper().startswith("ADVERTISEMENT"):
-                    parts.append(t)
+                if not t:
+                    continue
+                if t in seen:
+                    continue
+                seen.add(t)
+                if len(t) <= 30:
+                    continue
+                if t.upper().startswith("ADVERTISEMENT"):
+                    continue
+                if blacklist.search(t):
+                    continue
+                parts.append(t)
         if parts:
             combined = ' '.join(parts)
             if len(combined) > 1000:
@@ -254,6 +277,10 @@ class GMAScraper:
             soup = BeautifulSoup(page.content(), 'html.parser')
             title = self._extract_with_fallbacks(soup, self.SELECTORS["title"]) or ""
             if not title:
+                context.close()
+                return None
+            # Skip lotto-related posts by title keywords
+            if re.search(r"\b(lotto|swertres|stl|4d|3d|6/\d{2}|pcso)\b", title, re.IGNORECASE):
                 context.close()
                 return None
             content = self._extract_content(soup, url)
