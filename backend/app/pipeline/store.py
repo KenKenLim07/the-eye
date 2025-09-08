@@ -7,10 +7,6 @@ def insert_articles(articles: List[NormalizedArticle]) -> dict:
     sb = get_supabase()
     # Filter out articles without URL (optional, but keeps DB clean)
     to_check = [a.url for a in articles if a.url]
-    existing_urls: set[str] = set()
-    if to_check:
-        res = sb.table("articles").select("url").in_("url", to_check).execute()
-        existing_urls = set((row.get("url") for row in (res.data or []) if row.get("url")))
 
     rows = [
         {
@@ -23,12 +19,15 @@ def insert_articles(articles: List[NormalizedArticle]) -> dict:
             "published_at": a.published_at,
         }
         for a in articles
-        if (not a.url) or (a.url not in existing_urls)
+        if a.url
     ]
 
     inserted = 0
     if rows:
-        ins = sb.table("articles").insert(rows).execute()
-        inserted = len(ins.data or [])
+        # Use upsert to avoid duplicate key violations on url
+        res = sb.table("articles").upsert(rows, on_conflict="url").execute()
+        inserted = len(res.data or [])
 
-    return {"checked": len(to_check), "skipped": len(articles) - len(rows), "inserted": inserted} 
+    # We cannot know exact skipped count from upsert response reliably; estimate
+    skipped = max(0, len(to_check) - inserted)
+    return {"checked": len(to_check), "skipped": skipped, "inserted": inserted} 

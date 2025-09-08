@@ -42,10 +42,6 @@ celery.conf.beat_schedule = {
         "task": "app.workers.tasks.scrape_inquirer_task",
         "schedule": schedule(1.25 * 60 * 60),  # 1.25 hours - High volume, needs stealth
     },
-    "scrape_abs_cbn": {
-        "task": "app.workers.tasks.scrape_abs_cbn_task",
-        "schedule": schedule(1.25 * 60 * 60),  # 1.25 hours - High stealth requirements (25-45s delays)
-    },
     
     # MEDIUM-FREQUENCY SOURCES (1.33-1.42 hours)
     # Moderate complexity and update frequency

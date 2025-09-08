@@ -8,7 +8,6 @@ from dataclasses import dataclass
 from bs4 import BeautifulSoup
 from app.pipeline.normalize import build_article, NormalizedArticle
 import httpx
-import brotli
 from app.scrapers.utils import resolve_category_pair
 
 logging.basicConfig(level=logging.INFO)
@@ -77,7 +76,7 @@ class ManilaTimesScraper:
         }
 
     def _fetch_with_httpx(self, url: str) -> Optional[str]:
-        """Fetch URL with httpx and proper Brotli decompression."""
+        """Fetch URL with httpx."""
         try:
             timeout = random.uniform(25.0, 35.0)
             logger.info(f"{self.name}: Fetching {url} with timeout {timeout:.1f}s")
@@ -90,16 +89,6 @@ class ManilaTimesScraper:
             ) as client:
                 response = client.get(url)
                 response.raise_for_status()
-                
-                # Handle Brotli decompression manually
-                if response.headers.get("content-encoding") == "br":
-                    try:
-                        decompressed_content = brotli.decompress(response.content)
-                        return decompressed_content.decode("utf-8")
-                    except Exception as e:
-                        logger.warning(f"Brotli decompression failed for {url}: {e}")
-                        return response.text
-                
                 return response.text
                 
         except httpx.HTTPStatusError as e:
@@ -111,6 +100,42 @@ class ManilaTimesScraper:
         except Exception as e:
             logger.error(f"Unexpected error fetching {url}: {e}")
             return None
+
+    def _discover_latest_urls(self, max_urls: int = 20) -> List[str]:
+        """Discover latest article URLs from homepage and the /news listing.
+        Returns a de-duplicated list of absolute URLs containing dated paths.
+        """
+        discovered: List[str] = []
+        tried_paths = ["/", "/news/"]
+        for path in tried_paths:
+            try:
+                page_url = urljoin(self.BASE_URL + "/", path.lstrip("/"))
+                html = self._fetch_with_httpx(page_url)
+                if not html:
+                    continue
+                soup = BeautifulSoup(html, 'html.parser')
+                for a in soup.find_all('a', href=True):
+                    href = a['href']
+                    if href.startswith('#'):
+                        continue
+                    full_url = urljoin(self.BASE_URL + "/", href)
+                    # Only keep article-like URLs with dated path and within domain
+                    if self.BASE_URL in full_url and \
+                       any(seg in full_url for seg in ["/news/", "/the-sunday-times/", "/opinion/"]) and \
+                       __import__('re').search(r"/\d{4}/\d{2}/\d{2}/", full_url):
+                        discovered.append(full_url)
+            except Exception as e:
+                logger.warning(f"{self.name}: discovery failed for {path}: {e}")
+                continue
+        # De-duplicate while preserving order
+        seen = set()
+        unique: List[str] = []
+        for u in discovered:
+            if u not in seen:
+                seen.add(u)
+                unique.append(u)
+        logger.info(f"{self.name}: discovery found {len(unique)} candidates; returning top {min(len(unique), max_urls)}")
+        return unique[:max_urls]
 
     def _extract_title(self, soup: BeautifulSoup) -> Optional[str]:
         """Extract article title."""
@@ -259,10 +284,15 @@ class ManilaTimesScraper:
         articles = []
         errors = []
         
+        # Prefer dynamic discovery; fall back to static list
+        discovered_urls = self._discover_latest_urls(max_urls=max_articles * 6)
+        if discovered_urls:
+            candidate_urls = discovered_urls[:max_articles]
+            logger.info(f"{self.name}: Using discovery: {len(candidate_urls)} of {len(discovered_urls)}")
+        else:
         logger.info(f"{self.name}: Starting stealth scraping with {len(self.STATIC_ARTICLE_URLS)} static URLs")
+            candidate_urls = self.STATIC_ARTICLE_URLS[:max_articles]
         
-        # Use static URLs for reliability
-        candidate_urls = self.STATIC_ARTICLE_URLS[:max_articles]
         logger.info(f"{self.name}: Processing {len(candidate_urls)} candidate articles")
         
         for i, url in enumerate(candidate_urls, 1):
@@ -316,6 +346,7 @@ class ManilaTimesScraper:
             metadata={
                 "scraper": self.name,
                 "urls_processed": len(candidate_urls),
-                "stealth_mode": True
+                "stealth_mode": True,
+                "discovered_urls": len(discovered_urls)
             }
         )
