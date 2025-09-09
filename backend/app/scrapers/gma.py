@@ -98,10 +98,28 @@ class GMAScraper:
             path = parsed.path or ""
             if not path.startswith("/news/"):
                 return False
-            segments = [seg for seg in path.split('/') if seg]
-            blacklist = {"photo", "photos", "video", "videos", "balitambayan", "cbb", "lotto"}
-            if any(seg in blacklist for seg in segments):
+
+            # SENIOR CYBER SEC & BLACK HAT VETERAN FILTERING 🔥
+            # Block ALL modal popups, lotto, gambling, and non-news content
+            path_lower = path.lower()
+
+            # Block lotto, gambling, and modal popup content
+            blocked_patterns = [
+                "lotto", "swertres", "stl", "pcso", "gambling", "betting",
+                "photo", "photos", "video", "videos", "balitambayan", "cbb",
+                "results", "draw", "winning", "numbers", "play", "ticket",
+                "modal", "popup", "advertisement", "ad", "promo", "promotion"
+            ]
+
+            # Check if any blocked pattern is in the URL path
+            if any(pattern in path_lower for pattern in blocked_patterns):
                 return False
+
+            # Additional regex check for lotto patterns
+            if re.search(r'/(lotto|swertres|stl|pcso|gambling|betting|results|draw|winning|numbers|play|ticket|modal|popup|advertisement|ad|promo|promotion)/', path_lower):
+                return False
+
+            segments = [seg for seg in path.split('/') if seg]
             return len(segments) >= 3
         except Exception:
             return False
