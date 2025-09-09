@@ -12,6 +12,29 @@ from datetime import datetime
 import re
 import urllib.request
 import json
+# Feature flags (env-driven) for gradual rollout
+import os
+
+
+def _env_flag(name: str, default: bool = False) -> bool:
+    val = os.getenv(name, str(default)).strip().lower()
+    return val in {"1", "true", "yes", "on"}
+
+USE_ADV_HEADERS = _env_flag("USE_ADV_HEADERS", False)
+USE_HUMAN_DELAY = _env_flag("USE_HUMAN_DELAY", False)
+USE_URL_FILTER = _env_flag("USE_URL_FILTER", False)
+
+try:
+    from app.scrapers.utils import (
+        get_advanced_stealth_headers,
+        get_human_like_delay,
+        is_valid_news_url,
+    )
+except Exception:
+    get_advanced_stealth_headers = None
+    get_human_like_delay = None
+    is_valid_news_url = None
+
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -59,7 +82,7 @@ class ManilaBulletinScraper:
     )
 
     MIN_DELAY = 8.0
-    MAX_DELAY = 14.0
+    MAX_DELAY = 28.0
 
     # Robots.txt disallow-derived patterns (must NOT fetch)
     DISALLOW_PATTERNS = [

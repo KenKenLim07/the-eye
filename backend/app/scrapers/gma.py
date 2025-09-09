@@ -11,6 +11,28 @@ from app.scrapers.base import launch_browser
 from datetime import datetime
 import re
 from app.scrapers.utils import resolve_category_pair
+# Feature flags (env-driven) for gradual rollout
+import os
+
+def _env_flag(name: str, default: bool = False) -> bool:
+    val = os.getenv(name, str(default)).strip().lower()
+    return val in {"1", "true", "yes", "on"}
+
+USE_ADV_HEADERS = _env_flag("USE_ADV_HEADERS", False)
+USE_HUMAN_DELAY = _env_flag("USE_HUMAN_DELAY", False)
+USE_URL_FILTER = _env_flag("USE_URL_FILTER", False)
+
+# Optional advanced utils
+try:
+    from app.scrapers.utils import (
+        get_advanced_stealth_headers,
+        get_human_like_delay,
+        is_valid_news_url,
+    )
+except Exception:
+    get_advanced_stealth_headers = None
+    get_human_like_delay = None
+    is_valid_news_url = None
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -37,8 +59,8 @@ class GMAScraper:
         "Chrome/125.0.0.0 Safari/537.36"
     )
 
-    MIN_DELAY = 5.0
-    MAX_DELAY = 12.0
+    MIN_DELAY = 12.0
+    MAX_DELAY = 25.0
 
     SELECTORS = {
         "article_links": [
@@ -77,20 +99,19 @@ class GMAScraper:
     }
 
     def _human_delay(self):
-        delay = random.uniform(self.MIN_DELAY, self.MAX_DELAY)
+        if USE_HUMAN_DELAY and get_human_like_delay is not None:
+            delay = get_human_like_delay()
+        else:
+            delay = random.uniform(self.MIN_DELAY, self.MAX_DELAY)
         logger.info(f"GMA v1: waiting {delay:.1f}s before next request (stealth)")
         time.sleep(delay)
 
     def _validate_url(self, url: str) -> bool:
-        if not url:
+        try:
+            parsed = urlparse(url)
+            return parsed.scheme in ("http", "https") and parsed.netloc
+        except Exception:
             return False
-        parsed = urlparse(url)
-        if not parsed.scheme or not parsed.netloc:
-            return False
-        if not parsed.netloc.endswith("gmanetwork.com"):
-            logger.debug(f"GMA v1: blocked external URL {url}")
-            return False
-        return True
 
     def _is_probable_article(self, url: str) -> bool:
         try:
@@ -98,28 +119,17 @@ class GMAScraper:
             path = parsed.path or ""
             if not path.startswith("/news/"):
                 return False
-
-            # SENIOR CYBER SEC & BLACK HAT VETERAN FILTERING 🔥
-            # Block ALL modal popups, lotto, gambling, and non-news content
-            path_lower = path.lower()
-
-            # Block lotto, gambling, and modal popup content
-            blocked_patterns = [
-                "lotto", "swertres", "stl", "pcso", "gambling", "betting",
-                "photo", "photos", "video", "videos", "balitambayan", "cbb",
-                "results", "draw", "winning", "numbers", "play", "ticket",
-                "modal", "popup", "advertisement", "ad", "promo", "promotion"
-            ]
-
-            # Check if any blocked pattern is in the URL path
-            if any(pattern in path_lower for pattern in blocked_patterns):
-                return False
-
-            # Additional regex check for lotto patterns
-            if re.search(r'/(lotto|swertres|stl|pcso|gambling|betting|results|draw|winning|numbers|play|ticket|modal|popup|advertisement|ad|promo|promotion)/', path_lower):
-                return False
-
+            if USE_URL_FILTER and is_valid_news_url is not None:
+                # Use advanced validator with domain guard
+                if not is_valid_news_url(url, "gmanetwork.com"):
+                    return False
+                # Passed advanced checks
+                return True
+            # Legacy checks (fallback)
             segments = [seg for seg in path.split('/') if seg]
+            blacklist = {"photo", "photos", "video", "videos", "balitambayan", "cbb", "lotto"}
+            if any(seg in blacklist for seg in segments):
+                return False
             return len(segments) >= 3
         except Exception:
             return False
@@ -215,7 +225,7 @@ class GMAScraper:
 
     def _new_context(self, browser: Browser):
         return browser.new_context(
-            user_agent=self.USER_AGENT,
+            user_agent=(get_advanced_stealth_headers()["User-Agent"] if (USE_ADV_HEADERS and get_advanced_stealth_headers is not None) else self.USER_AGENT),
             locale='en-PH',
             viewport={"width": 1366, "height": 768},
             java_script_enabled=True,
@@ -236,14 +246,20 @@ class GMAScraper:
             pass
 
     def _set_headers(self, page):
-        page.set_extra_http_headers({
-            'User-Agent': self.USER_AGENT,
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-            'Accept-Language': 'en-PH,en;q=0.9',
-            'Connection': 'keep-alive',
-            'Referer': urljoin(self.BASE_URL, '/news/'),
-            'Upgrade-Insecure-Requests': '1',
-        })
+        if USE_ADV_HEADERS and get_advanced_stealth_headers is not None:
+            headers = get_advanced_stealth_headers()
+            # Ensure referer points to news
+            headers.setdefault('Referer', urljoin(self.BASE_URL, '/news/'))
+            page.set_extra_http_headers(headers)
+        else:
+            page.set_extra_http_headers({
+                'User-Agent': self.USER_AGENT,
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                'Accept-Language': 'en-PH,en;q=0.9',
+                'Connection': 'keep-alive',
+                'Referer': urljoin(self.BASE_URL, '/news/'),
+                'Upgrade-Insecure-Requests': '1',
+            })
 
     def _extract_article_links(self, soup: BeautifulSoup) -> List[str]:
         urls = []
@@ -324,6 +340,7 @@ class GMAScraper:
         start = time.time()
         articles: List[NormalizedArticle] = []
         errors: List[str] = []
+        logger.info(f"GMA v1: flags USE_ADV_HEADERS={USE_ADV_HEADERS}, USE_HUMAN_DELAY={USE_HUMAN_DELAY}, USE_URL_FILTER={USE_URL_FILTER}")
         try:
             with launch_browser() as browser:
                 context = self._new_context(browser)

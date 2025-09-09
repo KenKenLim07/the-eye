@@ -6,8 +6,11 @@ from app.pipeline.store import insert_articles
 import logging
 from app.observability.logs import start_run, finalize_run
 
-# New import for ABS-CBN
-from app.scrapers.abs_cbn import ABSCBNScraper
+# Guarded import for ABS-CBN (may be removed)
+try:
+    from app.scrapers.abs_cbn import ABSCBNScraper
+except Exception:
+    ABSCBNScraper = None
 # New import for GMA
 from app.scrapers.gma import GMAScraper
 # New import for Philstar
@@ -120,54 +123,14 @@ def scrape_inquirer_task(self):
                 "retries_exhausted": True
             }
 
-# New ABS-CBN task mirroring Inquirer
-@shared_task(bind=True, max_retries=3, default_retry_delay=60)
+# ABS-CBN task is disabled (site defense too strong / scraper removed)
+@shared_task(bind=True, max_retries=0)
 def scrape_abs_cbn_task(self):
     task_id = self.request.id
-    logger.info(f"Starting ABS-CBN scraping task {task_id}")
+    logger.info(f"ABS-CBN task {task_id} requested but DISABLED")
     log = start_run("abs_cbn")
-    try:
-        scraper = ABSCBNScraper()
-        import random
-        result = scraper.scrape_latest(max_articles=12)
-        logger.info(f"Task {task_id} - ABS-CBN scraped {len(result.articles)} articles, {len(result.errors)} errors")
-        if result.articles:
-            store_result = insert_articles(result.articles)
-            logger.info(f"Task {task_id} - ABS-CBN storage result: {store_result}")
-            finalize_run(log["id"], status="success", articles_scraped=len(result.articles))
-            return {
-                "ok": True,
-                "task_id": task_id,
-                "scraping": {
-                    "articles_found": len(result.articles),
-                    "errors": result.errors,
-                    "performance": result.performance,
-                    "metadata": result.metadata
-                },
-                "storage": store_result
-            }
-        else:
-            finalize_run(log["id"], status="success", articles_scraped=0)
-            return {
-                "ok": True,
-                "task_id": task_id,
-                "scraping": {
-                    "articles_found": 0,
-                    "errors": result.errors,
-                    "performance": result.performance,
-                    "metadata": result.metadata
-                },
-                "storage": {"checked": 0, "skipped": 0, "inserted": 0}
-            }
-    except Exception as e:
-        error_msg = f"ABS-CBN task {task_id} failed: {str(e)}"
-        logger.error(error_msg)
-        finalize_run(log["id"], status="error", articles_scraped=(len(result.articles) if "result" in locals() else 0), error_message=str(e))
-        if self.request.retries < self.max_retries:
-            logger.info(f"Task {task_id} - Retrying ({self.request.retries + 1}/{self.max_retries})")
-            raise self.retry(countdown=60 * (2 ** self.request.retries))
-        else:
-            return {"ok": False, "task_id": task_id, "error": error_msg, "retries_exhausted": True}
+    finalize_run(log["id"], status="success", articles_scraped=0)
+    return {"ok": True, "task_id": task_id, "disabled": True, "reason": "ABS-CBN scraper removed/disabled"}
 
 # New GMA task
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)

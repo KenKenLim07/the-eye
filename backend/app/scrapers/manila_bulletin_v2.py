@@ -64,8 +64,8 @@ class ManilaBulletinV2Scraper:
     ]
     
     # ⏱️ DELAY CONFIGURATION (More aggressive than Sunstar)
-    MIN_DELAY = 2.0  # Faster than Sunstar's 3.0
-    MAX_DELAY = 6.0  # Faster than Sunstar's 8.0
+    MIN_DELAY = 8.0  # Faster than Sunstar's 3.0
+    MAX_DELAY = 18.0  # Faster than Sunstar's 8.0
     REQUEST_DELAY = 0.3  # Small delay between requests
     
     # 🎯 DISCOVERY LIMITS

@@ -43,6 +43,10 @@ services:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/1
       - CELERYD_PREFETCH_MULTIPLIER=1
+      # Feature flags for gradual rollout (GMA)
+      - USE_ADV_HEADERS=true
+      - USE_HUMAN_DELAY=true
+      - USE_URL_FILTER=true
     volumes:
       - /Users/mac/ph-eye:/app
     depends_on:

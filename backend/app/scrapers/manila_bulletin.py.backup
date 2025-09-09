@@ -59,7 +59,7 @@ class ManilaBulletinScraper:
     )
 
     MIN_DELAY = 8.0
-    MAX_DELAY = 14.0
+    MAX_DELAY = 28.0
 
     # Robots.txt disallow-derived patterns (must NOT fetch)
     DISALLOW_PATTERNS = [
@@ -163,20 +163,170 @@ class ManilaBulletinScraper:
         text = text.replace("<", "&lt;").replace(">", "&gt;")
         return text.strip()
 
-    def _extract_content(self, soup: BeautifulSoup) -> str:
-        parts: List[str] = []
-        for sel in self.SELECTORS["content"]:
+    def _find_article_container(self, soup: BeautifulSoup) -> Optional[BeautifulSoup]:
+        container_selectors = [
+            "article",
+            "main[role='main'] article",
+            ".single-post",
+            ".single-article",
+            ".post-single",
+            ".post",
+            ".entry-content",
+            ".post-content",
+            ".article-content",
+            ".story-content",
+            "#content article",
+        ]
+        candidates: List[BeautifulSoup] = []
+        for sel in container_selectors:
             try:
-                for p in soup.select(sel):
-                    txt = (p.get_text() or "").strip()
-                    if txt and len(txt) > 30:
-                        parts.append(self._sanitize_text(txt))
-                if parts:
-                    break
+                for el in soup.select(sel):
+                    candidates.append(el)
             except Exception:
                 continue
-        content = "\n\n".join(parts[:20])
-        return content
+        if not candidates:
+            return None
+        # Score by total text length of <p> inside
+        def score(el: BeautifulSoup) -> int:
+            try:
+                text = "\n".join(p.get_text(" ", strip=True) for p in el.select("p"))
+                return len(text)
+            except Exception:
+                return 0
+        best = max(candidates, key=score)
+        return best if score(best) > 0 else None
+
+    def _extract_content(self, soup: BeautifulSoup) -> str:
+        # Boilerplate class/section blacklist
+        blacklist_selectors = [
+            "nav", "footer", "aside", ".newsletter", ".subscribe", ".subscription", ".share",
+            ".social", ".related", ".recommend", ".tags", ".breadcrumbs", ".author", ".byline",
+            ".comments", "#comments", ".ad", "[class*='advert']", "[id*='advert']",
+        ]
+        boilerplate_phrases = [
+            "sign up by email", "all rights reserved", "©", "copyright", "read next", "related stories",
+            "follow us", "advertisement", "subscribe", "share this", "newsletter",
+            "published", "updated", "read more",
+            "press escape to quit searching",
+        ]
+        # Regex-based skip rules for header widgets (temperature, time, date)
+        header_skip_patterns = [
+            re.compile(r"^\s*(?:[A-Z][a-z]+\s*)?\d{1,2}°[CF]\b"),                # Manila 27°C
+            re.compile(r"^\s*\d{1,2}:\d{2}\s*(?:AM|PM)\b", re.IGNORECASE),       # 10:37 PM
+            re.compile(r"\b(January|February|March|April|May|June|July|August|September|October|November|December)\b\s+\d{1,2},\s+\d{4}", re.IGNORECASE),  # September 3, 2025
+        ]
+        # Remove blacklisted sections from a copy soup for cleaner scoring
+        try:
+            for sel in blacklist_selectors:
+                for el in soup.select(sel):
+                    el.decompose()
+        except Exception:
+            pass
+        # Exclude script/style/template/noscript content from consideration
+        try:
+            for el in soup.find_all(["script", "style", "template", "noscript"]):
+                el.decompose()
+        except Exception:
+            pass
+        # Prefer a scoped article container
+        container = self._find_article_container(soup) or soup
+        parts: List[str] = []
+        try:
+            paragraphs = container.select("p")
+        except Exception:
+            paragraphs = []
+        def should_skip_text(txt: str) -> bool:
+            low = txt.lower()
+            if any(phrase in low for phrase in boilerplate_phrases):
+                return True
+            if "{{" in txt and "}}" in txt:
+                return True
+            for pat in header_skip_patterns:
+                if pat.search(txt):
+                    return True
+            return False
+        for p in paragraphs:
+            try:
+                parent_name = (p.parent.name or "").lower() if p.parent else ""
+                if parent_name in {"script", "style", "template", "noscript"}:
+                    continue
+                txt = (p.get_text(" ", strip=True) or "").strip()
+            except Exception:
+                txt = ""
+            if not txt:
+                continue
+            if should_skip_text(txt):
+                continue
+            # Less strict threshold to avoid dropping valid short lead lines
+            if len(txt) < 25 and not (txt.endswith(".") or txt.endswith("!") or txt.endswith("?")):
+                continue
+            parts.append(self._sanitize_text(txt))
+            if len(parts) >= 40:
+                break
+        content = "\n\n".join(parts)
+        # Relaxed second pass if too short
+        if len(content) < 250:
+            parts = []
+            for p in paragraphs:
+                try:
+                    parent_name = (p.parent.name or "").lower() if p.parent else ""
+                    if parent_name in {"script", "style", "template", "noscript"}:
+                        continue
+                    txt = (p.get_text(" ", strip=True) or "").strip()
+                except Exception:
+                    txt = ""
+                if not txt:
+                    continue
+                if should_skip_text(txt):
+                    continue
+                parts.append(self._sanitize_text(txt))
+                if len(parts) >= 40:
+                    break
+            content = "\n\n".join(parts)
+        # Fallback to original broad selectors if still empty
+        if not content:
+            parts = []
+            for sel in self.SELECTORS["content"]:
+                try:
+                    for p in soup.select(sel):
+                        parent_name = (p.parent.name or "").lower() if p.parent else ""
+                        if parent_name in {"script", "style", "template", "noscript"}:
+                            continue
+                        txt = (p.get_text(" ", strip=True) or "").strip()
+                        if not txt:
+                            continue
+                        if should_skip_text(txt):
+                            continue
+                        parts.append(self._sanitize_text(txt))
+                        if len(parts) >= 40:
+                            break
+                    if parts:
+                        break
+                except Exception:
+                    continue
+            content = "\n\n".join(parts)
+        # Meta description fallback
+        if len(content) < 120:
+            try:
+                meta = soup.select_one("meta[property='og:description']") or soup.select_one("meta[name='description']")
+                if meta:
+                    desc = (meta.get("content") or "").strip()
+                    if desc and ("{{" not in desc and "}}" not in desc) and not any(p.search(desc) for p in header_skip_patterns):
+                        content = desc if not content else content + "\n\n" + desc
+            except Exception:
+                pass
+        # Final text fallback: take top-level text from container
+        if len(content) < 120:
+            try:
+                text = container.get_text(" ", strip=True)
+                if text and ("{{" not in text and "}}" not in text):
+                    # Remove obvious header tokens
+                    lines = [ln for ln in text.splitlines() if ln.strip() and not should_skip_text(ln.strip())]
+                    content = ("\n\n".join(lines))[:1500]
+            except Exception:
+                pass
+        # Cap to avoid oversized rows
+        return (content or "")[:20000]
 
     def _parse_published(self, raw: Optional[str]) -> Optional[str]:
         if not raw:
@@ -350,106 +500,163 @@ class ManilaBulletinScraper:
 
     def _scrape_article(self, url: str, browser: Browser) -> Optional[NormalizedArticle]:
         try:
-            context = browser.new_context(
-                user_agent=self.USER_AGENT,
-                extra_http_headers={"Referer": self.BASE_URL}
-            )
-            page = context.new_page()
-            page.set_default_navigation_timeout(40_000)
-            page.set_default_timeout(40_000)
-            self._human_delay()
-            try:
-                page.goto(url, wait_until="domcontentloaded")
-            except Exception:
-                page.goto(url)
-                page.wait_for_load_state("domcontentloaded", timeout=15_000)
-            soup = BeautifulSoup(page.content(), "html.parser")
-            jsonld = self._extract_json_ld(soup)
+            attempts = 0
+            last_error: Optional[Exception] = None
+            while attempts < 2:
+                attempts += 1
+                context = browser.new_context(
+                    user_agent=self.USER_AGENT,
+                    extra_http_headers={"Referer": self.BASE_URL}
+                )
+                page = context.new_page()
+                # Block heavy/static resources and third-party requests to reduce timeouts
+                try:
+                    page.route("**/*", lambda route: (
+                        route.abort()
+                        if any(route.request.url.lower().endswith(ext) for ext in (
+                            ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".ico", ".css", ".woff", ".woff2", ".ttf", ".otf"))
+                        or (not route.request.url.startswith(self.BASE_URL))
+                        else route.continue_()
+                    ))
+                except Exception:
+                    pass
+                page.set_default_navigation_timeout(30_000)
+                page.set_default_timeout(30_000)
+                self._human_delay()
+                try:
+                    # Prefer domcontentloaded for speed; load can hang on ads/analytics
+                    page.goto(url, wait_until="domcontentloaded")
+                except Exception as e:
+                    last_error = e
+                    try:
+                        page.goto(url)
+                        page.wait_for_load_state("domcontentloaded", timeout=15_000)
+                    except Exception as e2:
+                        last_error = e2
+                        context.close()
+                        continue
+                # Attempt to wait for some content to appear but don't block too long
+                try:
+                    page.wait_for_selector("article, .entry-content, .post-content", timeout=5_000)
+                except Exception:
+                    pass
+                soup = BeautifulSoup(page.content(), "html.parser")
+                jsonld = self._extract_json_ld(soup)
 
-            title = jsonld.get("headline") or self._extract_with_fallbacks(soup, self.SELECTORS["title"]) or ""
-            if not title:
+                title = jsonld.get("headline") or self._extract_with_fallbacks(soup, self.SELECTORS["title"]) or ""
+                if not title:
+                    context.close()
+                    continue
+                content = self._sanitize_text(jsonld.get("articleBody") or self._extract_content(soup))
+                raw_published = jsonld.get("datePublished") or self._extract_with_fallbacks(soup, self.SELECTORS["published_date"]) or None
+                published_iso = self._parse_published(raw_published)
+                article = build_article(
+                    source="Manila Bulletin",
+                    category="General",
+                    title=title,
+                    url=url,
+                    content=content,
+                    published_at=published_iso,
+                )
                 context.close()
-                return None
-            content = self._sanitize_text(jsonld.get("articleBody") or self._extract_content(soup))
-            raw_published = jsonld.get("datePublished") or self._extract_with_fallbacks(soup, self.SELECTORS["published_date"]) or None
-            published_iso = self._parse_published(raw_published)
-            article = build_article(
-                source="Manila Bulletin",
-                category="General",
-                title=title,
-                url=url,
-                content=content,
-                published_at=published_iso,
-            )
-            context.close()
-            return article
+                return article
+            # All attempts failed
+            if last_error:
+                logger.error(f"Manila Bulletin scrape failed for {url}: {last_error}")
+            return None
         except Exception as e:
             logger.error(f"Manila Bulletin scrape failed for {url}: {e}")
             return None
+
+
+    def _discover_links_from_homepage(self, max_links: int = 20) -> List[str]:
+        """Discover links directly from Manila Bulletin homepage."""
+        try:
+            data = self._fetch_url(self.BASE_URL)
+            if not data:
+                return []
+            
+            html = data.decode('utf-8', errors='ignore')
+            links = self._discover_links_from_html(html)
+            return links[:max_links]
+        except Exception as e:
+            logger.error(f'Homepage discovery failed: {e}')
+            return []
 
     def scrape_latest(self, max_articles: int = 3) -> ScrapingResult:
         start = time.time()
         articles: List[NormalizedArticle] = []
         errors: List[str] = []
         discovered: List[str] = []
+        
+        # 1) First try homepage discovery (fastest and most reliable)
+        homepage_links = []
         try:
-            # 1) Prefer conservative section HTML discovery (strict caps)
-            html_links_found = 0
-            with launch_browser() as browser:
-                for path in self.START_PATHS[:2]:  # only first 2 sections
-                    try:
-                        self._human_delay()
-                        context = browser.new_context(
-                            user_agent=self.USER_AGENT,
-                            extra_http_headers={"Referer": self.BASE_URL}
-                        )
-                        page = context.new_page()
-                        page.set_default_navigation_timeout(20_000)
-                        page.set_default_timeout(20_000)
-                        url = urljoin(self.BASE_URL, path)
+            logger.info('Trying homepage discovery')
+            homepage_links = self._discover_links_from_homepage(max_links=max_articles * 10)
+            discovered.extend(homepage_links)
+            logger.info(f'Homepage found {len(homepage_links)} links')
+        except Exception as e:
+            errors.append(f'homepage:{e}')
+            logger.error(f'Homepage discovery failed: {e}')
+
+        # 2) Then try section HTML discovery if still low
+        html_links_found = 0
+        if len(discovered) < max_articles * 2:
+            try:
+                with launch_browser() as browser:
+                    for path in self.START_PATHS[:2]:  # only first 2 sections
                         try:
-                            page.goto(url, wait_until="networkidle")
-                        except Exception:
-                            page.goto(url, wait_until="domcontentloaded")
-                        new_links = self._discover_links_from_html(page.content())[:5]  # cap per section
-                        html_links_found += len(new_links)
-                        discovered.extend(new_links)
-                        context.close()
-                    except Exception as e:
-                        errors.append(f"discover@{path}:{e}")
-                        try:
+                            self._human_delay()
+                            context = browser.new_context(
+                                user_agent=self.USER_AGENT,
+                                extra_http_headers={'Referer': self.BASE_URL}
+                            )
+                            page = context.new_page()
+                            page.set_default_navigation_timeout(20_000)
+                            page.set_default_timeout(20_000)
+                            url = urljoin(self.BASE_URL, path)
+                            try:
+                                page.goto(url, wait_until='networkidle')
+                            except Exception:
+                                page.goto(url, wait_until='domcontentloaded')
+                            new_links = self._discover_links_from_html(page.content())[:5]  # cap per section
+                            html_links_found += len(new_links)
+                            discovered.extend(new_links)
                             context.close()
-                        except Exception:
-                            pass
-                # 2) Then Google News hints if still low
-                gnews_links = []
-                if len(discovered) < max_articles * 2:
-                    try:
-                        gnews_links = self._discover_links_from_google_news(max_links=max_articles * 10)
-                        discovered.extend(gnews_links)
-                    except Exception as e:
-                        errors.append(f"gnews:{e}")
-                # 3) Finally sitemaps if not cooled down
-                sitemap_links = []
-                if len(discovered) < max_articles * 2:
-                    try:
-                        sitemap_links = self._discover_links_from_sitemaps(max_links=max_articles * 10)
-                        discovered.extend(sitemap_links)
-                    except Exception as e:
-                        errors.append(f"sitemaps:{e}")
+                        except Exception as e:
+                            errors.append(f'discover@{path}:{e}')
+                            try:
+                                context.close()
+                            except Exception:
+                                pass
+            except Exception as e:
+                errors.append(f'sections:{e}')
 
-                # Dedup and validate
-                candidates: List[str] = []
-                seen = set()
-                for u in discovered:
-                    if u not in seen and self._validate_url(u):
-                        seen.add(u)
-                        candidates.append(u)
+        # 3) Finally sitemaps if not cooled down
+        sitemap_links = []
+        if len(discovered) < max_articles * 2:
+            try:
+                sitemap_links = self._discover_links_from_sitemaps(max_links=max_articles * 10)
+                discovered.extend(sitemap_links)
+            except Exception as e:
+                errors.append(f'sitemaps:{e}')
 
-                logger.info(
-                    f"MB discovery: html={html_links_found}, gnews={len(gnews_links)}, sitemaps={len(sitemap_links)}, candidates={len(candidates)}"
-                )
+        # Dedup and validate
+        candidates: List[str] = []
+        seen = set()
+        for u in discovered:
+            if u not in seen and self._validate_url(u):
+                seen.add(u)
+                candidates.append(u)
 
+        logger.info(
+            f'MB discovery: homepage={len(homepage_links)}, html={html_links_found}, sitemaps={len(sitemap_links)}, candidates={len(candidates)}'
+        )
+
+        # Scrape articles
+        try:
+            with launch_browser() as browser:
                 for url in candidates:
                     if len(articles) >= max_articles:
                         break
@@ -458,7 +665,8 @@ class ManilaBulletinScraper:
                         articles.append(art)
         except Exception as e:
             errors.append(str(e))
+        
         duration = time.time() - start
-        perf = {"duration_s": round(duration, 2), "count": len(articles)}
-        meta = {"domain": "mb.com.ph", "candidates": len(discovered)}
+        perf = {'duration_s': round(duration, 2), 'count': len(articles)}
+        meta = {'domain': 'mb.com.ph', 'candidates': len(discovered)}
         return ScrapingResult(articles=articles, errors=errors, performance=perf, metadata=meta) 

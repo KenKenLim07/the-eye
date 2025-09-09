@@ -10,29 +10,6 @@ from app.pipeline.normalize import build_article, NormalizedArticle
 import httpx
 import brotli
 from app.scrapers.utils import resolve_category_pair
-# Feature flags (env-driven) for gradual rollout
-import os
-
-
-def _env_flag(name: str, default: bool = False) -> bool:
-    val = os.getenv(name, str(default)).strip().lower()
-    return val in {"1", "true", "yes", "on"}
-
-USE_ADV_HEADERS = _env_flag("USE_ADV_HEADERS", False)
-USE_HUMAN_DELAY = _env_flag("USE_HUMAN_DELAY", False)
-USE_URL_FILTER = _env_flag("USE_URL_FILTER", False)
-
-try:
-    from app.scrapers.utils import (
-        get_advanced_stealth_headers,
-        get_human_like_delay,
-        is_valid_news_url,
-    )
-except Exception:
-    get_advanced_stealth_headers = None
-    get_human_like_delay = None
-    is_valid_news_url = None
-
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

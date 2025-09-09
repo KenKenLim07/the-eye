@@ -10,6 +10,29 @@ from app.scrapers.base import launch_browser
 import random
 from app.scrapers.utils import resolve_category_pair
 
+# Feature flags (env-driven) for gradual rollout
+import os
+
+def _env_flag(name: str, default: bool = False) -> bool:
+    val = os.getenv(name, str(default)).strip().lower()
+    return val in {"1", "true", "yes", "on"}
+
+USE_ADV_HEADERS = _env_flag("USE_ADV_HEADERS", False)
+USE_HUMAN_DELAY = _env_flag("USE_HUMAN_DELAY", False)
+USE_URL_FILTER = _env_flag("USE_URL_FILTER", False)
+
+# Optional advanced utils
+try:
+    from app.scrapers.utils import (
+        get_advanced_stealth_headers,
+        get_human_like_delay,
+        is_valid_news_url,
+    )
+except Exception:
+    get_advanced_stealth_headers = None
+    get_human_like_delay = None
+    is_valid_news_url = None
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -28,9 +51,9 @@ class InquirerScraper:
     USER_AGENT = "Mozilla/5.0 (compatible; PH-Eye-NewsBot/1.0; +https://github.com/your-repo)"
     
     # Rate limiting
-    MIN_DELAY = 5.0  # seconds between requests (increased for stealth)
+    MIN_DELAY = 12.0  # seconds between requests (increased for stealth)
     MAX_RETRIES = 3
-    MAX_DELAY = 12.0  # randomized upper bound for human-like delays
+    MAX_DELAY = 25.0  # randomized upper bound for human-like delays
     
     # Enhanced selectors with more specific targeting
     SELECTORS = {
@@ -72,7 +95,10 @@ class InquirerScraper:
     
     def _human_delay(self):
         """Random delay to mimic human browsing behavior."""
-        delay = random.uniform(self.MIN_DELAY, self.MAX_DELAY)
+        if USE_HUMAN_DELAY and get_human_like_delay is not None:
+            delay = get_human_like_delay()
+        else:
+            delay = random.uniform(self.MIN_DELAY, self.MAX_DELAY)
         logger.info(f"Waiting {delay:.1f}s before next request (stealth mode)")
         time.sleep(delay)
         
@@ -93,6 +119,11 @@ class InquirerScraper:
         if not parsed.netloc.endswith('inquirer.net'):
             logger.warning(f"Blocked external URL: {url}")
             return False
+
+        if USE_URL_FILTER and is_valid_news_url is not None:
+            if not is_valid_news_url(url, 'inquirer.net'):
+                return False
+            return True
             
         return True
     
@@ -202,8 +233,15 @@ class InquirerScraper:
     
     def _new_context(self, browser: Browser):
         """Create browser context with resource blocking for better performance."""
+        if USE_ADV_HEADERS and get_advanced_stealth_headers is not None:
+            headers = get_advanced_stealth_headers()
+            headers.setdefault('Referer', self.BASE_URL)
+            user_agent = headers.get('User-Agent', self.USER_AGENT)
+        else:
+            headers = {'Referer': self.BASE_URL}
+            user_agent = self.USER_AGENT
         context = browser.new_context(
-            user_agent=self.USER_AGENT,
+            user_agent=user_agent,
             locale='en-PH',
             viewport={"width": 1366, "height": 768},
             java_script_enabled=True,
@@ -225,13 +263,16 @@ class InquirerScraper:
         try:
             context = self._new_context(browser)
             page = context.new_page()
-            page.set_extra_http_headers({
-                'User-Agent': self.USER_AGENT,
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.5',
-                'Accept-Encoding': 'gzip, deflate',
-                'Connection': 'keep-alive',
-            })
+            page.set_extra_http_headers(
+                get_advanced_stealth_headers() if (USE_ADV_HEADERS and get_advanced_stealth_headers is not None) else {
+                    'User-Agent': self.USER_AGENT,
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                    'Accept-Language': 'en-US,en;q=0.5',
+                    'Accept-Encoding': 'gzip, deflate',
+                    'Connection': 'keep-alive',
+                    'Referer': self.BASE_URL,
+                }
+            )
             
             # Set reasonable timeouts
             page.set_default_timeout(30000)
@@ -311,6 +352,7 @@ class InquirerScraper:
             with launch_browser() as browser:
                 # Scrape homepage for article links
                 logger.info("Starting Inquirer scraping session")
+                logger.info(f"Inquirer flags USE_ADV_HEADERS={USE_ADV_HEADERS}, USE_HUMAN_DELAY={USE_HUMAN_DELAY}, USE_URL_FILTER={USE_URL_FILTER}")
                 
                 # Get homepage
                 context = self._new_context(browser)

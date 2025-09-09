@@ -15,29 +15,6 @@ import json
 import httpx
 from app.scrapers.utils import resolve_category_pair
 
-# Feature flags (env-driven) for gradual rollout
-import os
-
-def _env_flag(name: str, default: bool = False) -> bool:
-    val = os.getenv(name, str(default)).strip().lower()
-    return val in {"1", "true", "yes", "on"}
-
-USE_ADV_HEADERS = _env_flag("USE_ADV_HEADERS", False)
-USE_HUMAN_DELAY = _env_flag("USE_HUMAN_DELAY", False)
-USE_URL_FILTER = _env_flag("USE_URL_FILTER", False)
-
-# Optional advanced utils
-try:
-    from app.scrapers.utils import (
-        get_advanced_stealth_headers,
-        get_human_like_delay,
-        is_valid_news_url,
-    )
-except Exception:
-    get_advanced_stealth_headers = None
-    get_human_like_delay = None
-    is_valid_news_url = None
-
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -75,8 +52,8 @@ class RapplerScraper:
     ]
 
     # Respectful crawling delays
-    MIN_DELAY = 10.0
-    MAX_DELAY = 20.0
+    MIN_DELAY = 4.0
+    MAX_DELAY = 8.0
 
     # Content selectors for Rappler
     SELECTORS = {
@@ -123,10 +100,7 @@ class RapplerScraper:
         return random.choice(self.USER_AGENTS)
 
     def _human_delay(self):
-        if USE_HUMAN_DELAY and get_human_like_delay is not None:
-            delay = get_human_like_delay()
-        else:
-            delay = random.uniform(self.MIN_DELAY, self.MAX_DELAY)
+        delay = random.uniform(self.MIN_DELAY, self.MAX_DELAY)
         logger.info(f"Rappler: stealth delay {delay:.1f}s")
         time.sleep(delay)
 
@@ -140,14 +114,6 @@ class RapplerScraper:
         if not ("rappler.com" in parsed.netloc):
             return False
         
-        if USE_URL_FILTER and is_valid_news_url is not None:
-            # Use advanced validator with domain guard
-            if not is_valid_news_url(url, "rappler.com"):
-                return False
-            # Passed advanced checks
-            return True
-        
-        # Legacy checks (fallback)
         # Filter out non-article URLs
         blacklist_patterns = [
             r"/feed/",
@@ -301,20 +267,15 @@ class RapplerScraper:
     def _fetch_with_httpx(self, url: str, timeout: int = 15) -> Optional[str]:
         """Fetch URL with httpx and stealth headers."""
         try:
-            if USE_ADV_HEADERS and get_advanced_stealth_headers is not None:
-                headers = get_advanced_stealth_headers()
-                # Ensure referer points to Rappler
-                headers.setdefault('Referer', self.BASE_URL)
-            else:
-                headers = {
-                    "User-Agent": self._get_random_ua(),
-                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-                    "Accept-Language": "en-US,en;q=0.5",
-                    "Accept-Encoding": "gzip, deflate, br",
-                    "Referer": self.BASE_URL,
-                    "Connection": "keep-alive",
-                    "Upgrade-Insecure-Requests": "1",
-                }
+            headers = {
+                "User-Agent": self._get_random_ua(),
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.5",
+                "Accept-Encoding": "gzip, deflate, br",
+                "Referer": self.BASE_URL,
+                "Connection": "keep-alive",
+                "Upgrade-Insecure-Requests": "1",
+            }
             
             with httpx.Client(timeout=timeout, follow_redirects=True) as client:
                 response = client.get(url, headers=headers)
@@ -393,17 +354,9 @@ class RapplerScraper:
             with launch_browser() as browser:
                 for section in self.SECTIONS[:3]:  # Limit to first 3 sections
                     try:
-                        if USE_ADV_HEADERS and get_advanced_stealth_headers is not None:
-                            headers = get_advanced_stealth_headers()
-                            headers.setdefault('Referer', self.BASE_URL)
-                            user_agent = headers.get('User-Agent', self._get_random_ua())
-                        else:
-                            user_agent = self._get_random_ua()
-                            headers = {"Referer": self.BASE_URL}
-                        
                         context = browser.new_context(
-                            user_agent=user_agent,
-                            extra_http_headers=headers
+                            user_agent=self._get_random_ua(),
+                            extra_http_headers={"Referer": self.BASE_URL}
                         )
                         page = context.new_page()
                         
@@ -476,19 +429,11 @@ class RapplerScraper:
     def _scrape_article(self, url: str, browser: Browser) -> Optional[NormalizedArticle]:
         """Scrape individual article with stealth techniques."""
         try:
-            if USE_ADV_HEADERS and get_advanced_stealth_headers is not None:
-                headers = get_advanced_stealth_headers()
-                headers.setdefault('Referer', self.BASE_URL)
-                user_agent = headers.get('User-Agent', self._get_random_ua())
-            else:
-                user_agent = self._get_random_ua()
-                headers = {"Referer": self.BASE_URL}
-            
             context = browser.new_context(
-                user_agent=user_agent,
+                user_agent=self._get_random_ua(),
                 locale="en-PH",
                 timezone_id="Asia/Manila",
-                extra_http_headers=headers
+                extra_http_headers={"Referer": self.BASE_URL}
             )
             page = context.new_page()
             
@@ -565,8 +510,6 @@ class RapplerScraper:
         start_time = time.time()
         articles = []
         errors = []
-        
-        logger.info(f"Rappler: flags USE_ADV_HEADERS={USE_ADV_HEADERS}, USE_HUMAN_DELAY={USE_HUMAN_DELAY}, USE_URL_FILTER={USE_URL_FILTER}")
         
         # Multi-source discovery strategy
         all_links = []
