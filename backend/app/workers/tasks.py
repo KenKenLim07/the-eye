@@ -63,7 +63,7 @@ def scrape_inquirer_task(self):
         # Run the scraper
         scraper = InquirerScraper()
         import random
-        result = scraper.scrape_latest(max_articles=12)
+        result = scraper.scrape_latest(max_articles=10)
         
         # Log scraping results
         logger.info(f"Task {task_id} - Scraping completed: {len(result.articles)} articles, {len(result.errors)} errors")
@@ -141,7 +141,7 @@ def scrape_gma_task(self):
     try:
         scraper = GMAScraper()
         import random
-        result = scraper.scrape_latest(max_articles=12)
+        result = scraper.scrape_latest(max_articles=10)
         logger.info(f"Task {task_id} - GMA scraped {len(result.articles)} articles, {len(result.errors)} errors")
         if result.articles:
             store_result = insert_articles(result.articles)
@@ -189,7 +189,7 @@ def scrape_philstar_task(self):
     try:
         scraper = PhilStarScraper()
         import random
-        result = scraper.scrape_latest(max_articles=12)
+        result = scraper.scrape_latest(max_articles=10)
         logger.info(f"Task {task_id} - Philstar scraped {len(result.articles)} articles, {len(result.errors)} errors")
         if result.articles:
             store_result = insert_articles(result.articles)
@@ -238,7 +238,7 @@ def scrape_manila_bulletin_task(self):
     try:
         scraper = ManilaBulletinScraper()
         import random
-        result = scraper.scrape_latest(max_articles=random.randint(2, 4))  # More conservative range
+        result = scraper.scrape_latest(max_articles=10)  # More conservative range
         logger.info(f"Task {task_id} - Manila Bulletin scraped {len(result.articles)} articles, {len(result.errors)} errors")
         if result.articles:
             store_result = insert_articles(result.articles)
@@ -288,7 +288,7 @@ def scrape_rappler_task(self):
     try:
         import random
         scraper = RapplerScraper()
-        result = scraper.scrape_latest(max_articles=random.randint(3, 5))
+        result = scraper.scrape_latest(max_articles=10)
         
         logger.info(f"Task {task_id} - Rappler scraped {len(result.articles)} articles, {len(result.errors)} errors")
         
@@ -359,7 +359,7 @@ def scrape_sunstar_task(self):
     try:
         scraper = SunstarScraper()
         import random
-        result = scraper.scrape_all(max_articles=random.randint(3, 5))  # Conservative range like other scrapers
+        result = scraper.scrape_all(max_articles=10)  # Conservative range like other scrapers
         
         if result.articles:
             # Store articles in database
@@ -416,7 +416,7 @@ def scrape_manila_times_task(self):
     try:
         scraper = ManilaTimesScraper()
         import random
-        result = scraper.scrape_latest(max_articles=12)
+        result = scraper.scrape_latest(max_articles=10)
         
         logger.info(f"Task {task_id} - Manila Times scraped {len(result.articles)} articles, {len(result.errors)} errors")
         

@@ -58,10 +58,7 @@ class InquirerScraper:
     # Enhanced selectors with more specific targeting
     SELECTORS = {
         "article_links": [
-            "article h2 a",           # Primary selector
-            "h2 a",                   # Fallback 1
-            ".entry-title a",         # Fallback 2
-            "a[href*='/news/']"      # Fallback 3 (broad)
+            "a"  # Catch all links, filter by URL validation
         ],
         "title": [
             "h1.entry-title",
@@ -107,25 +104,62 @@ class InquirerScraper:
         logger.info(f"Performance - {operation}: {duration:.2f}s")
         
     def _validate_url(self, url: str) -> bool:
-        """Security: Validate URLs before processing."""
+        """Security: minimal validation – only allow inquirer.net domains with whitelisted sections."""
         if not url:
             return False
-            
         parsed = urlparse(url)
         if not parsed.scheme or not parsed.netloc:
             return False
-            
-        # Ensure we only scrape from inquirer.net
+        # Only allow *.inquirer.net and subdomains
         if not parsed.netloc.endswith('inquirer.net'):
-            logger.warning(f"Blocked external URL: {url}")
             return False
-
-        if USE_URL_FILTER and is_valid_news_url is not None:
-            if not is_valid_news_url(url, 'inquirer.net'):
-                return False
+        # Exclude non-news subdomains
+        excluded_subdomains = (
+            'radyo.inquirer.net',
+            'pep.inquirer.net',
+        )
+        if parsed.netloc in excluded_subdomains:
+            return False
+        # Reject obvious non-article utility pages
+        blocked_paths = (
+            '/tag/', '/author/', '/search', '/privacy-policy', '/user-agreement', '/contact', '/newsletter',
+            '/job-openings', '/article-index', '/fullfeed'
+        )
+        if any(bp in parsed.path for bp in blocked_paths):
+            return False
+        # Whitelist: allow only key sections/domains
+        allowed_section_prefixes = (
+            '/news/',
+            '/headlines/',
+            '/nation/',
+            '/business/',
+            '/sports/',
+            '/entertainment/',
+            '/lifestyle/',
+            '/opinion/',
+            '/technology/',
+            '/globalnation/',
+        )
+        allowed_news_subdomains = (
+            'newsinfo.inquirer.net',
+            'globalnation.inquirer.net',
+            'business.inquirer.net',
+            'sports.inquirer.net',
+            'entertainment.inquirer.net',
+            'lifestyle.inquirer.net',
+            'opinion.inquirer.net',
+            'technology.inquirer.net',
+        )
+        # Allow WP-style permalinks: https://newsinfo.inquirer.net/?p=ID
+        if parsed.netloc == 'newsinfo.inquirer.net' and parsed.path == '/' and 'p=' in (parsed.query or ''):
             return True
-            
-        return True
+        # If on an allowed subdomain, accept if path is non-empty
+        if parsed.netloc in allowed_news_subdomains:
+            return parsed.path not in ('', '/')
+        # Otherwise, require allowed section prefixes in the path
+        if any(parsed.path.startswith(prefix) for prefix in allowed_section_prefixes):
+            return True
+        return False
     
     def _sanitize_text(self, text: str) -> str:
         """Security: Sanitize extracted text content."""
@@ -222,11 +256,12 @@ class InquirerScraper:
                 links = soup.select(selector)
                 for link in links:
                     href = link.get('href')
-                    if href and self._validate_url(href):
+                    if href:
                         full_url = urljoin(self.BASE_URL, href)
-                        urls.add(full_url)
+                        if self._validate_url(full_url):
+                            urls.add(full_url)
             except Exception as e:
-                logger.warning(f"Failed to extract links with {selector}: {e}")
+                logger.error(f"Selector '{selector}' error: {e}")
                 continue
                 
         return list(urls)
@@ -342,7 +377,7 @@ class InquirerScraper:
             logger.error(f"Failed to scrape {url}: {e}")
             return None
     
-    def scrape_latest(self, max_articles: int = 3) -> ScrapingResult:
+    def scrape_latest(self, max_articles: int = 10) -> ScrapingResult:
         """Main scraping method with comprehensive error handling and monitoring."""
         start_time = time.time()
         articles = []
@@ -368,7 +403,18 @@ class InquirerScraper:
                     soup = BeautifulSoup(page.content(), 'html.parser')
                     article_urls = self._extract_article_links(soup)
                     
-                    logger.info(f"Found {len(article_urls)} article URLs")
+                    # Debug: log some URLs found
+                    if article_urls:
+                        logger.info(f"Found {len(article_urls)} article URLs")
+                        logger.info(f"Sample URLs: {article_urls[:3]}")
+                    else:
+                        logger.warning("No article URLs found - checking selectors")
+                        # Debug: check what links exist
+                        all_links = soup.find_all('a', href=True)
+                        logger.info(f"Total links found: {len(all_links)}")
+                        if all_links:
+                            sample_links = [link.get('href') for link in all_links[:5]]
+                            logger.info(f"Sample links: {sample_links}")
                     
                     # Scrape each article
                     for i, url in enumerate(article_urls[:max_articles]):
@@ -432,7 +478,7 @@ class InquirerScraper:
 def scrape_inquirer_latest() -> List[NormalizedArticle]:
     """Entry point for Celery tasks - returns just the articles."""
     scraper = InquirerScraper()
-    result = scraper.scrape_latest(max_articles=3)
+    result = scraper.scrape_latest(max_articles=10)
     
     # Log results for monitoring
     logger.info(f"Inquirer scraping result: {result.metadata}")
