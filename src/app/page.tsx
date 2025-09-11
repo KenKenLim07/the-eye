@@ -39,9 +39,9 @@ export default async function Home() {
             sourceValue="Manila Times"
           />
           <ArticleRowServer 
-            articles={articlesBySource["Philstar"] || []} 
+            articles={articlesBySource["PhilStar"] || []} 
             title="Philstar" 
-            sourceValue="Philstar" 
+            sourceValue="PhilStar" 
           />
           <ArticleRowServer 
             articles={articlesBySource["Sunstar"] || []} 

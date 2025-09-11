@@ -1,7 +1,7 @@
 import time
 import logging
 import random
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 from urllib.parse import urljoin, urlparse
 from dataclasses import dataclass
 from playwright.sync_api import Browser
@@ -292,6 +292,146 @@ class GMAScraper:
             except Exception:
                 return False
 
+    def _extract_gma_category(self, url: str, soup: BeautifulSoup) -> Tuple[str, Optional[str]]:
+        """Extract category specifically for GMA's structure."""
+        raw_category = None
+        
+        # 1. Try to extract from URL structure first (most reliable for GMA)
+        if url:
+            try:
+                from urllib.parse import urlparse
+                parsed = urlparse(url)
+                path_parts = [p for p in parsed.path.split('/') if p]
+                
+                if path_parts and len(path_parts) >= 2:
+                    # GMA URLs: /news/topstories/nation/... or /news/business/... or /news/sports/...
+                    if path_parts[0] == 'news' and len(path_parts) > 1:
+                        main_category = path_parts[1].lower()
+                        category_map = {
+                            'topstories': 'News',
+                            'business': 'Business',
+                            'sports': 'Sports',
+                            'entertainment': 'Entertainment',
+                            'world': 'World',
+                            'lifestyle': 'Lifestyle',
+                            'opinion': 'Opinion',
+                            'nation': 'Nation',
+                            'politics': 'Politics',
+                            'metro': 'Metro',
+                            'cebu': 'Cebu',
+                            'davao': 'Davao',
+                            'bohol': 'Bohol',
+                            'pampanga': 'Pampanga',
+                            'baguio': 'Baguio',
+                            'zamboanga': 'Zamboanga',
+                            'iloilo': 'Iloilo',
+                            'tacloban': 'Tacloban',
+                            'general-santos': 'General Santos',
+                            'lotto': 'Lotto',  # GMA has lotto results
+                            'weather': 'Weather',
+                            'technology': 'Technology',
+                            'health': 'Health',
+                            'education': 'Education'
+                        }
+                        
+                        if main_category in category_map:
+                            raw_category = category_map[main_category]
+                        
+                        # For topstories, check the sub-category
+                        if main_category == 'topstories' and len(path_parts) > 2:
+                            sub_category = path_parts[2].lower()
+                            if sub_category in category_map:
+                                raw_category = category_map[sub_category]
+            except Exception:
+                pass
+        
+        # 2. Extract from meta tags (GMA uses standard meta tags)
+        if not raw_category:
+            try:
+                # Check for article:section meta tag
+                meta_section = soup.find('meta', property='article:section')
+                if meta_section and meta_section.get('content'):
+                    raw_category = meta_section.get('content').strip()
+                
+                # Check for og:type and other meta tags
+                if not raw_category:
+                    meta_type = soup.find('meta', property='og:type')
+                    if meta_type and meta_type.get('content') == 'article':
+                        # Try to extract from breadcrumbs or other indicators
+                        pass
+            except Exception:
+                pass
+        
+        # 3. Extract from breadcrumbs (if available)
+        if not raw_category:
+            try:
+                for selector in ['nav.breadcrumb a', '.breadcrumb a', '.breadcrumbs a', 'ol.breadcrumb li a', '.breadcrumb-list a']:
+                    breadcrumb = soup.select_one(selector)
+                    if breadcrumb:
+                        text = breadcrumb.get_text(strip=True)
+                        if text and text.lower() not in ['home', 'gma', 'gmanetwork', 'news']:
+                            raw_category = text
+                            break
+            except Exception:
+                pass
+        
+        # 4. Extract from page title (fallback)
+        if not raw_category:
+            try:
+                title_tag = soup.find('title')
+                if title_tag:
+                    title_text = title_tag.get_text()
+                    # Look for category indicators in title
+                    if '| GMA News Online' in title_text:
+                        # Extract category from title structure
+                        parts = title_text.split('|')
+                        if len(parts) > 1:
+                            category_part = parts[1].strip()
+                            if category_part and category_part != 'GMA News Online':
+                                raw_category = category_part
+            except Exception:
+                pass
+        
+        # Normalize the category
+        if raw_category:
+            # Clean up the category name
+            raw_category = raw_category.strip().title()
+            # Map common variations
+            if raw_category.lower() in ['topstories', 'top stories', 'headlines']:
+                normalized = 'News'
+            elif raw_category.lower() in ['business', 'biz', 'economy']:
+                normalized = 'Business'
+            elif raw_category.lower() in ['sports', 'sport']:
+                normalized = 'Sports'
+            elif raw_category.lower() in ['nation', 'national', 'politics']:
+                normalized = 'Nation'
+            elif raw_category.lower() in ['world', 'international']:
+                normalized = 'World'
+            elif raw_category.lower() in ['entertainment', 'showbiz']:
+                normalized = 'Entertainment'
+            elif raw_category.lower() in ['lifestyle', 'life']:
+                normalized = 'Lifestyle'
+            elif raw_category.lower() in ['opinion', 'editorial']:
+                normalized = 'Opinion'
+            elif raw_category.lower() in ['lotto', 'lottery']:
+                normalized = 'Lotto'
+            elif raw_category.lower() in ['weather', 'climate']:
+                normalized = 'Weather'
+            elif raw_category.lower() in ['technology', 'tech']:
+                normalized = 'Technology'
+            elif raw_category.lower() in ['health', 'medical']:
+                normalized = 'Health'
+            elif raw_category.lower() in ['education', 'school']:
+                normalized = 'Education'
+            else:
+                normalized = raw_category
+        else:
+            normalized = 'General'
+            raw_category = None
+        
+        return normalized, raw_category
+
+
     def _scrape_article(self, url: str, browser: Browser) -> Optional[NormalizedArticle]:
         try:
             context = self._new_context(browser)
@@ -320,7 +460,7 @@ class GMAScraper:
             content = self._extract_content(soup, url)
             raw_published = self._extract_with_fallbacks(soup, self.SELECTORS["published_date"]) or None
             published_iso = self._parse_published(raw_published)
-            norm_cat, raw_cat = resolve_category_pair(url, soup)
+            norm_cat, raw_cat = self._extract_gma_category(url, soup)
             article = build_article(
                 source="GMA",
                 title=title,

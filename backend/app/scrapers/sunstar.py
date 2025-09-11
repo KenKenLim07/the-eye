@@ -67,6 +67,75 @@ class SunstarScraper:
         "/general-santos/",
     ]
 
+    def _extract_sunstar_category(self, url: str, rss_category: Optional[str]) -> Tuple[str, Optional[str]]:
+        """Extract normalized and raw category for SunStar using URL + RSS hints.
+        Priority: URL path → RSS category → fallback 'General'."""
+        normalized = "General"
+        raw = None
+
+        try:
+            parsed = urlparse(url)
+            parts = [p for p in parsed.path.split('/') if p]
+            # Patterns:
+            # /{city}/local-news/... ; /{city}/business/... ; /{city}/sports/...
+            # /article/{id}/{city}/{section}/{slug}
+            city_or_prefix = parts[0].lower() if len(parts) >= 1 else None
+            section = None
+
+            if city_or_prefix == "article" and len(parts) >= 4:
+                # /article/1976093/davao/local-news/slug
+                section = parts[3].lower()
+            elif len(parts) >= 2:
+                # /cebu/local-news/slug  or /manila/business/slug
+                section = parts[1].lower()
+
+            # Map section keywords to canonical categories
+            section_map = {
+                "local-news": "Nation",
+                "nation": "Nation",
+                "business": "Business",
+                "sports": "Sports",
+                "opinion": "Opinion",
+                "world": "World",
+                "lifestyle": "Lifestyle",
+                "entertainment": "Entertainment",
+                "traffic": "Metro",
+            }
+
+            if section in section_map:
+                normalized = section_map[section]
+                raw = section.replace('-', ' ').title()
+            else:
+                # Fallback to city/region as raw when section unknown
+                if city_or_prefix and city_or_prefix not in {"article"}:
+                    raw = city_or_prefix.replace('-', ' ').title()
+                    # Treat city buckets as Nation/Local
+                    normalized = "Nation"
+        except Exception:
+            pass
+
+        # Use RSS category as a hint if URL did not provide anything specific
+        if (raw is None or normalized == "General") and rss_category:
+            hint = rss_category.strip()
+            raw = raw or hint
+            key = hint.lower()
+            if "business" in key:
+                normalized = "Business"
+            elif "sport" in key:
+                normalized = "Sports"
+            elif "opinion" in key or "editorial" in key:
+                normalized = "Opinion"
+            elif "world" in key:
+                normalized = "World"
+            elif "lifestyle" in key:
+                normalized = "Lifestyle"
+            elif "entertainment" in key or "showbiz" in key:
+                normalized = "Entertainment"
+            elif "nation" in key or "local" in key or "metro" in key:
+                normalized = "Nation"
+
+        return normalized, raw
+
     # User-Agent rotation for stealth
     USER_AGENTS = [
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
@@ -206,21 +275,18 @@ class SunstarScraper:
                         except:
                             published_at = datetime.now().isoformat()
 
-                    # Extract category from categories
-                    category = None
+                    # Prefer URL-derived category; fall back to RSS-provided category
+                    rss_category = None
                     categories = item.findall('category')
                     if categories:
-                        # Use the first category that's not too generic
                         for cat in categories:
                             if cat.text and cat.text not in ['Balita', 'News']:
-                                category = cat.text
+                                rss_category = cat.text
                                 break
-                        if not category and categories[0].text:
-                            category = categories[0].text
-                    
-                    # If no category from RSS, extract from URL
-                    if not category:
-                        category = self._extract_category_from_url(url)
+                        if not rss_category and categories[0].text:
+                            rss_category = categories[0].text
+
+                    norm_cat, raw_cat = self._extract_sunstar_category(url, rss_category)
                     
                     # Build article
                     article = build_article(
@@ -228,8 +294,9 @@ class SunstarScraper:
                         title=title,
                         url=url,
                         content=content,
-                        category=category,
-                        published_at=published_at
+                        category=norm_cat,
+                        published_at=published_at,
+                        raw_category=raw_cat,
                     )
                     
                     articles.append(article)
@@ -358,13 +425,15 @@ class SunstarScraper:
                 if self._is_article_url(article_url):
                     title = link.get_text(strip=True)
                     if title and len(title) > 10:  # Filter out short titles
+                        norm_cat, raw_cat = self._extract_sunstar_category(article_url, None)
                         article = build_article(
                             source="Sunstar",
                             title=title,
                             url=article_url,
                             content=None,
-                            category=self._extract_category_from_url(article_url),
-                            published_at=None
+                            category=norm_cat,
+                            published_at=None,
+                            raw_category=raw_cat,
                         )
                         articles.append(article)
 
@@ -398,7 +467,7 @@ class SunstarScraper:
                 
         return True
 
-    def scrape_all(self, max_articles: int = 3) -> ScrapingResult:
+    def scrape_all(self, max_articles: int = 10) -> ScrapingResult:
         """Main scraping method - combines RSS and section scraping."""
         logger.info("🚀 Starting comprehensive Sunstar scraping...")
         logger.info(f"Sunstar flags USE_ADV_HEADERS={USE_ADV_HEADERS}, USE_HUMAN_DELAY={USE_HUMAN_DELAY}, USE_URL_FILTER={USE_URL_FILTER}")
@@ -464,7 +533,7 @@ class SunstarScraper:
         )
 
 
-def scrape_sunstar_latest(max_articles: int = 3) -> ScrapingResult:
+def scrape_sunstar_latest(max_articles: int = 10) -> ScrapingResult:
     """Convenience function for scraping latest Sunstar articles."""
     scraper = SunstarScraper()
     return scraper.scrape_all(max_articles)

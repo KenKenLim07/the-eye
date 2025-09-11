@@ -298,125 +298,6 @@ class RapplerScraper:
             pass
         return data
 
-    def _extract_rappler_category(self, url: str, soup: BeautifulSoup) -> Tuple[str, Optional[str]]:
-        """Extract category specifically for Rappler's structure."""
-        raw_category = None
-        
-        # 1. Try to extract from URL structure first (most reliable)
-        if url:
-            try:
-                from urllib.parse import urlparse
-                parsed = urlparse(url)
-                path_parts = [p for p in parsed.path.split('/') if p]
-                
-                if path_parts:
-                    # Rappler URLs: /technology/article-name or /newsbreak/politics/article-name
-                    first_segment = path_parts[0].lower()
-                    category_map = {
-                        'technology': 'Technology',
-                        'tech': 'Technology', 
-                        'business': 'Business',
-                        'sports': 'Sports',
-                        'world': 'World',
-                        'entertainment': 'Entertainment',
-                        'nation': 'Nation',
-                        'newsbreak': 'News',
-                        'latest': 'News',
-                        'politics': 'Politics',
-                        'lifestyle': 'Lifestyle',
-                        'opinion': 'Opinion'
-                    }
-                    
-                    if first_segment in category_map:
-                        raw_category = category_map[first_segment]
-                    
-                    # For newsbreak URLs, check second segment
-                    if first_segment == 'newsbreak' and len(path_parts) > 1:
-                        second_segment = path_parts[1].lower()
-                        if second_segment in category_map:
-                            raw_category = category_map[second_segment]
-            except Exception:
-                pass
-        
-        # 2. Extract from JavaScript dataLayer (very reliable for Rappler)
-        if not raw_category:
-            try:
-                # Look for window.dataLayer.push with primary_category
-                for script in soup.find_all('script'):
-                    if script.string and 'primary_category' in script.string:
-                        script_text = script.string
-                        import re
-                        match = re.search(r'"primary_category":"([^"]+)"', script_text)
-                        if match:
-                            raw_category = match.group(1)
-                            break
-            except Exception:
-                pass
-        
-        # 3. Extract from JSON-LD structured data
-        if not raw_category:
-            try:
-                for script in soup.find_all('script', type='application/ld+json'):
-                    try:
-                        import json
-                        data = json.loads(script.string or '')
-                        if isinstance(data, dict) and '@graph' in data:
-                            for item in data['@graph']:
-                                if item.get('@type') == 'NewsArticle':
-                                    section = item.get('articleSection')
-                                    if section:
-                                        raw_category = section
-                                        break
-                        elif isinstance(data, dict) and data.get('@type') == 'NewsArticle':
-                            section = data.get('articleSection')
-                            if section:
-                                raw_category = section
-                    except:
-                        continue
-            except Exception:
-                pass
-        
-        # 4. Fallback to breadcrumbs
-        if not raw_category:
-            try:
-                for selector in ['nav.breadcrumb a', '.breadcrumb a', '.breadcrumbs a']:
-                    breadcrumb = soup.select_one(selector)
-                    if breadcrumb:
-                        text = breadcrumb.get_text(strip=True)
-                        if text and text.lower() not in ['home', 'latest news', 'rappler']:
-                            raw_category = text
-                            break
-            except Exception:
-                pass
-        
-        # Normalize the category
-        if raw_category:
-            # Clean up the category name
-            raw_category = raw_category.strip().title()
-            # Map common variations
-            if raw_category.lower() in ['tech', 'technology']:
-                normalized = 'Technology'
-            elif raw_category.lower() in ['biz', 'business']:
-                normalized = 'Business'
-            elif raw_category.lower() in ['sports', 'sport']:
-                normalized = 'Sports'
-            elif raw_category.lower() in ['world', 'international']:
-                normalized = 'World'
-            elif raw_category.lower() in ['entertainment', 'showbiz']:
-                normalized = 'Entertainment'
-            elif raw_category.lower() in ['nation', 'national', 'politics']:
-                normalized = 'Nation'
-            elif raw_category.lower() in ['news', 'newsbreak', 'latest']:
-                normalized = 'News'
-            else:
-                normalized = raw_category
-        else:
-            normalized = 'General'
-            raw_category = None
-        
-        return normalized, raw_category
-
-
     def _fetch_with_httpx(self, url: str, timeout: int = 15) -> Optional[str]:
         """Fetch URL with httpx and stealth headers."""
         try:
@@ -662,7 +543,7 @@ class RapplerScraper:
             published_at = self._parse_published_date(raw_date)
             
             # Build normalized article
-            norm_cat, raw_cat = self._extract_rappler_category(url, soup)
+            norm_cat, raw_cat = resolve_category_pair(url, soup)
             article = build_article(
                 source="Rappler",
                 title=title,

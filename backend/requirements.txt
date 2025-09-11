@@ -10,3 +10,4 @@ lxml==5.2.2
 playwright==1.46.0
 supabase==2.6.0
 celery-redbeat==2.3.3
+brotli>=1.0.9

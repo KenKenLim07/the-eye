@@ -1,7 +1,7 @@
 import time
 import logging
 import random
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 from urllib.parse import urljoin, urlparse
 from dataclasses import dataclass
 from playwright.sync_api import Browser
@@ -194,6 +194,138 @@ class PhilStarScraper:
         
         return context
 
+    def _extract_philstar_category(self, url: str, soup: BeautifulSoup) -> Tuple[str, Optional[str]]:
+        """Extract category specifically for PhilStar's structure."""
+        raw_category = None
+        
+        # 1. Try to extract from URL structure first (most reliable for PhilStar)
+        if url:
+            try:
+                from urllib.parse import urlparse
+                parsed = urlparse(url)
+                path_parts = [p for p in parsed.path.split('/') if p]
+                
+                if path_parts:
+                    # PhilStar URLs: /business/biz-memos/2025/... or /nation/2025/... or /sports/basketball/2025/...
+                    first_segment = path_parts[0].lower()
+                    category_map = {
+                        'business': 'Business',
+                        'nation': 'Nation', 
+                        'sports': 'Sports',
+                        'entertainment': 'Entertainment',
+                        'world': 'World',
+                        'lifestyle': 'Lifestyle',
+                        'opinion': 'Opinion',
+                        'headlines': 'Headlines',
+                        'news': 'News',
+                        'politics': 'Politics',
+                        'metro': 'Metro',
+                        'cebu': 'Cebu',
+                        'davao': 'Davao',
+                        'bohol': 'Bohol',
+                        'pampanga': 'Pampanga',
+                        'baguio': 'Baguio',
+                        'zamboanga': 'Zamboanga',
+                        'iloilo': 'Iloilo',
+                        'tacloban': 'Tacloban',
+                        'general-santos': 'General Santos'
+                    }
+                    
+                    if first_segment in category_map:
+                        raw_category = category_map[first_segment]
+                    
+                    # For sports, check if there's a sub-category
+                    if first_segment == 'sports' and len(path_parts) > 1:
+                        second_segment = path_parts[1].lower()
+                        if second_segment in ['basketball', 'football', 'volleyball', 'tennis', 'boxing', 'mma']:
+                            # Keep as Sports but note the sub-category
+                            raw_category = 'Sports'
+                    
+                    # For business, check sub-categories
+                    if first_segment == 'business' and len(path_parts) > 1:
+                        second_segment = path_parts[1].lower()
+                        if second_segment in ['biz-memos', 'economy', 'markets', 'companies']:
+                            raw_category = 'Business'
+            except Exception:
+                pass
+        
+        # 2. Extract from meta tags (PhilStar uses standard meta tags)
+        if not raw_category:
+            try:
+                # Check for article:section meta tag
+                meta_section = soup.find('meta', property='article:section')
+                if meta_section and meta_section.get('content'):
+                    raw_category = meta_section.get('content').strip()
+                
+                # Check for og:type and other meta tags
+                if not raw_category:
+                    meta_type = soup.find('meta', property='og:type')
+                    if meta_type and meta_type.get('content') == 'article':
+                        # Try to extract from breadcrumbs or other indicators
+                        pass
+            except Exception:
+                pass
+        
+        # 3. Extract from breadcrumbs (if available)
+        if not raw_category:
+            try:
+                for selector in ['nav.breadcrumb a', '.breadcrumb a', '.breadcrumbs a', 'ol.breadcrumb li a']:
+                    breadcrumb = soup.select_one(selector)
+                    if breadcrumb:
+                        text = breadcrumb.get_text(strip=True)
+                        if text and text.lower() not in ['home', 'philstar', 'philstar.com']:
+                            raw_category = text
+                            break
+            except Exception:
+                pass
+        
+        # 4. Extract from page title (fallback)
+        if not raw_category:
+            try:
+                title_tag = soup.find('title')
+                if title_tag:
+                    title_text = title_tag.get_text()
+                    # Look for category indicators in title
+                    if '| Philstar.com' in title_text:
+                        # Extract category from title structure
+                        parts = title_text.split('|')
+                        if len(parts) > 1:
+                            category_part = parts[1].strip()
+                            if category_part and category_part != 'Philstar.com':
+                                raw_category = category_part
+            except Exception:
+                pass
+        
+        # Normalize the category
+        if raw_category:
+            # Clean up the category name
+            raw_category = raw_category.strip().title()
+            # Map common variations
+            if raw_category.lower() in ['biz', 'business', 'economy']:
+                normalized = 'Business'
+            elif raw_category.lower() in ['sports', 'sport']:
+                normalized = 'Sports'
+            elif raw_category.lower() in ['nation', 'national', 'politics']:
+                normalized = 'Nation'
+            elif raw_category.lower() in ['world', 'international']:
+                normalized = 'World'
+            elif raw_category.lower() in ['entertainment', 'showbiz']:
+                normalized = 'Entertainment'
+            elif raw_category.lower() in ['lifestyle', 'life']:
+                normalized = 'Lifestyle'
+            elif raw_category.lower() in ['opinion', 'editorial']:
+                normalized = 'Opinion'
+            elif raw_category.lower() in ['headlines', 'news']:
+                normalized = 'News'
+            else:
+                normalized = raw_category
+        else:
+            normalized = 'General'
+            raw_category = None
+        
+        return normalized, raw_category
+
+
     def _scrape_article(self, url: str, browser: Browser) -> Optional[NormalizedArticle]:
         """Scrape individual article."""
         try:
@@ -232,7 +364,7 @@ class PhilStarScraper:
             published_date = self._extract_with_fallbacks(soup, self.SELECTORS["published_date"])
             
             # Build normalized article
-            norm_cat, raw_cat = resolve_category_pair(url, soup)
+            norm_cat, raw_cat = self._extract_philstar_category(url, soup)
             article = build_article(
                 source="PhilStar",
                 title=title,
