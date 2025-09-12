@@ -61,14 +61,20 @@ export interface AnalysisRow {
   created_at: string;
 }
 
+interface BulkAnalysisResponse {
+  data: (AnalysisRow | null)[];
+  ok?: boolean;
+  error?: string;
+}
+
 export async function fetchLatestAnalysisByIds(articleIds: (number | string)[]): Promise<Record<string, AnalysisRow | null>> {
   if (!articleIds.length) return {};
   const base = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
   const qs = encodeURIComponent(articleIds.map(String).join(','));
   try {
     const res = await fetch(`${base}/ml/analysis?ids=${qs}`, { cache: 'no-store' });
-    const json = await res.json();
-    const rows: (AnalysisRow | null)[] = (json?.data || []) as any;
+    const json: BulkAnalysisResponse = await res.json();
+    const rows = json?.data || [];
     const map: Record<string, AnalysisRow | null> = {};
     articleIds.forEach((id, idx) => { map[String(id)] = rows[idx] || null; });
     return map;

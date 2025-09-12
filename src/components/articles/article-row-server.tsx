@@ -13,6 +13,8 @@ interface Article {
   category: string | null;
 }
 
+type BadgeVariant = 'default' | 'secondary' | 'destructive' | 'outline';
+
 interface ArticleRowServerProps {
   articles: Article[];
   title: string;
@@ -50,8 +52,8 @@ export default async function ArticleRowServer({ articles, title, sourceValue }:
                         const row = analysisById[String(a.id)];
                         const label = row?.sentiment_label;
                         if (!label) return null;
-                        const variant = label === 'positive' ? 'default' : label === 'negative' ? 'destructive' : 'secondary';
-                        return <Badge variant={variant as any}>{label}</Badge>;
+                        const variant: BadgeVariant = label === 'positive' ? 'default' : label === 'negative' ? 'destructive' : 'secondary';
+                        return <Badge variant={variant}>{label}</Badge>;
                       })()}
                     </div>
                   </div>
