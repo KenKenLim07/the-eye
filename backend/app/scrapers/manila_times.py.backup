@@ -10,6 +10,29 @@ from app.pipeline.normalize import build_article, NormalizedArticle
 import httpx
 import brotli
 from app.scrapers.utils import resolve_category_pair
+# Feature flags (env-driven) for gradual rollout
+import os
+
+
+def _env_flag(name: str, default: bool = False) -> bool:
+    val = os.getenv(name, str(default)).strip().lower()
+    return val in {"1", "true", "yes", "on"}
+
+USE_ADV_HEADERS = _env_flag("USE_ADV_HEADERS", False)
+USE_HUMAN_DELAY = _env_flag("USE_HUMAN_DELAY", False)
+USE_URL_FILTER = _env_flag("USE_URL_FILTER", False)
+
+try:
+    from app.scrapers.utils import (
+        get_advanced_stealth_headers,
+        get_human_like_delay,
+        is_valid_news_url,
+    )
+except Exception:
+    get_advanced_stealth_headers = None
+    get_human_like_delay = None
+    is_valid_news_url = None
+
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -37,8 +60,15 @@ class ManilaTimesScraper:
     
     # Discovery entry points for latest news
     DISCOVERY_PATHS = [
-        "/news/",
-        "/news/latest/"
+        "/business/",
+        "/sports/",
+        "/opinion/",
+        "/world/",
+        "/lifestyle/",
+        "/entertainment/",
+        "/politics/",
+        "/news/latest/",
+        "/news/"
     ]
     
     # Rotating User-Agents for stealth
@@ -291,6 +321,99 @@ class ManilaTimesScraper:
         
         return text.strip()
 
+    def _extract_manila_times_category(self, url: str, soup: BeautifulSoup) -> (str, Optional[str]):
+        """Infer canonical and raw category for Manila Times.
+        Priority: URL path → meta tags/breadcrumbs → fallback 'News'."""
+        normalized = "News"
+        raw = None
+        try:
+            parsed = urlparse(url)
+            parts = [p for p in parsed.path.split('/') if p]
+            # URL patterns often include a section after the date or at the top-level
+            # e.g., /2025/09/07/news/.../{id} or /opinion/columns/.../{id}
+            candidates = []
+            for p in parts:
+                lp = p.lower()
+                # collect plausible category tokens (including sub-sections)
+                if any(k in lp for k in [
+                    "news", "business", "sports", "opinion", "editorial", "world",
+                    "regions", "lifestyle", "entertainment", "campus", "politics",
+                    "top-business", "foreign-business", "top-sports", "columns",
+                    "the-sunday-times", "top-news"
+                ]):
+                    candidates.append(lp)
+            # prefer more specific sub-section if present, else the first
+            section = None
+            if candidates:
+                # prioritize explicit main sections
+                priority = [
+                    "business", "sports", "opinion", "world", "politics",
+                    "lifestyle", "entertainment", "news", "regions", "campus"
+                ]
+                for pri in priority:
+                    for c in candidates:
+                        if c == pri or c.startswith(f"{pri}/"):
+                            section = pri
+                            break
+                    if section:
+                        break
+                if not section:
+                    section = candidates[0]
+            mapping = {
+                "news": "News",
+                "top-news": "News",
+                "business": "Business",
+                "top-business": "Business",
+                "foreign-business": "Business",
+                "sports": "Sports",
+                "top-sports": "Sports",
+                "opinion": "Opinion",
+                "columns": "Opinion",
+                "editorial": "Opinion",
+                "world": "World",
+                "regions": "Nation",
+                "politics": "Politics",
+                "lifestyle": "Lifestyle",
+                "entertainment": "Entertainment",
+                "campus": "Campus",
+                "the-sunday-times": "News",
+            }
+            if section in mapping:
+                normalized = mapping[section]
+                raw = section.replace("-", " ").title()
+        except Exception:
+            pass
+        # Meta fallbacks
+        try:
+            if not raw:
+                # Common meta keys used by MT
+                meta = (soup.find("meta", {"property": "article:section"})
+                        or soup.find("meta", {"itemprop": "articleSection"})
+                        or soup.find("meta", {"property": "mrf:sections"})
+                        or soup.find("meta", attrs={"name": "section"}))
+                if meta and (meta.get("content") or meta.get("value")):
+                    raw_val = (meta.get("content") or meta.get("value") or "").strip()
+                    if raw_val:
+                        raw = raw_val
+                        key = raw_val.lower().replace(" ", "-")
+                        normalized = mapping.get(key, raw_val.title())
+        except Exception:
+            pass
+        # Breadcrumb fallback
+        try:
+            if not raw:
+                for sel in [".breadcrumb a", "nav.breadcrumb a", "ol.breadcrumb li a", ".breadcrumbs a"]:
+                    a = soup.select_one(sel)
+                    if a:
+                        text = a.get_text(strip=True)
+                        if text and text.lower() not in {"home", "the manila times", "manila times"}:
+                            raw = text
+                            normalized = mapping.get(text.lower(), text.title())
+                            break
+        except Exception:
+            pass
+        return normalized, raw
+
     def _extract_with_fallbacks(self, soup: BeautifulSoup, url: str) -> Optional[NormalizedArticle]:
         """Extract article with multiple fallback strategies."""
         try:
@@ -308,6 +431,10 @@ class ManilaTimesScraper:
                 logger.warning(f"{self.name}: Missing required fields for {url}")
                 return None
             
+            # Category extraction
+            norm_cat, raw_cat = self._extract_manila_times_category(url, soup)
+            logger.info(f"{self.name}: resolved category norm={norm_cat}, raw={raw_cat} for {url}")
+            
             # Build normalized article
             article = build_article(
                 title=title,
@@ -315,7 +442,8 @@ class ManilaTimesScraper:
                 url=url,
                 published_at=published_date,
                 source="Manila Times",
-                category="news"
+                category=norm_cat,
+                raw_category=raw_cat,
             )
             
             return article
@@ -324,7 +452,7 @@ class ManilaTimesScraper:
             logger.error(f"{self.name}: Error extracting article from {url}: {e}")
             return None
 
-    def scrape_latest(self, max_articles: int = 5) -> ScrapingResult:
+    def scrape_latest(self, max_articles: int = 10) -> ScrapingResult:
         """Scrape latest articles with stealth approach."""
         start_time = time.time()
         articles = []

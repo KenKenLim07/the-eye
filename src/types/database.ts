@@ -89,6 +89,104 @@ export type Database = {
         }
         Relationships: []
       }
+      bias_analysis: {
+        Row: {
+          article_id: number | null
+          confidence_score: number | null
+          created_at: string | null
+          id: number
+          model_metadata: Json | null
+          model_type: string
+          model_version: string
+          political_bias_score: number | null
+          processing_time_ms: number | null
+          sentiment_label: string | null
+          sentiment_score: number | null
+          toxicity_score: number | null
+        }
+        Insert: {
+          article_id?: number | null
+          confidence_score?: number | null
+          created_at?: string | null
+          id?: number
+          model_metadata?: Json | null
+          model_type: string
+          model_version: string
+          political_bias_score?: number | null
+          processing_time_ms?: number | null
+          sentiment_label?: string | null
+          sentiment_score?: number | null
+          toxicity_score?: number | null
+        }
+        Update: {
+          article_id?: number | null
+          confidence_score?: number | null
+          created_at?: string | null
+          id?: number
+          model_metadata?: Json | null
+          model_type?: string
+          model_version?: string
+          political_bias_score?: number | null
+          processing_time_ms?: number | null
+          sentiment_label?: string | null
+          sentiment_score?: number | null
+          toxicity_score?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bias_analysis_article_id_fkey"
+            columns: ["article_id"]
+            isOneToOne: false
+            referencedRelation: "articles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      pattern_predictions: {
+        Row: {
+          confidence_score: number | null
+          created_at: string | null
+          horizon: string
+          id: number
+          model_metadata: Json | null
+          model_type: string
+          model_version: string
+          predicted_value: number | null
+          scope_type: string
+          scope_value: string
+          valid_from: string | null
+          valid_until: string | null
+        }
+        Insert: {
+          confidence_score?: number | null
+          created_at?: string | null
+          horizon: string
+          id?: number
+          model_metadata?: Json | null
+          model_type: string
+          model_version: string
+          predicted_value?: number | null
+          scope_type: string
+          scope_value: string
+          valid_from?: string | null
+          valid_until?: string | null
+        }
+        Update: {
+          confidence_score?: number | null
+          created_at?: string | null
+          horizon?: string
+          id?: number
+          model_metadata?: Json | null
+          model_type?: string
+          model_version?: string
+          predicted_value?: number | null
+          scope_type?: string
+          scope_value?: string
+          valid_from?: string | null
+          valid_until?: string | null
+        }
+        Relationships: []
+      }
       raw_articles: {
         Row: {
           id: number
@@ -148,7 +246,15 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      v_article_counts_weekly: {
+        Row: {
+          category: string | null
+          n: number | null
+          source: string | null
+          week: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       [_ in never]: never

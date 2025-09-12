@@ -144,7 +144,8 @@ async def diagnostics(dry_run: bool = False, max_articles: int = 1):
             "app.workers.tasks.scrape_philstar_task": False,
             "app.workers.tasks.scrape_manila_bulletin_task": False,
             "app.workers.tasks.scrape_rappler_task": False,
-            "app.workers.tasks.scrape_sunstar_task, scrape_manila_times_task": False,
+            "app.workers.tasks.scrape_sunstar_task": False,
+            "app.workers.tasks.scrape_manila_times_task": False,
         }
         # Consolidate registered task names from all workers
         all_registered = set()
@@ -165,7 +166,8 @@ async def diagnostics(dry_run: bool = False, max_articles: int = 1):
             jobs.append({"source": "gma", "task_id": str(scrape_gma_task.delay())})
             jobs.append({"source": "philstar", "task_id": str(scrape_philstar_task.delay())})
             jobs.append({"source": "rappler", "task_id": str(scrape_rappler_task.delay())})
-            jobs.append({"source": "sunstar", "task_id": str(scrape_sunstar_task, scrape_manila_times_task.delay())})
+            jobs.append({"source": "sunstar", "task_id": str(scrape_sunstar_task.delay())})
+            jobs.append({"source": "manila_times", "task_id": str(scrape_manila_times_task.delay())})
             jobs.append({"source": "manila_bulletin", "task_id": str(scrape_manila_bulletin_task.delay())})
             report["dry_runs"] = jobs
         except Exception as e:

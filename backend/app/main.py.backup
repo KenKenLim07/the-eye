@@ -5,6 +5,7 @@ from app.workers.celery_app import celery
 from celery.result import AsyncResult
 from typing import Optional
 from app.core.supabase import get_supabase
+from app.workers.ml_tasks import analyze_articles_task
 
 app = FastAPI(title="PH Eye Backend", version="0.1.0")
 
@@ -39,7 +40,12 @@ async def run_scrape(payload: dict = Body(default={})):
         elif s in ["rappler", "rappler-news", "rappler-news-ph"]:
             job = scrape_rappler_task.delay()
             jobs.append({"source": "rappler", "task_id": str(job)})
+        elif s in ["sunstar", "sunstar-ph", "sunstar-philippines"]:
+            job = scrape_sunstar_task.delay()
             jobs.append({"source": "sunstar", "task_id": str(job)})
+        elif s in ["manila_times", "manila-times", "mt"]:
+            job = scrape_manila_times_task.delay()
+            jobs.append({"source": "manila_times", "task_id": str(job)})
     return {"queued": True, "jobs": jobs}
 
 @app.get("/scrape/status/{task_id}")
@@ -138,7 +144,7 @@ async def diagnostics(dry_run: bool = False, max_articles: int = 1):
             "app.workers.tasks.scrape_philstar_task": False,
             "app.workers.tasks.scrape_manila_bulletin_task": False,
             "app.workers.tasks.scrape_rappler_task": False,
-            "app.workers.tasks.scrape_sunstar_task": False,
+            "app.workers.tasks.scrape_sunstar_task, scrape_manila_times_task": False,
         }
         # Consolidate registered task names from all workers
         all_registered = set()
@@ -159,10 +165,59 @@ async def diagnostics(dry_run: bool = False, max_articles: int = 1):
             jobs.append({"source": "gma", "task_id": str(scrape_gma_task.delay())})
             jobs.append({"source": "philstar", "task_id": str(scrape_philstar_task.delay())})
             jobs.append({"source": "rappler", "task_id": str(scrape_rappler_task.delay())})
-            jobs.append({"source": "sunstar", "task_id": str(scrape_sunstar_task.delay())})
+            jobs.append({"source": "sunstar", "task_id": str(scrape_sunstar_task, scrape_manila_times_task.delay())})
             jobs.append({"source": "manila_bulletin", "task_id": str(scrape_manila_bulletin_task.delay())})
             report["dry_runs"] = jobs
         except Exception as e:
             report["dry_runs"] = {"error": str(e)}
 
     return report 
+
+# ML endpoints
+@app.post("/ml/analyze")
+async def ml_analyze(payload: dict = Body(default={})):
+    """Queue analysis for specific article_ids or by time window.
+    Body: { article_ids?: number[], since?: ISODate, model_version?: string }
+    """
+    sb = get_supabase()
+    article_ids = payload.get("article_ids") or []
+    since = payload.get("since")
+    if not article_ids and since:
+        q = sb.table("articles").select("id").gte("published_at", since).limit(5000)
+        res = q.execute()
+        article_ids = [r["id"] for r in (res.data or [])]
+    if not article_ids:
+        return {"queued": False, "reason": "no_article_ids"}
+    job = analyze_articles_task.delay(article_ids)
+    return {"queued": True, "task_id": str(job), "count": len(article_ids)}
+
+@app.get("/articles/{article_id}/analysis")
+async def get_article_analysis(article_id: int):
+    sb = get_supabase()
+    res = sb.table("bias_analysis").select("*").eq("article_id", article_id).order("created_at", desc=True).limit(1).execute()
+    return {"data": (res.data or [None])[0]} 
+
+@app.get("/ml/analysis")
+async def get_bulk_article_analysis(ids: str):
+    """
+    Bulk latest analysis for article IDs.
+    Query: ?ids=1,2,3
+    Returns: { data: [{article_id, ...latest row...}, ...] }
+    """
+    sb = get_supabase()
+    try:
+        id_list = [int(x) for x in (ids or "").split(",") if x.strip().isdigit()]
+        if not id_list:
+            return {"data": []}
+        res = sb.table("bias_analysis").select("*").in_("article_id", id_list).order("created_at", desc=True).limit(10000).execute()
+        rows = res.data or []
+        latest: dict[int, dict] = {}
+        for r in rows:
+            aid = int(r.get("article_id"))
+            if aid not in latest:
+                latest[aid] = r
+        # Preserve input order
+        data = [latest.get(aid) for aid in id_list]
+        return {"data": data}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}, 500 

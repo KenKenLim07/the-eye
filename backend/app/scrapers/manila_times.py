@@ -10,6 +10,8 @@ from app.pipeline.normalize import build_article, NormalizedArticle
 import httpx
 import brotli
 from app.scrapers.utils import resolve_category_pair
+from datetime import datetime, timezone
+import re
 # Feature flags (env-driven) for gradual rollout
 import os
 
@@ -45,7 +47,7 @@ class ScrapingResult:
     metadata: Dict[str, Any]
 
 class ManilaTimesScraper:
-    """BLACKHAT Manila Times Scraper - Ultra-Conservative Stealth Approach"""
+    """BLACKHAT Manila Times Scraper - Ultra-Conservative Stealth Approach with 502 handling"""
 
     BASE_URL = "https://www.manilatimes.net"
     
@@ -112,41 +114,103 @@ class ManilaTimesScraper:
             "Pragma": "no-cache"
         }
 
-    def _fetch_with_httpx(self, url: str) -> Optional[str]:
-        """Fetch URL with httpx and proper Brotli decompression."""
+    def _normalize_published_date(self, date_str: str) -> Optional[str]:
+        """Normalize published date to ISO format."""
+        if not date_str:
+            return None
+        
         try:
-            timeout = random.uniform(25.0, 35.0)
-            logger.info(f"{self.name}: Fetching {url} with timeout {timeout:.1f}s")
+            # Try common date formats
+            formats = [
+                "%Y-%m-%dT%H:%M:%S%z",
+                "%Y-%m-%dT%H:%M:%S.%f%z", 
+                "%Y-%m-%d %H:%M:%S",
+                "%Y-%m-%d",
+                "%B %d, %Y",
+                "%b %d, %Y",
+                "%d %B %Y",
+                "%d %b %Y"
+            ]
             
-            with httpx.Client(
-                follow_redirects=True,
-                timeout=float(timeout),
-                headers=self._get_stealth_headers(),
-                verify=False  # KEY: Disable SSL verification
-            ) as client:
-                response = client.get(url)
-                response.raise_for_status()
-                
-                # Handle Brotli decompression manually
-                if response.headers.get("content-encoding") == "br":
-                    try:
-                        decompressed_content = brotli.decompress(response.content)
-                        return decompressed_content.decode("utf-8")
-                    except Exception as e:
-                        logger.warning(f"Brotli decompression failed for {url}: {e}")
-                        return response.text
-                
-                return response.text
-                
-        except httpx.HTTPStatusError as e:
-            logger.error(f"HTTP error fetching {url}: {e.response.status_code} - {e.response.text[:100]}")
-            return None
-        except httpx.RequestError as e:
-            logger.error(f"Request error fetching {url}: {e}")
-            return None
+            for fmt in formats:
+                try:
+                    dt = datetime.strptime(date_str.strip(), fmt)
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    return dt.isoformat()
+                except ValueError:
+                    continue
+            
+            # If all formats fail, return current time
+            logger.warning(f"{self.name}: Could not parse date '{date_str}', using current time")
+            return datetime.now(timezone.utc).isoformat()
+            
         except Exception as e:
-            logger.error(f"Unexpected error fetching {url}: {e}")
-            return None
+            logger.warning(f"{self.name}: Date normalization error: {e}")
+            return datetime.now(timezone.utc).isoformat()
+
+    def _fetch_with_retry(self, url: str, max_retries: int = 3) -> Optional[str]:
+        """Fetch URL with retry logic for 502 errors."""
+        for attempt in range(max_retries):
+            try:
+                timeout = random.uniform(25.0, 35.0)
+                logger.info(f"{self.name}: Fetching {url} (attempt {attempt + 1}/{max_retries}) with timeout {timeout:.1f}s")
+                
+                with httpx.Client(
+                    follow_redirects=True,
+                    timeout=float(timeout),
+                    headers=self._get_stealth_headers(),
+                    verify=False  # KEY: Disable SSL verification
+                ) as client:
+                    response = client.get(url)
+                    
+                    # Handle 502 specifically
+                    if response.status_code == 502:
+                        if attempt < max_retries - 1:
+                            wait_time = (2 ** attempt) + random.uniform(1, 3)  # Exponential backoff
+                            logger.warning(f"{self.name}: 502 error for {url}, retrying in {wait_time:.1f}s")
+                            time.sleep(wait_time)
+                            continue
+                        else:
+                            logger.error(f"{self.name}: 502 error for {url} after {max_retries} attempts")
+                            return None
+                    
+                    response.raise_for_status()
+                    
+                    # Handle Brotli decompression manually
+                    if response.headers.get("content-encoding") == "br":
+                        try:
+                            decompressed_content = brotli.decompress(response.content)
+                            return decompressed_content.decode("utf-8")
+                        except Exception as e:
+                            logger.warning(f"Brotli decompression failed for {url}: {e}")
+                            return response.text
+                    
+                    return response.text
+                    
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 502 and attempt < max_retries - 1:
+                    wait_time = (2 ** attempt) + random.uniform(1, 3)
+                    logger.warning(f"{self.name}: 502 error for {url}, retrying in {wait_time:.1f}s")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    logger.error(f"{self.name}: HTTP error fetching {url}: {e.response.status_code} - {e.response.text[:100]}")
+                    return None
+            except httpx.RequestError as e:
+                if attempt < max_retries - 1:
+                    wait_time = (2 ** attempt) + random.uniform(1, 3)
+                    logger.warning(f"{self.name}: Request error for {url}, retrying in {wait_time:.1f}s: {e}")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    logger.error(f"{self.name}: Request error fetching {url}: {e}")
+                    return None
+            except Exception as e:
+                logger.error(f"{self.name}: Unexpected error fetching {url}: {e}")
+                return None
+        
+        return None
 
     def _validate_url(self, url: str) -> bool:
         try:
@@ -179,7 +243,7 @@ class ManilaTimesScraper:
         seen = set()
         try:
             for path in self.DISCOVERY_PATHS:
-                html = self._fetch_with_httpx(urljoin(self.BASE_URL, path))
+                html = self._fetch_with_retry(urljoin(self.BASE_URL, path))
                 if not html:
                     continue
                 soup = BeautifulSoup(html, 'html.parser')
@@ -293,7 +357,7 @@ class ManilaTimesScraper:
                     date_str = date_elem.get("datetime", "").strip() or date_elem.get_text(strip=True)
                 
                 if date_str:
-                    return date_str
+                    return self._normalize_published_date(date_str)
         
         return None
 
@@ -453,7 +517,7 @@ class ManilaTimesScraper:
             return None
 
     def scrape_latest(self, max_articles: int = 10) -> ScrapingResult:
-        """Scrape latest articles with stealth approach."""
+        """Scrape latest articles with stealth approach and 502 handling."""
         start_time = time.time()
         articles = []
         errors = []
@@ -473,10 +537,10 @@ class ManilaTimesScraper:
                 
                 # Fetch and parse
                 logger.info(f"{self.name}: Scraping {url}")
-                html = self._fetch_with_httpx(url)
+                html = self._fetch_with_retry(url)
                 
                 if not html:
-                    error_msg = f"Failed to fetch {url}"
+                    error_msg = f"Failed to fetch {url} (likely 502 or network error)"
                     logger.warning(f"{self.name}: {error_msg}")
                     errors.append(error_msg)
                     continue
@@ -514,6 +578,7 @@ class ManilaTimesScraper:
             metadata={
                 "scraper": self.name,
                 "urls_processed": len(candidate_urls),
-                "stealth_mode": True
+                "stealth_mode": True,
+                "502_handling": True
             }
         )
