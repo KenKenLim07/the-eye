@@ -28,8 +28,16 @@ def insert_articles(articles: List[NormalizedArticle]) -> dict:
     ]
 
     inserted = 0
+    inserted_ids: list[int] = []
     if rows:
         ins = sb.table("articles").insert(rows).execute()
-        inserted = len(ins.data or [])
+        data = ins.data or []
+        inserted = len(data)
+        inserted_ids = [int(r.get("id")) for r in data if r.get("id") is not None]
 
-    return {"checked": len(to_check), "skipped": len(articles) - len(rows), "inserted": inserted} 
+    return {
+        "checked": len(to_check),
+        "skipped": len(articles) - len(rows),
+        "inserted": inserted,
+        "inserted_ids": inserted_ids,
+    } 

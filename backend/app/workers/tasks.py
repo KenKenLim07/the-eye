@@ -5,6 +5,7 @@ from app.scrapers.inquirer import scrape_inquirer_latest, InquirerScraper
 from app.pipeline.store import insert_articles
 import logging
 from app.observability.logs import start_run, finalize_run
+from app.workers.ml_tasks import analyze_articles_task
 
 # Guarded import for ABS-CBN (may be removed)
 try:
@@ -76,6 +77,10 @@ def scrape_inquirer_task(self):
         if result.articles:
             store_result = insert_articles(result.articles)
             logger.info(f"Task {task_id} - Storage result: {store_result}")
+            # Enqueue ML analysis for newly inserted articles
+            inserted_ids = store_result.get("inserted_ids") or []
+            if inserted_ids:
+                analyze_articles_task.delay(inserted_ids)
             finalize_run(log["id"], status="success", articles_scraped=len(result.articles))
             
             # Return comprehensive result
@@ -146,6 +151,9 @@ def scrape_gma_task(self):
         if result.articles:
             store_result = insert_articles(result.articles)
             logger.info(f"Task {task_id} - GMA storage result: {store_result}")
+            inserted_ids = store_result.get("inserted_ids") or []
+            if inserted_ids:
+                analyze_articles_task.delay(inserted_ids)
             finalize_run(log["id"], status="success", articles_scraped=len(result.articles))
             return {
                 "ok": True,
@@ -194,6 +202,9 @@ def scrape_philstar_task(self):
         if result.articles:
             store_result = insert_articles(result.articles)
             logger.info(f"Task {task_id} - Philstar storage result: {store_result}")
+            inserted_ids = store_result.get("inserted_ids") or []
+            if inserted_ids:
+                analyze_articles_task.delay(inserted_ids)
             finalize_run(log["id"], status="success", articles_scraped=len(result.articles))
             return {
                 "ok": True,
@@ -243,6 +254,9 @@ def scrape_manila_bulletin_task(self):
         if result.articles:
             store_result = insert_articles(result.articles)
             logger.info(f"Task {task_id} - Manila Bulletin storage result: {store_result}")
+            inserted_ids = store_result.get("inserted_ids") or []
+            if inserted_ids:
+                analyze_articles_task.delay(inserted_ids)
             finalize_run(log["id"], status="success", articles_scraped=len(result.articles))
             return {
                 "ok": True,
@@ -295,6 +309,9 @@ def scrape_rappler_task(self):
         if result.articles:
             store_result = insert_articles(result.articles)
             logger.info(f"Task {task_id} - Rappler storage result: {store_result}")
+            inserted_ids = store_result.get("inserted_ids") or []
+            if inserted_ids:
+                analyze_articles_task.delay(inserted_ids)
             
             finalize_run(log["id"], status="success", articles_scraped=len(result.articles))
             
@@ -364,6 +381,9 @@ def scrape_sunstar_task(self):
         if result.articles:
             # Store articles in database
             storage_result = insert_articles(result.articles)
+            inserted_ids = storage_result.get("inserted_ids") or []
+            if inserted_ids:
+                analyze_articles_task.delay(inserted_ids)
             finalize_run(log["id"], status="success", articles_scraped=len(result.articles))
             
             return {
@@ -423,6 +443,9 @@ def scrape_manila_times_task(self):
         if result.articles:
             store_result = insert_articles(result.articles)
             logger.info(f"Task {task_id} - Manila Times storage result: {store_result}")
+            inserted_ids = store_result.get("inserted_ids") or []
+            if inserted_ids:
+                analyze_articles_task.delay(inserted_ids)
             finalize_run(log["id"], status="success", articles_scraped=len(result.articles))
             
             return {

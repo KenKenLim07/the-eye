@@ -50,3 +50,31 @@ export async function fetchAllArticles(limit: number = 20): Promise<Record<strin
 
   return articlesBySource;
 }
+
+export interface AnalysisRow {
+  id: number;
+  article_id: number;
+  model_version: string;
+  model_type: string;
+  sentiment_score: number | null;
+  sentiment_label: string | null;
+  created_at: string;
+}
+
+export async function fetchLatestAnalysisByIds(articleIds: (number | string)[]): Promise<Record<string, AnalysisRow | null>> {
+  if (!articleIds.length) return {};
+  const base = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
+  const qs = encodeURIComponent(articleIds.map(String).join(','));
+  try {
+    const res = await fetch(`${base}/ml/analysis?ids=${qs}`, { cache: 'no-store' });
+    const json = await res.json();
+    const rows: (AnalysisRow | null)[] = (json?.data || []) as any;
+    const map: Record<string, AnalysisRow | null> = {};
+    articleIds.forEach((id, idx) => { map[String(id)] = rows[idx] || null; });
+    return map;
+  } catch {
+    const map: Record<string, AnalysisRow | null> = {};
+    articleIds.forEach(id => { map[String(id)] = null; });
+    return map;
+  }
+}
