@@ -27,7 +27,26 @@ CANONICAL_CATEGORIES = {
     "general-santos": "General Santos",
 }
 
+# Canonical source display names
+CANONICAL_SOURCES: Dict[str, str] = {
+    "gma": "GMA",
+    "manila bulletin": "Manila Bulletin",
+    "sunstar": "Sunstar",
+    "inquirer": "Inquirer",
+    "rappler": "Rappler",
+    "philstar": "Philstar",
+    "manila times": "Manila Times",
+    "abs-cbn": "ABS-CBN",
+}
+
 BLACKLIST_SEGMENTS = {"photo", "photos", "video", "videos", "about", "section", "tag", "author", "page"}
+
+
+def normalize_source(raw: Optional[str]) -> Optional[str]:
+    if not raw:
+        return None
+    key = raw.strip().lower()
+    return CANONICAL_SOURCES.get(key) or raw.strip().title()
 
 
 def normalize_category(raw: Optional[str]) -> Optional[str]:
@@ -335,6 +354,7 @@ def create_stealth_httpx_client() -> httpx.AsyncClient:
     )
 
 # 🛡️ CONTENT VALIDATION UTILITIES
+
 def validate_article_content(content: str, min_length: int = 50) -> bool:
     """Validate article content meets minimum requirements."""
     if not content:
@@ -367,6 +387,7 @@ def log_skipped_article(source: str, url: str, reason: str):
     logger.info(f"{source}: skipping article ({reason}) - {url}")
 
 #  ADVANCED URL VALIDATION
+
 def is_valid_news_url(url: str, base_domain: str) -> bool:
     """Advanced URL validation for news articles."""
     try:

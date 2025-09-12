@@ -17,7 +17,7 @@ export async function fetchAllArticles(limit: number = 20): Promise<Record<strin
     "GMA",
     "Rappler", 
     "Inquirer",
-    "PhilStar",
+    "Philstar",
     "Sunstar",
     "Manila Bulletin"
   ];
