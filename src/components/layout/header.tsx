@@ -28,6 +28,12 @@ export default function Header() {
               Sources
             </Link>
             <Link 
+              href="/trends" 
+              className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Trends
+            </Link>
+            <Link 
               href="/about" 
               className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
             >

@@ -1,0 +1,137 @@
+ 
+ -------------- celery@MacBook-Pro v5.3.6 (emerald-rush)
+--- ***** ----- 
+-- ******* ---- macOS-14.6.1-x86_64-i386-64bit 2025-09-13 03:03:23
+- *** --- * --- 
+- ** ---------- [config]
+- ** ---------- .> app:         ph_eye:0x10753e6d0
+- ** ---------- .> transport:   redis://localhost:6379/0
+- ** ---------- .> results:     redis://localhost:6379/1
+- *** --- * --- .> concurrency: 8 (prefork)
+-- ******* ---- .> task events: OFF (enable -E to monitor tasks in this worker)
+--- ***** ----- 
+ -------------- [queues]
+                .> celery           exchange=celery(direct) key=celery
+                
+
+[tasks]
+  . app.workers.ml_tasks.analyze_articles_task
+  . app.workers.tasks.scrape_abs_cbn_task
+  . app.workers.tasks.scrape_gma_task
+  . app.workers.tasks.scrape_inquirer_task
+  . app.workers.tasks.scrape_manila_bulletin_task
+  . app.workers.tasks.scrape_manila_times_task
+  . app.workers.tasks.scrape_philstar_task
+  . app.workers.tasks.scrape_rappler_task
+  . app.workers.tasks.scrape_sample
+  . app.workers.tasks.scrape_sunstar_task
+
+[2025-09-13 03:03:23,634: WARNING/MainProcess] /Users/mac/ph-eye/backend/venv/lib/python3.11/site-packages/celery/worker/consumer/consumer.py:507: CPendingDeprecationWarning: The broker_connection_retry configuration setting will no longer determine
+whether broker connection retries are made during startup in Celery 6.0 and above.
+If you wish to retain the existing behavior for retrying connections on startup,
+you should set broker_connection_retry_on_startup to True.
+  warnings.warn(
+
+[2025-09-13 03:03:23,645: INFO/MainProcess] Connected to redis://localhost:6379/0
+[2025-09-13 03:03:23,646: WARNING/MainProcess] /Users/mac/ph-eye/backend/venv/lib/python3.11/site-packages/celery/worker/consumer/consumer.py:507: CPendingDeprecationWarning: The broker_connection_retry configuration setting will no longer determine
+whether broker connection retries are made during startup in Celery 6.0 and above.
+If you wish to retain the existing behavior for retrying connections on startup,
+you should set broker_connection_retry_on_startup to True.
+  warnings.warn(
+
+[2025-09-13 03:03:23,648: INFO/MainProcess] mingle: searching for neighbors
+[2025-09-13 03:03:24,657: INFO/MainProcess] mingle: all alone
+[2025-09-13 03:03:24,675: INFO/MainProcess] celery@MacBook-Pro ready.
+[2025-09-13 03:59:36,836: INFO/MainProcess] Task app.workers.tasks.scrape_inquirer_task[fb9de881-cbb0-4fc3-8e15-64593eba2baf] received
+[2025-09-13 03:59:36,860: INFO/ForkPoolWorker-8] Starting Inquirer scraping task fb9de881-cbb0-4fc3-8e15-64593eba2baf
+[2025-09-13 03:59:37,290: INFO/ForkPoolWorker-8] HTTP Request: POST https://msoffsowwuhuetsrixgs.supabase.co/rest/v1/scraping_logs "HTTP/2 201 Created"
+[2025-09-13 03:59:37,875: ERROR/ForkPoolWorker-8] Critical scraping error: BrowserType.launch: Executable doesn't exist at /Users/mac/Library/Caches/ms-playwright/chromium-1129/chrome-mac/Chromium.app/Contents/MacOS/Chromium
+╔════════════════════════════════════════════════════════════╗
+║ Looks like Playwright was just installed or updated.       ║
+║ Please run the following command to download new browsers: ║
+║                                                            ║
+║     playwright install                                     ║
+║                                                            ║
+║ <3 Playwright Team                                         ║
+╚════════════════════════════════════════════════════════════╝
+[2025-09-13 03:59:37,876: INFO/ForkPoolWorker-8] Scraping completed: 0 articles, 1 errors in 0.57s
+[2025-09-13 03:59:37,876: INFO/ForkPoolWorker-8] Task fb9de881-cbb0-4fc3-8e15-64593eba2baf - Scraping completed: 0 articles, 1 errors
+[2025-09-13 03:59:37,876: INFO/ForkPoolWorker-8] Task fb9de881-cbb0-4fc3-8e15-64593eba2baf - Performance: {'total_time': 0.5692169666290283, 'articles_per_second': 0.0, 'success_rate': 0.0}
+[2025-09-13 03:59:37,877: WARNING/ForkPoolWorker-8] Task fb9de881-cbb0-4fc3-8e15-64593eba2baf - Scraping errors: ["Critical scraping error: BrowserType.launch: Executable doesn't exist at /Users/mac/Library/Caches/ms-playwright/chromium-1129/chrome-mac/Chromium.app/Contents/MacOS/Chromium\n╔════════════════════════════════════════════════════════════╗\n║ Looks like Playwright was just installed or updated.       ║\n║ Please run the following command to download new browsers: ║\n║                                                            ║\n║     playwright install                                     ║\n║                                                            ║\n║ <3 Playwright Team                                         ║\n╚════════════════════════════════════════════════════════════╝"]
+[2025-09-13 03:59:37,877: WARNING/ForkPoolWorker-8] Task fb9de881-cbb0-4fc3-8e15-64593eba2baf - No articles found to store
+[2025-09-13 03:59:38,057: INFO/ForkPoolWorker-8] HTTP Request: PATCH https://msoffsowwuhuetsrixgs.supabase.co/rest/v1/scraping_logs?id=eq.1122 "HTTP/2 200 OK"
+[2025-09-13 03:59:38,071: INFO/ForkPoolWorker-8] Task app.workers.tasks.scrape_inquirer_task[fb9de881-cbb0-4fc3-8e15-64593eba2baf] succeeded in 1.2171982300060336s: {'ok': True, 'task_id': 'fb9de881-cbb0-4fc3-8e15-64593eba2baf', 'scraping': {'articles_found': 0, 'errors': ['Critical scraping error: BrowserType.launch: Executable doesn\'t exist at /Users/mac/Library/Caches/ms-playwright/chromium-1129/chrome-mac/Chromium.app/Contents/MacOS/Chromium
+╔════════════════════════════════════════════════════════════╗
+║ Looks like Playwright was just installed or updated.       ║
+║ Please run the following command to download new browsers: ║
+║                                                            ║
+║     playwright install                                     ║
+║                                                            ║
+║ <3 Playwright Team                                         ║
+╚════════════════════════════════════════════════════════════╝'], 'performance': {'total_time': 0.5692169666290283, 'articles_per_second': 0.0, 'success_rate': 0.0}, 'metadata': {'source': 'Philippine Daily Inquirer', 'scraped_at': '2025-09-13 03:59:37', 'total_articles_found': 0, 'total_errors': , ...}}}
+[2025-09-13 04:05:05,605: INFO/MainProcess] Task app.workers.tasks.scrape_inquirer_task[1d1b382a-8df5-4545-9668-9ba9aea1a635] received
+[2025-09-13 04:05:05,606: INFO/ForkPoolWorker-8] Starting Inquirer scraping task 1d1b382a-8df5-4545-9668-9ba9aea1a635
+[2025-09-13 04:05:06,485: INFO/ForkPoolWorker-8] HTTP Request: POST https://msoffsowwuhuetsrixgs.supabase.co/rest/v1/scraping_logs "HTTP/2 201 Created"
+[2025-09-13 04:05:12,325: INFO/ForkPoolWorker-8] Starting Inquirer scraping session
+[2025-09-13 04:05:12,338: INFO/ForkPoolWorker-8] Inquirer flags USE_ADV_HEADERS=False, USE_HUMAN_DELAY=False, USE_URL_FILTER=False
+[2025-09-13 04:05:13,388: INFO/ForkPoolWorker-8] Found 48 article URLs
+[2025-09-13 04:05:13,388: INFO/ForkPoolWorker-8] Sample URLs: ['https://newsinfo.inquirer.net/2108328/tinio-dares-sara-duterte-waive-parliamentary-courtesy-answer-queries', 'https://newsinfo.inquirer.net/2106503/discayas-name-solons-in-flood-control-mess', 'https://newsinfo.inquirer.net/category/inquirer-headlines/nation']
+[2025-09-13 04:05:13,388: INFO/ForkPoolWorker-8] Scraping article 1/10: https://newsinfo.inquirer.net/2108328/tinio-dares-sara-duterte-waive-parliamentary-courtesy-answer-queries
+[2025-09-13 04:05:14,485: INFO/ForkPoolWorker-8] Extracted 58 content parts, total length: 1003
+[2025-09-13 04:05:14,505: INFO/ForkPoolWorker-8] Article https://newsinfo.inquirer.net/2108328/tinio-dares-sara-duterte-waive-parliamentary-courtesy-answer-queries: Title='Tinio dares Sara Duterte: Waive parliamentary courtesy, answer queries', Content length=1003
+[2025-09-13 04:05:14,569: INFO/ForkPoolWorker-8] Successfully scraped: Tinio dares Sara Duterte: Waive parliamentary courtesy, answer queries
+[2025-09-13 04:05:14,569: INFO/ForkPoolWorker-8] Waiting 14.6s before next request (stealth mode)
+[2025-09-13 04:05:29,165: INFO/ForkPoolWorker-8] Scraping article 2/10: https://newsinfo.inquirer.net/2106503/discayas-name-solons-in-flood-control-mess
+[2025-09-13 04:05:32,219: INFO/ForkPoolWorker-8] Extracted 74 content parts, total length: 1003
+[2025-09-13 04:05:32,244: INFO/ForkPoolWorker-8] Article https://newsinfo.inquirer.net/2106503/discayas-name-solons-in-flood-control-mess: Title='Discayas name solons in flood control mess', Content length=1003
+[2025-09-13 04:05:32,338: INFO/ForkPoolWorker-8] Successfully scraped: Discayas name solons in flood control mess
+[2025-09-13 04:05:32,339: INFO/ForkPoolWorker-8] Waiting 20.9s before next request (stealth mode)
+[2025-09-13 04:05:50,123: ERROR/ForkPoolWorker-8] Error scraping https://newsinfo.inquirer.net/2106503/discayas-name-solons-in-flood-control-mess: SoftTimeLimitExceeded()
+[2025-09-13 04:05:50,123: INFO/ForkPoolWorker-8] Scraping article 3/10: https://newsinfo.inquirer.net/category/inquirer-headlines/nation
+[2025-09-13 04:05:51,035: INFO/ForkPoolWorker-8] Extracted 2 content parts, total length: 219
+[2025-09-13 04:05:51,052: INFO/ForkPoolWorker-8] Article https://newsinfo.inquirer.net/category/inquirer-headlines/nation: Title='Nation', Content length=219
+[2025-09-13 04:05:51,100: INFO/ForkPoolWorker-8] Successfully scraped: Nation
+[2025-09-13 04:05:51,101: INFO/ForkPoolWorker-8] Waiting 24.8s before next request (stealth mode)
+
+worker: Warm shutdown (MainProcess)
+[2025-09-13 04:05:56,580: ERROR/MainProcess] Process 'ForkPoolWorker-5' pid:62669 exited with 'signal 15 (SIGTERM)'
+[2025-09-13 04:05:56,592: ERROR/MainProcess] Process 'ForkPoolWorker-2' pid:62665 exited with 'signal 15 (SIGTERM)'
+[2025-09-13 04:05:56,603: ERROR/MainProcess] Process 'ForkPoolWorker-1' pid:62664 exited with 'signal 15 (SIGTERM)'
+[2025-09-13 04:05:57,153: ERROR/MainProcess] Process 'ForkPoolWorker-8' pid:62672 exited with 'signal 15 (SIGTERM)'
+[2025-09-13 04:05:57,166: ERROR/MainProcess] Process 'ForkPoolWorker-7' pid:62671 exited with 'signal 15 (SIGTERM)'
+[2025-09-13 04:05:57,177: ERROR/MainProcess] Process 'ForkPoolWorker-6' pid:62670 exited with 'signal 15 (SIGTERM)'
+[2025-09-13 04:05:57,187: ERROR/MainProcess] Process 'ForkPoolWorker-4' pid:62668 exited with 'signal 15 (SIGTERM)'
+[2025-09-13 04:05:57,198: ERROR/MainProcess] Process 'ForkPoolWorker-3' pid:62667 exited with 'signal 15 (SIGTERM)'
+[2025-09-13 04:05:57,239: ERROR/MainProcess] Task handler raised error: WorkerLostError('Worker exited prematurely: signal 15 (SIGTERM) Job: 1.')
+Traceback (most recent call last):
+  File "/Users/mac/ph-eye/backend/venv/lib/python3.11/site-packages/billiard/pool.py", line 1265, in mark_as_worker_lost
+    raise WorkerLostError(
+billiard.einfo.ExceptionWithTraceback: 
+"""
+Traceback (most recent call last):
+  File "/Users/mac/ph-eye/backend/venv/lib/python3.11/site-packages/celery/worker/worker.py", line 202, in start
+    self.blueprint.start(self)
+  File "/Users/mac/ph-eye/backend/venv/lib/python3.11/site-packages/celery/bootsteps.py", line 116, in start
+    step.start(parent)
+  File "/Users/mac/ph-eye/backend/venv/lib/python3.11/site-packages/celery/bootsteps.py", line 365, in start
+    return self.obj.start()
+           ^^^^^^^^^^^^^^^^
+  File "/Users/mac/ph-eye/backend/venv/lib/python3.11/site-packages/celery/worker/consumer/consumer.py", line 340, in start
+    blueprint.start(self)
+  File "/Users/mac/ph-eye/backend/venv/lib/python3.11/site-packages/celery/bootsteps.py", line 116, in start
+    step.start(parent)
+  File "/Users/mac/ph-eye/backend/venv/lib/python3.11/site-packages/celery/worker/consumer/consumer.py", line 742, in start
+    c.loop(*c.loop_args())
+  File "/Users/mac/ph-eye/backend/venv/lib/python3.11/site-packages/celery/worker/loops.py", line 86, in asynloop
+    state.maybe_shutdown()
+  File "/Users/mac/ph-eye/backend/venv/lib/python3.11/site-packages/celery/worker/state.py", line 93, in maybe_shutdown
+    raise WorkerShutdown(should_stop)
+celery.exceptions.WorkerShutdown: 0
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/mac/ph-eye/backend/venv/lib/python3.11/site-packages/billiard/pool.py", line 1265, in mark_as_worker_lost
+    raise WorkerLostError(
+billiard.exceptions.WorkerLostError: Worker exited prematurely: signal 15 (SIGTERM) Job: 1.
+"""

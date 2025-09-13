@@ -1,25 +1,31 @@
-import { supabaseServer } from "@/lib/supabase/server";
+import { createClient } from "@supabase/supabase-js";
+
+const supabaseServer = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
 export interface Article {
-  id: string | number;
-  title: string;
-  url: string | null;
-  content: string | null;
-  published_at: string | null;
+  id: number;
   source: string;
   category: string | null;
+  raw_category: string | null;
+  title: string;
+  url: string;
+  content: string;
+  published_at: string;
+  created_at: string;
 }
 
-export async function fetchAllArticles(limit: number = 20): Promise<Record<string, Article[]>> {
+export async function fetchAllArticles(limit: number = 10): Promise<Record<string, Article[]>> {
   const sources = [
-    // Removed "ABS-CBN"
-    "Manila Times", 
     "GMA",
-    "Rappler", 
     "Inquirer",
-    "Philstar",
+    "Philstar",  // Fixed: was "PhilStar"
     "Sunstar",
-    "Manila Bulletin"
+    "Manila Bulletin",
+    "Manila Times",
+    "Rappler"
   ];
 
   // Create parallel queries for all sources
@@ -58,29 +64,50 @@ export interface AnalysisRow {
   model_type: string;
   sentiment_score: number | null;
   sentiment_label: string | null;
+  confidence_score: number | null;
+  processing_time_ms: number | null;
+  model_metadata: any;
   created_at: string;
 }
 
-interface BulkAnalysisResponse {
-  data: (AnalysisRow | null)[];
-  ok?: boolean;
-  error?: string;
+export interface BulkAnalysisResponse {
+  analysis: AnalysisRow[];
 }
 
-export async function fetchLatestAnalysisByIds(articleIds: (number | string)[]): Promise<Record<string, AnalysisRow | null>> {
-  if (!articleIds.length) return {};
-  const base = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
-  const qs = encodeURIComponent(articleIds.map(String).join(','));
+export async function fetchLatestAnalysisByIds(articleIds: number[]): Promise<Record<number, AnalysisRow | null>> {
+  if (articleIds.length === 0) return {};
+
   try {
-    const res = await fetch(`${base}/ml/analysis?ids=${qs}`, { cache: 'no-store' });
-    const json: BulkAnalysisResponse = await res.json();
-    const rows = json?.data || [];
-    const map: Record<string, AnalysisRow | null> = {};
-    articleIds.forEach((id, idx) => { map[String(id)] = rows[idx] || null; });
-    return map;
-  } catch {
-    const map: Record<string, AnalysisRow | null> = {};
-    articleIds.forEach(id => { map[String(id)] = null; });
-    return map;
+    const response = await fetch(
+      `${process.env.NEXT_PUBLIC_BACKEND_URL}/ml/analysis?ids=${articleIds.join(',')}`,
+      { cache: 'no-store' }
+    );
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    
+    const data: BulkAnalysisResponse = await response.json();
+    const analysisMap: Record<number, AnalysisRow | null> = {};
+    
+    // Group by article_id and get the latest analysis for each
+    const latestByArticle: Record<number, AnalysisRow> = {};
+    
+    for (const analysis of data.analysis) {
+      const articleId = analysis.article_id;
+      if (!latestByArticle[articleId] || new Date(analysis.created_at) > new Date(latestByArticle[articleId].created_at)) {
+        latestByArticle[articleId] = analysis;
+      }
+    }
+    
+    // Create the final map
+    for (const articleId of articleIds) {
+      analysisMap[articleId] = latestByArticle[articleId] || null;
+    }
+    
+    return analysisMap;
+  } catch (error) {
+    console.error('Failed to fetch analysis:', error);
+    return {};
   }
 }

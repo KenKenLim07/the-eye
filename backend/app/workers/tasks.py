@@ -38,7 +38,7 @@ def scrape_sample(source: str = "Inquirer"):
 
     # Insert a sample row; ignore duplicate URLs
     try:
-        existing = sb.table("articles").select("id").eq("url", url).limit(1).execute()
+        existing = sb.table("articles").eq("url", url).limit(1).execute()
         if existing.data:
             return {"ok": True, "skipped": True, "url": url}
         res = sb.table("articles").insert({

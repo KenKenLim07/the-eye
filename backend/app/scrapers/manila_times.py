@@ -47,6 +47,18 @@ class ScrapingResult:
     metadata: Dict[str, Any]
 
 class ManilaTimesScraper:
+    # Add enhanced retry mixin
+    def __init__(self):
+        super().__init__()
+        # Import enhanced retry functionality
+        from .manila_times_enhanced import EnhancedRetryMixin
+        self.retry_mixin = EnhancedRetryMixin()
+        self.name = "manila_times"
+        logger.info(f"{self.name}: Initialized with enhanced retry logic")
+
+    def _fetch_with_enhanced_retry(self, url: str, max_retries: int = 5) -> Optional[str]:
+        """Use enhanced retry logic."""
+        return self.retry_mixin.fetch_with_enhanced_retry(url, max_retries)
     """BLACKHAT Manila Times Scraper - Ultra-Conservative Stealth Approach with 502 handling"""
 
     BASE_URL = "https://www.manilatimes.net"
@@ -149,7 +161,7 @@ class ManilaTimesScraper:
             logger.warning(f"{self.name}: Date normalization error: {e}")
             return datetime.now(timezone.utc).isoformat()
 
-    def _fetch_with_retry(self, url: str, max_retries: int = 3) -> Optional[str]:
+    def _fetch_with_enhanced_retry(self, url: str, max_retries: int = 3) -> Optional[str]:
         """Fetch URL with retry logic for 502 errors."""
         for attempt in range(max_retries):
             try:
@@ -243,7 +255,7 @@ class ManilaTimesScraper:
         seen = set()
         try:
             for path in self.DISCOVERY_PATHS:
-                html = self._fetch_with_retry(urljoin(self.BASE_URL, path))
+                html = self._fetch_with_enhanced_retry(urljoin(self.BASE_URL, path))
                 if not html:
                     continue
                 soup = BeautifulSoup(html, 'html.parser')
@@ -537,7 +549,7 @@ class ManilaTimesScraper:
                 
                 # Fetch and parse
                 logger.info(f"{self.name}: Scraping {url}")
-                html = self._fetch_with_retry(url)
+                html = self._fetch_with_enhanced_retry(url)
                 
                 if not html:
                     error_msg = f"Failed to fetch {url} (likely 502 or network error)"

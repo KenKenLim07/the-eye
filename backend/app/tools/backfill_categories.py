@@ -124,7 +124,7 @@ RESOLVERS = {
 # -----------------------------
 
 def fetch_candidates(sb, source: Optional[str], limit: int, offset: int) -> List[Dict[str, Any]]:
-    q = sb.table("articles").select("id, url, source, category, raw_category").order("inserted_at", desc=True)
+    q = sb.table("articles").order("inserted_at", desc=True)
     if source:
         q = q.eq("source", source)
     # missing or generic

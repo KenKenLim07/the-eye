@@ -6,8 +6,18 @@ from celery.result import AsyncResult
 from typing import Optional
 from app.core.supabase import get_supabase
 from app.workers.ml_tasks import analyze_articles_task
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(title="PH Eye Backend", version="0.1.0")
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://localhost:3001", "http://127.0.0.1:3000", "http://127.0.0.1:3001"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.get("/")
 async def root():
@@ -19,7 +29,14 @@ async def health():
 
 @app.post("/scrape/run")
 async def run_scrape(payload: dict = Body(default={})):
-    sources = payload.get("sources") or ["inquirer"]
+    # Handle both 'source' (singular) and 'sources' (plural) parameters
+    if "source" in payload:
+        sources = [payload["source"]]
+    elif "sources" in payload:
+        sources = payload["sources"]
+    else:
+        sources = ["inquirer"]  # Default fallback
+    
     jobs = []
     for s in sources:
         if s == "inquirer":
@@ -49,177 +66,228 @@ async def run_scrape(payload: dict = Body(default={})):
     return {"queued": True, "jobs": jobs}
 
 @app.get("/scrape/status/{task_id}")
-async def get_task_status(task_id: str):
-    """Get the status and result of a scraping task."""
-    task_result = AsyncResult(task_id, app=celery)
-    
-    if task_result.ready():
-        if task_result.successful():
-            return {
-                "task_id": task_id,
-                "status": "completed",
-                "result": task_result.result
-            }
+async def get_scrape_status(task_id: str):
+    try:
+        result = AsyncResult(task_id, app=celery)
+        if result.ready():
+            if result.successful():
+                return {"status": "completed", "result": result.result}
+            else:
+                return {"status": "failed", "error": str(result.result)}
         else:
-            return {
-                "task_id": task_id,
-                "status": "failed",
-                "error": str(task_result.result)
-            }
-    else:
-        return {
-            "task_id": task_id,
-            "status": "pending",
-            "info": task_result.info
-        }
+            return {"status": "pending"}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
 
-@app.get("/scrape/active")
-async def get_active_tasks():
-    """Get currently active scraping tasks."""
-
-# New: logs endpoints
-@app.get("/logs/recent")
-async def get_recent_logs(source: Optional[str] = None, limit: int = 20):
+@app.get("/articles")
+async def get_articles(limit: int = 50, offset: int = 0, source: Optional[str] = None, category: Optional[str] = None):
     sb = get_supabase()
-    q = sb.table("scraping_logs").select(
-        "run_id,source,status,articles_scraped,started_at,completed_at,execution_time_ms"
-    ).order("started_at", desc=True).limit(max(1, min(limit, 100)))
+    
+    query = sb.table("articles").select("*")
+    
     if source:
-        q = q.eq("source", source)
-    res = q.execute()
-    return {"data": res.data or []}
-
-@app.get("/logs/{run_id}")
-async def get_log_by_run_id(run_id: str):
-    sb = get_supabase()
-    res = sb.table("scraping_logs").select("*").eq("run_id", run_id).limit(1).execute()
-    return {"data": (res.data or [None])[0]} 
-
-# New: diagnostics endpoint
-@app.get("/diagnostics")
-async def diagnostics(dry_run: bool = False, max_articles: int = 1):
-    """Comprehensive diagnostics for scrapers, Celery, and Supabase.
-    - Checks Supabase connectivity and basic permissions
-    - Confirms Celery broker/backends reachability
-    - Verifies all scraper tasks are registered
-    - Optionally triggers 1-article dry runs per scraper (non-blocking)
-    """
-    report: dict = {
-        "env": {
-            "broker": settings.celery_broker_url,
-            "result_backend": settings.celery_result_backend,
-            "supabase_url": settings.supabase_url[:8] + "…" if settings.supabase_url else None,
-        },
-        "supabase": {},
-        "celery": {},
-        "tasks": {},
-        "dry_runs": [],
-    }
-
-    # Supabase ping
+        query = query.eq("source", source)
+    if category:
+        query = query.eq("category", category)
+    
+    query = query.order("published_at", desc=True).range(offset, offset + limit - 1)
+    
     try:
-        sb = get_supabase()
-        ping = sb.table("scraping_logs").select("id").limit(1).execute()
-        report["supabase"] = {"ok": True, "rows": len(ping.data or [])}
+        result = query.execute()
+        return {"articles": result.data, "count": len(result.data)}
     except Exception as e:
-        report["supabase"] = {"ok": False, "error": str(e)}
+        return {"error": str(e), "articles": []}
 
-    # Celery ping
-    try:
-        insp = celery.control.inspect(timeout=2)
-        active = insp.active() or {}
-        scheduled = insp.scheduled() or {}
-        registered = insp.registered() or {}
-        report["celery"] = {
-            "ok": True,
-            "workers": list(active.keys()) if isinstance(active, dict) else [],
-            "active_counts": {k: len(v or []) for k, v in (active or {}).items()},
-            "scheduled_counts": {k: len(v or []) for k, v in (scheduled or {}).items()},
-        }
-        # Task registration expectations
-        expected = {
-            "app.workers.tasks.scrape_inquirer_task": False,
-            "app.workers.tasks.scrape_abs_cbn_task": False,
-            "app.workers.tasks.scrape_gma_task": False,
-            "app.workers.tasks.scrape_philstar_task": False,
-            "app.workers.tasks.scrape_manila_bulletin_task": False,
-            "app.workers.tasks.scrape_rappler_task": False,
-            "app.workers.tasks.scrape_sunstar_task": False,
-            "app.workers.tasks.scrape_manila_times_task": False,
-        }
-        # Consolidate registered task names from all workers
-        all_registered = set()
-        for names in (registered or {}).values():
-            for n in (names or []):
-                all_registered.add(n)
-        for name in expected.keys():
-            expected[name] = name in all_registered
-        report["tasks"] = expected
-    except Exception as e:
-        report["celery"] = {"ok": False, "error": str(e)}
-
-    # Optional dry-run (enqueue minimal jobs)
-    if dry_run:
-        try:
-            jobs = []
-            jobs.append({"source": "inquirer", "task_id": str(scrape_inquirer_task.delay())})
-            jobs.append({"source": "gma", "task_id": str(scrape_gma_task.delay())})
-            jobs.append({"source": "philstar", "task_id": str(scrape_philstar_task.delay())})
-            jobs.append({"source": "rappler", "task_id": str(scrape_rappler_task.delay())})
-            jobs.append({"source": "sunstar", "task_id": str(scrape_sunstar_task.delay())})
-            jobs.append({"source": "manila_times", "task_id": str(scrape_manila_times_task.delay())})
-            jobs.append({"source": "manila_bulletin", "task_id": str(scrape_manila_bulletin_task.delay())})
-            report["dry_runs"] = jobs
-        except Exception as e:
-            report["dry_runs"] = {"error": str(e)}
-
-    return report 
-
-# ML endpoints
-@app.post("/ml/analyze")
-async def ml_analyze(payload: dict = Body(default={})):
-    """Queue analysis for specific article_ids or by time window.
-    Body: { article_ids?: number[], since?: ISODate, model_version?: string }
-    """
+@app.get("/articles/{article_id}")
+async def get_article(article_id: int):
     sb = get_supabase()
-    article_ids = payload.get("article_ids") or []
-    since = payload.get("since")
-    if not article_ids and since:
-        q = sb.table("articles").select("id").gte("published_at", since).limit(5000)
-        res = q.execute()
-        article_ids = [r["id"] for r in (res.data or [])]
-    if not article_ids:
-        return {"queued": False, "reason": "no_article_ids"}
-    job = analyze_articles_task.delay(article_ids)
-    return {"queued": True, "task_id": str(job), "count": len(article_ids)}
+    try:
+        result = sb.table("articles").eq("id", article_id).execute()
+        if result.data:
+            return result.data[0]
+        else:
+            return {"error": "Article not found"}
+    except Exception as e:
+        return {"error": str(e)}
 
 @app.get("/articles/{article_id}/analysis")
 async def get_article_analysis(article_id: int):
     sb = get_supabase()
-    res = sb.table("bias_analysis").select("*").eq("article_id", article_id).order("created_at", desc=True).limit(1).execute()
-    return {"data": (res.data or [None])[0]} 
+    try:
+        result = sb.table("bias_analysis").eq("article_id", article_id).order("created_at", desc=True).limit(1).execute()
+        if result.data:
+            return result.data[0]
+        else:
+            return {"error": "Analysis not found"}
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.post("/ml/analyze")
+async def analyze_articles(payload: dict = Body(default={})):
+    article_ids = payload.get("article_ids")
+    since = payload.get("since")
+    
+    if not article_ids and not since:
+        return {"error": "Either article_ids or since must be provided"}
+    
+    sb = get_supabase()
+    
+    if since:
+        # Get articles from the specified date
+        try:
+            result = sb.table("articles").gte("published_at", since).execute()
+            article_ids = [row["id"] for row in result.data or []]
+        except Exception as e:
+            return {"error": f"Failed to fetch articles: {e}"}
+    
+    if not article_ids:
+        return {"error": "No articles found for analysis"}
+    
+    # Queue analysis task
+    try:
+        task = analyze_articles_task.delay(article_ids)
+        return {"queued": True, "task_id": str(task), "article_count": len(article_ids)}
+    except Exception as e:
+        return {"error": f"Failed to queue analysis: {e}"}
 
 @app.get("/ml/analysis")
-async def get_bulk_article_analysis(ids: str):
-    """
-    Bulk latest analysis for article IDs.
-    Query: ?ids=1,2,3
-    Returns: { data: [{article_id, ...latest row...}, ...] }
-    """
+async def get_analysis(ids: str):
+    try:
+        article_ids = [int(id.strip()) for id in ids.split(",") if id.strip()]
+    except ValueError:
+        return {"error": "Invalid article IDs format"}
+    
     sb = get_supabase()
     try:
-        id_list = [int(x) for x in (ids or "").split(",") if x.strip().isdigit()]
-        if not id_list:
-            return {"data": []}
-        res = sb.table("bias_analysis").select("*").in_("article_id", id_list).order("created_at", desc=True).limit(10000).execute()
-        rows = res.data or []
-        latest: dict[int, dict] = {}
-        for r in rows:
-            aid = int(r.get("article_id"))
-            if aid not in latest:
-                latest[aid] = r
-        # Preserve input order
-        data = [latest.get(aid) for aid in id_list]
-        return {"data": data}
+        result = sb.table("bias_analysis").select("*").in_("article_id", article_ids).order("created_at", desc=True).limit(50000).execute()
+        return {"analysis": result.data or []}
     except Exception as e:
-        return {"ok": False, "error": str(e)}, 500 
+        return {"error": str(e)}
+
+@app.get("/ml/trends")
+async def get_trends(period: str = "7d", source: Optional[str] = None):
+    sb = get_supabase()
+    
+    # Calculate date range
+    from datetime import datetime, timedelta
+    now = datetime.now()
+    
+    if period == "1d":
+        start_date = now - timedelta(days=1)
+    elif period == "7d":
+        start_date = now - timedelta(days=7)
+    elif period == "30d":
+        start_date = now - timedelta(days=30)
+    else:
+        start_date = now - timedelta(days=7)
+    
+    start_date_str = start_date.isoformat()
+    
+    try:
+        # Get articles from the period
+        query = sb.table("articles").gte("published_at", start_date_str).order("published_at", desc=True)
+        
+        if source:
+            query = query.eq("source", source)
+        
+        articles_result = query.limit(1000).execute()
+        articles = articles_result.data or []
+        
+        if not articles:
+            return {
+                "ok": True,
+                "summary": {
+                    "period": period,
+                    "source": source,
+                    "total_articles": 0,
+                    "positive_pct": 0,
+                    "negative_pct": 0,
+                    "neutral_pct": 0,
+                    "avg_daily_articles": 0
+                },
+                "timeline": []
+            }
+        
+        # Get analysis for these articles
+        article_ids = [a["id"] for a in articles]
+        analysis_result = sb.table("bias_analysis").in_("article_id", article_ids).eq("model_version", "vader_v1").eq("model_type", "sentiment").execute()
+        analysis_data = analysis_result.data or []
+        
+        # Group by date
+        from collections import defaultdict
+        daily_data = defaultdict(lambda: {"positive": 0, "negative": 0, "neutral": 0, "total": 0, "sentiment_scores": []})
+        
+        for analysis in analysis_data:
+            article_id = analysis["article_id"]
+            sentiment_label = analysis.get("sentiment_label", "neutral")
+            sentiment_score = analysis.get("sentiment_score", 0)
+            
+            # Find the article to get its date
+            article = next((a for a in articles if a["id"] == article_id), None)
+            if article:
+                date_str = article["published_at"][:10]  # YYYY-MM-DD
+                daily_data[date_str]["total"] += 1
+                daily_data[date_str]["sentiment_scores"].append(sentiment_score)
+                
+                if sentiment_label == "positive":
+                    daily_data[date_str]["positive"] += 1
+                elif sentiment_label == "negative":
+                    daily_data[date_str]["negative"] += 1
+                else:
+                    daily_data[date_str]["neutral"] += 1
+        
+        # Convert to timeline format
+        timeline = []
+        total_articles = 0
+        total_positive = 0
+        total_negative = 0
+        total_neutral = 0
+        
+        for date_str in sorted(daily_data.keys()):
+            data = daily_data[date_str]
+            total = data["total"]
+            positive = data["positive"]
+            negative = data["negative"]
+            neutral = data["neutral"]
+            
+            total_articles += total
+            total_positive += positive
+            total_negative += negative
+            total_neutral += neutral
+            
+            avg_sentiment = sum(data["sentiment_scores"]) / len(data["sentiment_scores"]) if data["sentiment_scores"] else 0
+            
+            timeline.append({
+                "date": date_str,
+                "positive": positive,
+                "negative": negative,
+                "neutral": neutral,
+                "total": total,
+                "avg_sentiment": avg_sentiment,
+                "positive_pct": round((positive / total * 100) if total > 0 else 0, 1),
+                "negative_pct": round((negative / total * 100) if total > 0 else 0, 1),
+                "neutral_pct": round((neutral / total * 100) if total > 0 else 0, 1)
+            })
+        
+        # Calculate summary
+        positive_pct = round((total_positive / total_articles * 100) if total_articles > 0 else 0, 1)
+        negative_pct = round((total_negative / total_articles * 100) if total_articles > 0 else 0, 1)
+        neutral_pct = round((total_neutral / total_articles * 100) if total_articles > 0 else 0, 1)
+        avg_daily_articles = round(total_articles / len(timeline), 1) if timeline else 0
+        
+        return {
+            "ok": True,
+            "summary": {
+                "period": period,
+                "source": source,
+                "total_articles": total_articles,
+                "positive_pct": positive_pct,
+                "negative_pct": negative_pct,
+                "neutral_pct": neutral_pct,
+                "avg_daily_articles": avg_daily_articles
+            },
+            "timeline": timeline
+        }
+        
+    except Exception as e:
+        return {"error": str(e)}

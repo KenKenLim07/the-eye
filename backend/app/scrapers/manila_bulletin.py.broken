@@ -485,8 +485,7 @@ class ManilaBulletinScraper:
                     links.append(full)
         # Fallback: scan all anchors and pick likely article URLs (year in path)
         if not links:
-            # FIXED: Only iterate over Tag elements, not Doctype or other non-Tag objects
-            for a in soup.find_all('a'):
+            for a in soup:
                 href = a.get("href")
                 if not href:
                     continue

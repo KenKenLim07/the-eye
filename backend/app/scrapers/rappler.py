@@ -454,7 +454,7 @@ class RapplerScraper:
             soup = BeautifulSoup(xml_content, "xml")
             links = []
             
-            for item in soup.select("item"):
+            for item in soup:
                 link_el = item.select_one("link")
                 if link_el:
                     url = link_el.get_text().strip()
@@ -481,7 +481,7 @@ class RapplerScraper:
             soup = BeautifulSoup(xml_content, "xml")
             links = []
             
-            for item in soup.select("item"):
+            for item in soup:
                 link_el = item.select_one("link")
                 if link_el:
                     gn_url = link_el.get_text().strip()
