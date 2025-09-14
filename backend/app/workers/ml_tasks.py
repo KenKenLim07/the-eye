@@ -6,7 +6,7 @@ from app.ml.bias import build_bias_row_for_vader
 def analyze_articles_task(self, article_ids: list[int]):
     sb = get_supabase()
     # Fetch articles
-    res = sb.table("articles").in_("id", article_ids).execute()
+    res = sb.table("articles").select("*").in_("id", article_ids).execute()
     rows = res.data or []
 
     out_rows = []

@@ -135,7 +135,7 @@ async def analyze_articles(payload: dict = Body(default={})):
     if since:
         # Get articles from the specified date
         try:
-            result = sb.table("articles").gte("published_at", since).execute()
+            result = sb.table("articles").select("id").gte("published_at", since).execute()
             article_ids = [row["id"] for row in result.data or []]
         except Exception as e:
             return {"error": f"Failed to fetch articles: {e}"}
@@ -185,7 +185,7 @@ async def get_trends(period: str = "7d", source: Optional[str] = None):
     
     try:
         # Get articles from the period
-        query = sb.table("articles").gte("published_at", start_date_str).order("published_at", desc=True)
+        query = sb.table("articles").select("*").gte("published_at", start_date_str).order("published_at", desc=True)
         
         if source:
             query = query.eq("source", source)
@@ -210,7 +210,7 @@ async def get_trends(period: str = "7d", source: Optional[str] = None):
         
         # Get analysis for these articles
         article_ids = [a["id"] for a in articles]
-        analysis_result = sb.table("bias_analysis").in_("article_id", article_ids).eq("model_version", "vader_v1").eq("model_type", "sentiment").execute()
+        analysis_result = sb.table("bias_analysis").select("*").in_("article_id", article_ids).eq("model_version", "vader_v1").eq("model_type", "sentiment").execute()
         analysis_data = analysis_result.data or []
         
         # Group by date

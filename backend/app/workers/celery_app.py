@@ -20,7 +20,7 @@ celery.conf.update(
     beat_sync_every=1,  # Sync every task
 )
 
-celery.autodiscover_tasks(["app.workers"])
+celery.autodiscover_tasks(["app.workers", "app.workers.ml_tasks"])
 
 # 🚀 PRODUCTION SCHEDULES: Intelligent intervals based on source characteristics
 celery.conf.beat_schedule = {

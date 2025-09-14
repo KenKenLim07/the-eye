@@ -1,11 +1,19 @@
-[2025-09-13 03:03:23,049: INFO/MainProcess] beat: Starting...
-celery beat v5.3.6 (emerald-rush) is starting.
-__    -    ... __   -        _
-LocalTime -> 2025-09-13 03:03:23
-Configuration ->
-    . broker -> redis://localhost:6379/0
-    . loader -> celery.loaders.app.AppLoader
-    . scheduler -> celery.beat.PersistentScheduler
-    . db -> celerybeat-schedule
-    . logfile -> [stderr]@%INFO
-    . maxinterval -> 5.00 minutes (300s)
+[2025-09-13 19:01:15,707: INFO/MainProcess] beat: Starting...
+[2025-09-13 19:01:15,716: ERROR/MainProcess] Removing corrupted schedule file 'celerybeat-schedule': error(79, 'Inappropriate file type or format')
+Traceback (most recent call last):
+  File "/Users/mac/ph-eye/backend/venv/lib/python3.11/site-packages/celery/beat.py", line 531, in setup_schedule
+    self._store = self._open_schedule()
+                  ^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mac/ph-eye/backend/venv/lib/python3.11/site-packages/celery/beat.py", line 521, in _open_schedule
+    return self.persistence.open(self.schedule_filename, writeback=True)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/Cellar/python@3.11/3.11.13/Frameworks/Python.framework/Versions/3.11/lib/python3.11/shelve.py", line 243, in open
+    return DbfilenameShelf(filename, flag, protocol, writeback)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/Cellar/python@3.11/3.11.13/Frameworks/Python.framework/Versions/3.11/lib/python3.11/shelve.py", line 227, in __init__
+    Shelf.__init__(self, dbm.open(filename, flag), protocol, writeback)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/Cellar/python@3.11/3.11.13/Frameworks/Python.framework/Versions/3.11/lib/python3.11/dbm/__init__.py", line 95, in open
+    return mod.open(file, flag, mode)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+_dbm.error: [Errno 79] Inappropriate file type or format: 'celerybeat-schedule'
