@@ -1,5 +1,5 @@
-[2025-09-13 19:01:15,707: INFO/MainProcess] beat: Starting...
-[2025-09-13 19:01:15,716: ERROR/MainProcess] Removing corrupted schedule file 'celerybeat-schedule': error(79, 'Inappropriate file type or format')
+[2025-09-18 21:25:26,568: INFO/MainProcess] beat: Starting...
+[2025-09-18 21:25:26,578: ERROR/MainProcess] Removing corrupted schedule file 'celerybeat-schedule': error(79, 'Inappropriate file type or format')
 Traceback (most recent call last):
   File "/Users/mac/ph-eye/backend/venv/lib/python3.11/site-packages/celery/beat.py", line 531, in setup_schedule
     self._store = self._open_schedule()

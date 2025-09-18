@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Philippine News Political Bias Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .card { background: white; padding: 20px; margin: 20px 0; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; }
+        .stat { text-align: center; padding: 15px; background: #f8f9fa; border-radius: 5px; }
+        .stat-value { font-size: 2em; font-weight: bold; color: #007bff; }
+        .stat-label { color: #666; margin-top: 5px; }
+        .chart-container { height: 400px; margin: 20px 0; }
+        .source-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px; }
+        .source-item { padding: 15px; border-left: 4px solid #007bff; background: #f8f9fa; }
+        .bias-positive { border-left-color: #28a745; }
+        .bias-negative { border-left-color: #dc3545; }
+        .bias-neutral { border-left-color: #6c757d; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🇵🇭 Philippine News Political Bias Analysis</h1>
+        
+        <div class="card">
+            <h2>📊 Overview</h2>
+            <div class="stats" id="overview-stats">
+                <!-- Stats will be populated by JavaScript -->
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>📈 Bias Distribution</h2>
+            <div class="chart-container">
+                <canvas id="biasChart"></canvas>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>📰 Source Comparison</h2>
+            <div class="source-list" id="source-list">
+                <!-- Sources will be populated by JavaScript -->
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>📅 Timeline Trends</h2>
+            <div class="chart-container">
+                <canvas id="timelineChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Load data from your API
+        async function loadDashboardData() {
+            try {
+                const response = await fetch('http://localhost:8000/dashboard/comprehensive?period=30d');
+                const data = await response.json();
+                
+                if (data.ok) {
+                    populateOverview(data);
+                    createBiasChart(data);
+                    populateSources(data);
+                    createTimelineChart(data);
+                } else {
+                    console.error('Error loading data:', data.error);
+                }
+            } catch (error) {
+                console.error('Error fetching data:', error);
+            }
+        }
+
+        function populateOverview(data) {
+            const statsContainer = document.getElementById('overview-stats');
+            statsContainer.innerHTML = `
+                <div class="stat">
+                    <div class="stat-value">${data.articles.total}</div>
+                    <div class="stat-label">Total Articles</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value">${data.political_bias.total_analyses}</div>
+                    <div class="stat-label">Analyses Completed</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value">${Math.round((data.political_bias.total_analyses / data.articles.total) * 100)}%</div>
+                    <div class="stat-label">Completion Rate</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value">${data.political_bias.avg_bias_score.toFixed(3)}</div>
+                    <div class="stat-label">Avg Bias Score</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value">${data.political_bias.avg_confidence.toFixed(3)}</div>
+                    <div class="stat-label">Avg Confidence</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value">${data.source_comparison.length}</div>
+                    <div class="stat-label">Sources Analyzed</div>
+                </div>
+            `;
+        }
+
+        function createBiasChart(data) {
+            const ctx = document.getElementById('biasChart').getContext('2d');
+            new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: Object.keys(data.political_bias.distribution),
+                    datasets: [{
+                        data: Object.values(data.political_bias.distribution),
+                        backgroundColor: [
+                            '#28a745', // pro_government - green
+                            '#dc3545', // pro_opposition - red
+                            '#6c757d', // neutral - gray
+                            '#ffc107'  // mixed - yellow
+                        ]
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom'
+                        }
+                    }
+                }
+            });
+        }
+
+        function populateSources(data) {
+            const sourceContainer = document.getElementById('source-list');
+            sourceContainer.innerHTML = data.source_comparison.map(source => {
+                const biasClass = source.political_bias.avg_bias_score > 0.1 ? 'bias-positive' : 
+                                 source.political_bias.avg_bias_score < -0.1 ? 'bias-negative' : 'bias-neutral';
+                
+                return `
+                    <div class="source-item ${biasClass}">
+                        <h3>${source.source}</h3>
+                        <p><strong>Bias Score:</strong> ${source.political_bias.avg_bias_score.toFixed(3)}</p>
+                        <p><strong>Confidence:</strong> ${source.political_bias.avg_confidence.toFixed(3)}</p>
+                        <p><strong>Articles:</strong> ${source.article_count}</p>
+                        <p><strong>Distribution:</strong></p>
+                        <ul>
+                            ${Object.entries(source.political_bias.distribution).map(([key, value]) => 
+                                `<li>${key}: ${value}</li>`
+                            ).join('')}
+                        </ul>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function createTimelineChart(data) {
+            const ctx = document.getElementById('timelineChart').getContext('2d');
+            const timeline = data.timeline.slice(-14); // Last 14 days
+            
+            new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: timeline.map(d => d.date),
+                    datasets: [
+                        {
+                            label: 'Pro-Government',
+                            data: timeline.map(d => d.political_bias.distribution.pro_government),
+                            borderColor: '#28a745',
+                            backgroundColor: 'rgba(40, 167, 69, 0.1)',
+                            tension: 0.1
+                        },
+                        {
+                            label: 'Pro-Opposition',
+                            data: timeline.map(d => d.political_bias.distribution.pro_opposition),
+                            borderColor: '#dc3545',
+                            backgroundColor: 'rgba(220, 53, 69, 0.1)',
+                            tension: 0.1
+                        },
+                        {
+                            label: 'Neutral',
+                            data: timeline.map(d => d.political_bias.distribution.neutral),
+                            borderColor: '#6c757d',
+                            backgroundColor: 'rgba(108, 117, 125, 0.1)',
+                            tension: 0.1
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+        }
+
+        // Load data when page loads
+        loadDashboardData();
+        
+        // Refresh data every 30 seconds
+        setInterval(loadDashboardData, 30000);
+    </script>
+</body>
+</html>

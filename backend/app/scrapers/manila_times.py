@@ -337,17 +337,63 @@ class ManilaTimesScraper:
             "p"
         ]
         
-        for selector in content_selectors:
-            content_elem = soup.select_one(selector)
-            if content_elem:
-                # Get all paragraphs
-                paragraphs = content_elem.find_all("p") if content_elem.name != "p" else [content_elem]
-                if paragraphs:
-                    content = " ".join([p.get_text(strip=True) for p in paragraphs if p.get_text(strip=True)])
-                    if content and len(content) > 100:  # Basic validation
-                        return content
-        
-        return None
+        # Prefer rich containers and score by paragraph count and text length
+        blacklist_selectors = [
+            "footer", "header", "nav", "aside", ".related", ".newsletter", ".author", ".share", ".tags", ".comments"
+        ]
+        # Remove obvious non-content blocks
+        for sel in blacklist_selectors:
+            for el in soup.select(sel):
+                el.decompose()
+
+        candidate_selectors = [
+            "article .td-post-content", "article .entry-content", "article .post-content", "article",
+            ".td-post-content", ".entry-content", ".post-content", ".content-article", ".article-body",
+            "main .content", "main"
+        ]
+
+        best_text = None
+        best_score = 0
+
+        def score_text(text: str) -> int:
+            if not text:
+                return 0
+            length = len(text)
+            sentences = max(1, text.count(".") + text.count("!") + text.count("?"))
+            return length + (sentences * 50)
+
+        # Evaluate candidates
+        for sel in candidate_selectors:
+            elem = soup.select_one(sel)
+            if not elem:
+                continue
+            # Collect paragraphs within this container
+            paragraphs = [p.get_text(strip=True) for p in elem.find_all("p")]
+            text = " ".join([t for t in paragraphs if t])
+            text = self._sanitize_text(text)
+            s = score_text(text)
+            if s > best_score and len(text) > 200:
+                best_text, best_score = text, s
+
+        # Fallback: pick the densest <div> by paragraph count
+        if not best_text:
+            candidates = []
+            for div in soup.find_all(["div", "section", "article" ]):
+                # skip if container looks like a blacklisted area
+                class_attr = " ".join(div.get("class", []))
+                if any(key in class_attr for key in ["footer", "header", "nav", "menu", "related", "share", "comment", "tag"]):
+                    continue
+                ps = [p.get_text(strip=True) for p in div.find_all("p")]
+                text = " ".join([t for t in ps if t])
+                text = self._sanitize_text(text)
+                if len(text) < 200:
+                    continue
+                candidates.append((len(ps), len(text), text))
+            if candidates:
+                candidates.sort(reverse=True)  # prioritize more paragraphs and longer text
+                best_text = candidates[0][2]
+
+        return best_text
 
     def _extract_published_date(self, soup: BeautifulSoup) -> Optional[str]:
         """Extract published date."""

@@ -1,0 +1,74 @@
+{
+  "total_articles": 1000,
+  "total_analyses": 812,
+  "completion_percentage": 81.2,
+  "avg_bias_score": 0.08,
+  "avg_confidence": 0.353,
+  "bias_distribution": {
+    "pro_government": 307,
+    "pro_opposition": 138,
+    "neutral": 353,
+    "mixed": 14
+  },
+  "top_sources": [
+    {
+      "source": "Manila Times",
+      "bias_score": 0.159,
+      "article_count": 113,
+      "confidence": 0.425
+    },
+    {
+      "source": "Sunstar",
+      "bias_score": 0.118,
+      "article_count": 198,
+      "confidence": 0.345
+    },
+    {
+      "source": "Manila Bulletin",
+      "bias_score": 0.087,
+      "article_count": 195,
+      "confidence": 0.35
+    },
+    {
+      "source": "GMA",
+      "bias_score": 0.084,
+      "article_count": 260,
+      "confidence": 0.321
+    },
+    {
+      "source": "Philstar",
+      "bias_score": 0.034,
+      "article_count": 10,
+      "confidence": 0.375
+    },
+    {
+      "source": "Rappler",
+      "bias_score": 0.03,
+      "article_count": 102,
+      "confidence": 0.386
+    },
+    {
+      "source": "PhilStar",
+      "bias_score": 0,
+      "article_count": 13,
+      "confidence": 0
+    },
+    {
+      "source": "ABS-CBN",
+      "bias_score": 0.0,
+      "article_count": 7,
+      "confidence": 0.344
+    },
+    {
+      "source": "Inquirer",
+      "bias_score": -0.046,
+      "article_count": 102,
+      "confidence": 0.337
+    }
+  ],
+  "timeline_summary": {
+    "total_days": 12,
+    "avg_articles_per_day": 83.3
+  },
+  "generated_at": "2025-09-14T08:51:51.026016"
+}

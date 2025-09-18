@@ -1,0 +1,520 @@
+{
+  "ok": true,
+  "period": "30d",
+  "source": null,
+  "articles": {
+    "total": 1000,
+    "by_source": {
+      "GMA": 260,
+      "Manila Bulletin": 195,
+      "Sunstar": 198,
+      "Inquirer": 102,
+      "Rappler": 102,
+      "Philstar": 10,
+      "Manila Times": 113,
+      "PhilStar": 13,
+      "ABS-CBN": 7
+    },
+    "by_date": {
+      "2025-09-04": 77,
+      "2025-09-05": 117,
+      "2025-09-03": 66,
+      "2025-09-13": 42,
+      "2025-09-12": 67,
+      "2025-09-14": 36,
+      "2025-09-07": 145,
+      "2025-09-08": 144,
+      "2025-09-11": 8,
+      "2025-09-09": 108,
+      "2025-09-10": 35,
+      "2025-09-06": 155
+    }
+  },
+  "sentiment": {
+    "total_analyses": 0,
+    "avg_compound": 0,
+    "distribution": {
+      "positive": 0,
+      "neutral": 0,
+      "negative": 0
+    }
+  },
+  "political_bias": {
+    "total_analyses": 812,
+    "avg_bias_score": 0.08,
+    "avg_confidence": 0.353,
+    "distribution": {
+      "pro_government": 307,
+      "pro_opposition": 138,
+      "neutral": 353,
+      "mixed": 14
+    }
+  },
+  "source_comparison": [
+    {
+      "source": "Manila Times",
+      "article_count": 113,
+      "sentiment": {
+        "avg_compound": 0,
+        "distribution": {
+          "positive": 0,
+          "neutral": 0,
+          "negative": 0
+        }
+      },
+      "political_bias": {
+        "avg_bias_score": 0.159,
+        "avg_confidence": 0.425,
+        "distribution": {
+          "pro_government": 48,
+          "pro_opposition": 10,
+          "neutral": 33,
+          "mixed": 0
+        }
+      }
+    },
+    {
+      "source": "Sunstar",
+      "article_count": 198,
+      "sentiment": {
+        "avg_compound": 0,
+        "distribution": {
+          "positive": 0,
+          "neutral": 0,
+          "negative": 0
+        }
+      },
+      "political_bias": {
+        "avg_bias_score": 0.118,
+        "avg_confidence": 0.345,
+        "distribution": {
+          "pro_government": 76,
+          "pro_opposition": 35,
+          "neutral": 46,
+          "mixed": 9
+        }
+      }
+    },
+    {
+      "source": "Manila Bulletin",
+      "article_count": 195,
+      "sentiment": {
+        "avg_compound": 0,
+        "distribution": {
+          "positive": 0,
+          "neutral": 0,
+          "negative": 0
+        }
+      },
+      "political_bias": {
+        "avg_bias_score": 0.087,
+        "avg_confidence": 0.35,
+        "distribution": {
+          "pro_government": 42,
+          "pro_opposition": 12,
+          "neutral": 97,
+          "mixed": 5
+        }
+      }
+    },
+    {
+      "source": "GMA",
+      "article_count": 260,
+      "sentiment": {
+        "avg_compound": 0,
+        "distribution": {
+          "positive": 0,
+          "neutral": 0,
+          "negative": 0
+        }
+      },
+      "political_bias": {
+        "avg_bias_score": 0.084,
+        "avg_confidence": 0.321,
+        "distribution": {
+          "pro_government": 82,
+          "pro_opposition": 23,
+          "neutral": 108,
+          "mixed": 0
+        }
+      }
+    },
+    {
+      "source": "Philstar",
+      "article_count": 10,
+      "sentiment": {
+        "avg_compound": 0,
+        "distribution": {
+          "positive": 0,
+          "neutral": 0,
+          "negative": 0
+        }
+      },
+      "political_bias": {
+        "avg_bias_score": 0.034,
+        "avg_confidence": 0.375,
+        "distribution": {
+          "pro_government": 4,
+          "pro_opposition": 2,
+          "neutral": 2,
+          "mixed": 0
+        }
+      }
+    },
+    {
+      "source": "Rappler",
+      "article_count": 102,
+      "sentiment": {
+        "avg_compound": 0,
+        "distribution": {
+          "positive": 0,
+          "neutral": 0,
+          "negative": 0
+        }
+      },
+      "political_bias": {
+        "avg_bias_score": 0.03,
+        "avg_confidence": 0.386,
+        "distribution": {
+          "pro_government": 36,
+          "pro_opposition": 25,
+          "neutral": 29,
+          "mixed": 0
+        }
+      }
+    },
+    {
+      "source": "PhilStar",
+      "article_count": 13,
+      "sentiment": {
+        "avg_compound": 0,
+        "distribution": {
+          "positive": 0,
+          "neutral": 0,
+          "negative": 0
+        }
+      },
+      "political_bias": {
+        "avg_bias_score": 0,
+        "avg_confidence": 0,
+        "distribution": {
+          "pro_government": 0,
+          "pro_opposition": 0,
+          "neutral": 0,
+          "mixed": 0
+        }
+      }
+    },
+    {
+      "source": "ABS-CBN",
+      "article_count": 7,
+      "sentiment": {
+        "avg_compound": 0,
+        "distribution": {
+          "positive": 0,
+          "neutral": 0,
+          "negative": 0
+        }
+      },
+      "political_bias": {
+        "avg_bias_score": 0.0,
+        "avg_confidence": 0.344,
+        "distribution": {
+          "pro_government": 0,
+          "pro_opposition": 0,
+          "neutral": 7,
+          "mixed": 0
+        }
+      }
+    },
+    {
+      "source": "Inquirer",
+      "article_count": 102,
+      "sentiment": {
+        "avg_compound": 0,
+        "distribution": {
+          "positive": 0,
+          "neutral": 0,
+          "negative": 0
+        }
+      },
+      "political_bias": {
+        "avg_bias_score": -0.046,
+        "avg_confidence": 0.337,
+        "distribution": {
+          "pro_government": 19,
+          "pro_opposition": 31,
+          "neutral": 31,
+          "mixed": 0
+        }
+      }
+    }
+  ],
+  "timeline": [
+    {
+      "date": "2025-09-03",
+      "articles": 66,
+      "sentiment": {
+        "avg_compound": 0,
+        "distribution": {
+          "positive": 0,
+          "neutral": 0,
+          "negative": 0
+        }
+      },
+      "political_bias": {
+        "avg_bias_score": 0.096,
+        "avg_confidence": 0.331,
+        "distribution": {
+          "pro_government": 24,
+          "pro_opposition": 9,
+          "neutral": 32,
+          "mixed": 1
+        }
+      }
+    },
+    {
+      "date": "2025-09-04",
+      "articles": 77,
+      "sentiment": {
+        "avg_compound": 0,
+        "distribution": {
+          "positive": 0,
+          "neutral": 0,
+          "negative": 0
+        }
+      },
+      "political_bias": {
+        "avg_bias_score": 0.058,
+        "avg_confidence": 0.344,
+        "distribution": {
+          "pro_government": 27,
+          "pro_opposition": 13,
+          "neutral": 32,
+          "mixed": 4
+        }
+      }
+    },
+    {
+      "date": "2025-09-05",
+      "articles": 117,
+      "sentiment": {
+        "avg_compound": 0,
+        "distribution": {
+          "positive": 0,
+          "neutral": 0,
+          "negative": 0
+        }
+      },
+      "political_bias": {
+        "avg_bias_score": 0.057,
+        "avg_confidence": 0.352,
+        "distribution": {
+          "pro_government": 35,
+          "pro_opposition": 20,
+          "neutral": 56,
+          "mixed": 4
+        }
+      }
+    },
+    {
+      "date": "2025-09-06",
+      "articles": 155,
+      "sentiment": {
+        "avg_compound": 0,
+        "distribution": {
+          "positive": 0,
+          "neutral": 0,
+          "negative": 0
+        }
+      },
+      "political_bias": {
+        "avg_bias_score": 0.066,
+        "avg_confidence": 0.354,
+        "distribution": {
+          "pro_government": 57,
+          "pro_opposition": 24,
+          "neutral": 71,
+          "mixed": 2
+        }
+      }
+    },
+    {
+      "date": "2025-09-07",
+      "articles": 145,
+      "sentiment": {
+        "avg_compound": 0,
+        "distribution": {
+          "positive": 0,
+          "neutral": 0,
+          "negative": 0
+        }
+      },
+      "political_bias": {
+        "avg_bias_score": 0.075,
+        "avg_confidence": 0.347,
+        "distribution": {
+          "pro_government": 49,
+          "pro_opposition": 26,
+          "neutral": 68,
+          "mixed": 2
+        }
+      }
+    },
+    {
+      "date": "2025-09-08",
+      "articles": 144,
+      "sentiment": {
+        "avg_compound": 0,
+        "distribution": {
+          "positive": 0,
+          "neutral": 0,
+          "negative": 0
+        }
+      },
+      "political_bias": {
+        "avg_bias_score": 0.107,
+        "avg_confidence": 0.355,
+        "distribution": {
+          "pro_government": 61,
+          "pro_opposition": 22,
+          "neutral": 60,
+          "mixed": 0
+        }
+      }
+    },
+    {
+      "date": "2025-09-09",
+      "articles": 108,
+      "sentiment": {
+        "avg_compound": 0,
+        "distribution": {
+          "positive": 0,
+          "neutral": 0,
+          "negative": 0
+        }
+      },
+      "political_bias": {
+        "avg_bias_score": 0.087,
+        "avg_confidence": 0.369,
+        "distribution": {
+          "pro_government": 22,
+          "pro_opposition": 11,
+          "neutral": 15,
+          "mixed": 0
+        }
+      }
+    },
+    {
+      "date": "2025-09-10",
+      "articles": 35,
+      "sentiment": {
+        "avg_compound": 0,
+        "distribution": {
+          "positive": 0,
+          "neutral": 0,
+          "negative": 0
+        }
+      },
+      "political_bias": {
+        "avg_bias_score": 0,
+        "avg_confidence": 0,
+        "distribution": {
+          "pro_government": 0,
+          "pro_opposition": 0,
+          "neutral": 0,
+          "mixed": 0
+        }
+      }
+    },
+    {
+      "date": "2025-09-11",
+      "articles": 8,
+      "sentiment": {
+        "avg_compound": 0,
+        "distribution": {
+          "positive": 0,
+          "neutral": 0,
+          "negative": 0
+        }
+      },
+      "political_bias": {
+        "avg_bias_score": 0,
+        "avg_confidence": 0,
+        "distribution": {
+          "pro_government": 0,
+          "pro_opposition": 0,
+          "neutral": 0,
+          "mixed": 0
+        }
+      }
+    },
+    {
+      "date": "2025-09-12",
+      "articles": 67,
+      "sentiment": {
+        "avg_compound": 0,
+        "distribution": {
+          "positive": 0,
+          "neutral": 0,
+          "negative": 0
+        }
+      },
+      "political_bias": {
+        "avg_bias_score": 0,
+        "avg_confidence": 0,
+        "distribution": {
+          "pro_government": 0,
+          "pro_opposition": 0,
+          "neutral": 0,
+          "mixed": 0
+        }
+      }
+    },
+    {
+      "date": "2025-09-13",
+      "articles": 42,
+      "sentiment": {
+        "avg_compound": 0,
+        "distribution": {
+          "positive": 0,
+          "neutral": 0,
+          "negative": 0
+        }
+      },
+      "political_bias": {
+        "avg_bias_score": 0.074,
+        "avg_confidence": 0.384,
+        "distribution": {
+          "pro_government": 14,
+          "pro_opposition": 7,
+          "neutral": 8,
+          "mixed": 0
+        }
+      }
+    },
+    {
+      "date": "2025-09-14",
+      "articles": 36,
+      "sentiment": {
+        "avg_compound": 0,
+        "distribution": {
+          "positive": 0,
+          "neutral": 0,
+          "negative": 0
+        }
+      },
+      "political_bias": {
+        "avg_bias_score": 0.141,
+        "avg_confidence": 0.376,
+        "distribution": {
+          "pro_government": 18,
+          "pro_opposition": 6,
+          "neutral": 11,
+          "mixed": 1
+        }
+      }
+    }
+  ],
+  "generated_at": "2025-09-14T08:51:51.026016"
+}
