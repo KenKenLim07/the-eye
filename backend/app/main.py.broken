@@ -1,0 +1,472 @@
+from fastapi import FastAPI, Body, Header, Query
+from .core.config import settings
+from app.workers.tasks import scrape_inquirer_task, scrape_abs_cbn_task, scrape_gma_task, scrape_philstar_task, scrape_manila_bulletin_task, scrape_rappler_task, scrape_sunstar_task, scrape_manila_times_task
+from app.workers.celery_app import celery
+from celery.result import AsyncResult
+from typing import Optional, List, Dict, Any
+from app.core.supabase import get_supabase
+from app.workers.ml_tasks import analyze_articles_task
+from fastapi.middleware.cors import CORSMiddleware
+from app.ml.bias import get_political_keywords_and_weights
+import os, json, subprocess, sys
+from datetime import datetime, timedelta, timezone
+import time
+from functools import lru_cache
+
+app = FastAPI(title="PH Eye Backend", version="0.1.0")
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://localhost:3001", "http://127.0.0.1:3000", "http://127.0.0.1:3001"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Simple in-memory cache
+_cache = {}
+_cache_ttl = {}
+
+def get_cached(key: str, ttl_seconds: int = 300):
+    """Get from cache if not expired"""
+    if key in _cache and key in _cache_ttl:
+        if time.time() < _cache_ttl[key]:
+            return _cache[key]
+        else:
+            # Expired, remove
+            del _cache[key]
+            del _cache_ttl[key]
+    return None
+
+def set_cached(key: str, value: any, ttl_seconds: int = 300):
+    """Set cache with TTL"""
+    _cache[key] = value
+    _cache_ttl[key] = time.time() + ttl_seconds
+
+@app.get("/")
+async def root():
+    return {"ok": True, "service": "ph-eye-backend"}
+
+@app.get("/health")
+async def health():
+    return {"ok": True}
+
+@app.post("/scrape/run")
+async def run_scrape(payload: dict = Body(default={})):
+    # Handle both 'source' (singular) and 'sources' (plural) parameters
+    if "source" in payload:
+        sources = [payload["source"]]
+    elif "sources" in payload:
+        sources = payload["sources"]
+    else:
+        sources = ["inquirer"]  # Default fallback
+    
+    jobs = []
+    for s in sources:
+        if s == "inquirer":
+            job = scrape_inquirer_task.delay()
+            jobs.append({"source": s, "task_id": str(job)})
+        elif s in ["abs_cbn", "abs-cbn", "abscbn"]:
+            job = scrape_abs_cbn_task.delay()
+            jobs.append({"source": "abs_cbn", "task_id": str(job)})
+        elif s == "gma":
+            job = scrape_gma_task.delay()
+            jobs.append({"source": s, "task_id": str(job)})
+        elif s == "philstar":
+            job = scrape_philstar_task.delay()
+            jobs.append({"source": s, "task_id": str(job)})
+        elif s == "manila_bulletin":
+            job = scrape_manila_bulletin_task.delay()
+            jobs.append({"source": s, "task_id": str(job)})
+        elif s == "rappler":
+            job = scrape_rappler_task.delay()
+            jobs.append({"source": s, "task_id": str(job)})
+        elif s == "sunstar":
+            job = scrape_sunstar_task.delay()
+            jobs.append({"source": s, "task_id": str(job)})
+        elif s == "manila_times":
+            job = scrape_manila_times_task.delay()
+            jobs.append({"source": s, "task_id": str(job)})
+        else:
+            jobs.append({"source": s, "error": "Unknown source"})
+    
+    return {"ok": True, "jobs": jobs}
+
+@app.get("/scrape/status/{task_id}")
+async def get_scrape_status(task_id: str):
+    try:
+        result = AsyncResult(task_id, app=celery)
+        if result.ready():
+            if result.successful():
+                return {"status": "completed", "result": result.result}
+            else:
+                return {"status": "failed", "error": str(result.result)}
+        else:
+            return {"status": "pending"}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+@app.get("/articles")
+async def get_articles(limit: int = Query(default=50, ge=1, le=200), offset: int = Query(default=0, ge=0), source: Optional[str] = None):
+    sb = get_supabase()
+    try:
+        query = sb.table("articles").select("*").order("published_at", desc=True).range(offset, offset + limit - 1)
+    
+    if source:
+        query = query.eq("source", source)
+    
+        result = query.execute()
+        return {"articles": result.data or [], "total": len(result.data or [])}
+    except Exception as e:
+        return {"error": str(e), "articles": [], "total": 0}
+
+@app.get("/ml/analysis")
+async def get_analysis(ids: str):
+    try:
+        article_ids = [int(id.strip()) for id in ids.split(",") if id.strip()]
+    except ValueError:
+        return {"error": "Invalid article IDs format"}
+    
+    # Limit batch size to prevent timeouts
+    if len(article_ids) > 100:
+        article_ids = article_ids[:100]
+    
+    # Check cache first
+    cache_key = f"analysis_{hash(tuple(sorted(article_ids)))}"
+    cached = get_cached(cache_key, 300)  # 5 min cache
+    if cached:
+        return cached
+    
+    sb = get_supabase()
+    try:
+        result = sb.table("bias_analysis").select("*").in_("article_id", article_ids).order("created_at", desc=True).limit(1000).execute()
+        response = {"analysis": result.data or []}
+        
+        # Cache the result
+        set_cached(cache_key, response, 300)
+        return {"ok": True, "summary": {"period": period, "source": source, "total_articles": len(articles), "positive_pct": trends.get("sentiment", {}).get("positive", 0) / max(len(analysis), 1) * 100, "negative_pct": trends.get("sentiment", {}).get("negative", 0) / max(len(analysis), 1) * 100, "neutral_pct": trends.get("sentiment", {}).get("neutral", 0) / max(len(analysis), 1) * 100, "avg_daily_articles": len(articles) / max(len(trends.get("daily", {})), 1)}, "timeline": [{"date": date, "positive": 0, "negative": 0, "neutral": 0, "total": count, "avg_sentiment": 0, "positive_pct": 0, "negative_pct": 0, "neutral_pct": 0} for date, count in trends.get("daily", {}).items()]}
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.get("/ml/trends")
+async def get_trends(period: str = "7d", source: Optional[str] = None):
+    # Check cache first
+    cache_key = f"trends_{period}_{source or 'all'}"
+    cached = get_cached(cache_key, 300)  # 5 min cache
+    if cached:
+        return cached
+    
+    sb = get_supabase()
+    
+    # Calculate date range
+    from datetime import datetime, timedelta
+    now = datetime.now()
+    
+    if period == "1d":
+        start_date = now - timedelta(days=1)
+    elif period == "7d":
+        start_date = now - timedelta(days=7)
+    elif period == "30d":
+        start_date = now - timedelta(days=30)
+    else:
+        start_date = now - timedelta(days=7)
+    
+    start_date_str = start_date.isoformat()
+    
+    try:
+        # Get articles from the period - LIMIT to prevent timeouts
+        query = sb.table("articles").select("*").gte("published_at", start_date_str).order("published_at", desc=True).limit(1000)
+        
+        if source:
+            query = query.eq("source", source)
+        
+        articles_result = query.execute()
+        articles = articles_result.data or []
+        
+        if not articles:
+            return {"articles": [], "analysis": [], "trends": {}}
+        
+        # Get analysis for these articles - LIMIT to prevent timeouts
+        article_ids = [a["id"] for a in articles]
+        analysis_result = sb.table("bias_analysis").select("*").in_("article_id", article_ids).order("created_at", desc=True).limit(2000).execute()
+        analysis = analysis_result.data or []
+        
+        # Process trends data
+        trends = {}
+        
+        # Sentiment trends
+        sentiment_data = [a for a in analysis if a.get("model_type") == "sentiment"]
+        if sentiment_data:
+            sentiment_counts = {}
+            for item in sentiment_data:
+                label = item.get("sentiment_label", "unknown")
+                sentiment_counts[label] = sentiment_counts.get(label, 0) + 1
+            trends["sentiment"] = sentiment_counts
+        
+        # Source distribution
+        source_counts = {}
+        for article in articles:
+            src = article.get("source", "unknown")
+            source_counts[src] = source_counts.get(src, 0) + 1
+        trends["sources"] = source_counts
+        
+        # Daily trends
+        daily_counts = {}
+        for article in articles:
+            date = article.get("published_at", "")[:10]  # YYYY-MM-DD
+            if date:
+                daily_counts[date] = daily_counts.get(date, 0) + 1
+        trends["daily"] = daily_counts
+        
+        # Calculate sentiment percentages
+        total_sentiment = sum(trends.get("sentiment", {}).values())
+        sentiment_pcts = {}
+        if total_sentiment > 0:
+            for label, count in trends.get("sentiment", {}).items():
+                sentiment_pcts[f"{label}_pct"] = (count / total_sentiment) * 100
+                else:
+            sentiment_pcts = {"positive_pct": 0, "negative_pct": 0, "neutral_pct": 0}
+        
+        # Create timeline data
+        timeline = []
+        for date, count in trends.get("daily", {}).items():
+            timeline.append({
+                "date": date,
+                "positive": 0,
+                "negative": 0, 
+                "neutral": 0,
+                "total": count,
+                "avg_sentiment": 0,
+                "positive_pct": 0,
+                "negative_pct": 0,
+                "neutral_pct": 0
+            })
+        
+        response = {
+            "ok": True,
+            "summary": {
+                "period": period,
+                "source": source,
+                "total_articles": len(articles),
+                "positive_pct": sentiment_pcts.get("positive_pct", 0),
+                "negative_pct": sentiment_pcts.get("negative_pct", 0),
+                "neutral_pct": sentiment_pcts.get("neutral_pct", 0),
+                "avg_daily_articles": len(articles) / max(len(trends.get("daily", {})), 1)
+            },
+            "timeline": timeline
+        }
+        
+        # Cache the result
+        set_cached(cache_key, response, 300)
+        return response
+        
+    except Exception as e:
+        return {"error": str(e), "articles": [], "analysis": [], "trends": {}}
+
+@app.get("/ml/bias_analysis_political_latest")
+async def get_political_bias_latest():
+    sb = get_supabase()
+    try:
+        result = sb.table("bias_analysis").select("*").eq("model_type", "political_bias").order("created_at", desc=True).limit(100).execute()
+        return {"analysis": result.data or []}
+    except Exception as e:
+        return {"error": str(e), "analysis": []}
+
+@app.get("/dashboard/comprehensive")
+async def get_dashboard_comprehensive():
+    # Check cache first
+    cache_key = "dashboard_comprehensive"
+    cached = get_cached(cache_key, 180)  # 3 min cache
+    if cached:
+        return cached
+    
+    sb = get_supabase()
+    try:
+        # Get recent articles (last 7 days)
+        week_ago = (datetime.now() - timedelta(days=7)).isoformat()
+        articles_result = sb.table("articles").select("*").gte("published_at", week_ago).order("published_at", desc=True).limit(500).execute()
+        articles = articles_result.data or []
+        
+        if not articles:
+            return {"articles": [], "analysis": [], "summary": {}}
+        
+        # Get analysis for recent articles
+        article_ids = [a["id"] for a in articles]
+        analysis_result = sb.table("bias_analysis").select("*").in_("article_id", article_ids).order("created_at", desc=True).limit(1000).execute()
+        analysis = analysis_result.data or []
+        
+        # Calculate summary
+        summary = {
+            "total_articles": len(articles),
+            "total_analysis": len(analysis),
+            "sources": {},
+            "sentiment": {},
+            "political_bias": {}
+        }
+        
+        # Source distribution
+        for article in articles:
+            src = article.get("source", "unknown")
+            summary["sources"][src] = summary["sources"].get(src, 0) + 1
+        
+        # Sentiment distribution
+        sentiment_data = [a for a in analysis if a.get("model_type") == "sentiment"]
+        for item in sentiment_data:
+            label = item.get("sentiment_label", "unknown")
+            summary["sentiment"][label] = summary["sentiment"].get(label, 0) + 1
+        
+        # Political bias distribution
+        bias_data = [a for a in analysis if a.get("model_type") == "political_bias"]
+        for item in bias_data:
+            direction = item.get("bias_direction", "unknown")
+            summary["political_bias"][direction] = summary["political_bias"].get(direction, 0) + 1
+        
+        response = {
+            "articles": articles,
+            "analysis": analysis,
+            "summary": summary
+        }
+        
+        # Cache the result
+        set_cached(cache_key, response, 180)
+        return {"ok": True, "summary": {"period": period, "source": source, "total_articles": len(articles), "positive_pct": trends.get("sentiment", {}).get("positive", 0) / max(len(analysis), 1) * 100, "negative_pct": trends.get("sentiment", {}).get("negative", 0) / max(len(analysis), 1) * 100, "neutral_pct": trends.get("sentiment", {}).get("neutral", 0) / max(len(analysis), 1) * 100, "avg_daily_articles": len(articles) / max(len(trends.get("daily", {})), 1)}, "timeline": [{"date": date, "positive": 0, "negative": 0, "neutral": 0, "total": count, "avg_sentiment": 0, "positive_pct": 0, "negative_pct": 0, "neutral_pct": 0} for date, count in trends.get("daily", {}).items()]}
+        
+    except Exception as e:
+        return {"error": str(e), "articles": [], "analysis": [], "summary": {}}
+
+@app.get("/ml/keywords/status")
+async def get_keywords_status():
+    try:
+        keywords, weights = get_political_keywords_and_weights()
+        return {
+            "ok": True,
+            "version": "external",
+            "categories": list(keywords.keys()),
+            "total_keywords": sum(len(v) for v in keywords.values()),
+            "weights": weights
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+@app.get("/ml/keywords/suggestions")
+async def get_keywords_suggestions():
+    try:
+        suggestions_path = os.path.join(os.path.dirname(__file__), 'ml', 'suggestions', 'keywords_ph_suggestions.json')
+        if os.path.exists(suggestions_path):
+            with open(suggestions_path, 'r', encoding='utf-8') as f:
+                return {"ok": True, "suggestions": json.load(f)}
+    else:
+            return {"ok": True, "suggestions": None, "message": "No suggestions available"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+@app.post("/ml/keywords/apply_suggestions")
+async def apply_keywords_suggestions(
+    category: str = Body(..., embed=True),
+    apply: bool = Body(default=False, embed=True),
+    admin_token: str = Header(None)
+):
+    # Simple admin check
+    ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "dev-admin-123")
+    if admin_token != ADMIN_TOKEN:
+        return {"ok": False, "error": "Unauthorized"}
+    
+    try:
+        script_path = os.path.join(os.path.dirname(__file__), '..', 'scripts', 'apply_keywords_suggestions.py')
+        cmd = [sys.executable, script_path, '--category', category]
+        if apply:
+            cmd.append('--apply')
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, cwd=os.path.dirname(script_path))
+        
+        return {
+            "ok": result.returncode == 0,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "applied": apply
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+@app.get("/bias/summary")
+async def bias_summary(days: int = Query(default=30, ge=1, le=180), limit_rows: int = Query(default=5000, ge=100, le=20000)):
+    # Check cache first
+    cache_key = f"bias_summary_{days}_{limit_rows}"
+    cached = get_cached(cache_key, 300)  # 5 min cache
+    if cached:
+        return cached
+    
+    sb = get_supabase()
+    try:
+        # Calculate date range
+        start_date = (datetime.now() - timedelta(days=days)).isoformat()
+        
+        # Get articles from the period
+        articles_result = sb.table("articles").select("id,title,source,published_at").gte("published_at", start_date).order("published_at", desc=True).limit(limit_rows).execute()
+        articles = articles_result.data or []
+        
+        if not articles:
+            return {"articles": [], "analysis": [], "summary": {}}
+        
+        # Get political bias analysis
+        article_ids = [a["id"] for a in articles]
+        analysis_result = sb.table("bias_analysis").select("*").in_("article_id", article_ids).eq("model_type", "political_bias").order("created_at", desc=True).limit(limit_rows).execute()
+        analysis = analysis_result.data or []
+        
+        # Calculate summary
+        summary = {
+            "total_articles": len(articles),
+            "total_analysis": len(analysis),
+            "bias_distribution": {},
+            "source_distribution": {},
+            "daily_trends": {}
+        }
+        
+        # Bias distribution
+        for item in analysis:
+            direction = item.get("bias_direction", "unknown")
+            summary["bias_distribution"][direction] = summary["bias_distribution"].get(direction, 0) + 1
+        
+        # Source distribution
+        for article in articles:
+            src = article.get("source", "unknown")
+            summary["source_distribution"][src] = summary["source_distribution"].get(src, 0) + 1
+        
+        # Daily trends
+        for article in articles:
+            date = article.get("published_at", "")[:10]  # YYYY-MM-DD
+            if date:
+                summary["daily_trends"][date] = summary["daily_trends"].get(date, 0) + 1
+        
+        response = {
+            "articles": articles,
+            "analysis": analysis,
+            "summary": summary
+        }
+        
+        # Cache the result
+        set_cached(cache_key, response, 300)
+        return {"ok": True, "summary": {"period": period, "source": source, "total_articles": len(articles), "positive_pct": trends.get("sentiment", {}).get("positive", 0) / max(len(analysis), 1) * 100, "negative_pct": trends.get("sentiment", {}).get("negative", 0) / max(len(analysis), 1) * 100, "neutral_pct": trends.get("sentiment", {}).get("neutral", 0) / max(len(analysis), 1) * 100, "avg_daily_articles": len(articles) / max(len(trends.get("daily", {})), 1)}, "timeline": [{"date": date, "positive": 0, "negative": 0, "neutral": 0, "total": count, "avg_sentiment": 0, "positive_pct": 0, "negative_pct": 0, "neutral_pct": 0} for date, count in trends.get("daily", {}).items()]}
+        
+    except Exception as e:
+        return {"error": str(e), "articles": [], "analysis": [], "summary": {}}
+
+@app.get("/bias/articles")
+async def bias_articles(direction: Optional[str] = Query(default=None), limit: int = Query(default=50, ge=1, le=200), offset: int = Query(default=0, ge=0)):
+    sb = get_supabase()
+    try:
+        # Get articles with political bias analysis
+        query = sb.table("bias_analysis").select("*, articles(*)").eq("model_type", "political_bias").order("created_at", desc=True).range(offset, offset + limit - 1)
+        
+        if direction:
+            query = query.eq("bias_direction", direction)
+        
+        result = query.execute()
+        return {"articles": result.data or [], "total": len(result.data or [])}
+    except Exception as e:
+        return {"error": str(e), "articles": [], "total": 0}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

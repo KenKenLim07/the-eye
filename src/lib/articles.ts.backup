@@ -74,30 +74,13 @@ export interface BulkAnalysisResponse {
   analysis: AnalysisRow[];
 }
 
-export interface FetchAnalysisResult {
-  map: Record<number, AnalysisRow | null>;
-  unavailable: boolean; // true when API request failed/unreachable
-}
-
-export async function fetchLatestAnalysisByIds(articleIds: number[]): Promise<FetchAnalysisResult> {
-  if (articleIds.length === 0) return { map: {}, unavailable: false };
+export async function fetchLatestAnalysisByIds(articleIds: number[]): Promise<Record<number, AnalysisRow | null>> {
+  if (articleIds.length === 0) return {};
 
   try {
-    const baseUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
-    if (!baseUrl.startsWith('http')) {
-      console.error('Invalid NEXT_PUBLIC_BACKEND_URL. Expected absolute URL, got:', baseUrl);
-      return { map: {}, unavailable: true };
-    }
-
-    const params = new URLSearchParams({
-      ids: articleIds.join(','),
-      model_type: 'sentiment',
-      model_version: 'vader_v1',
-    });
-
     const response = await fetch(
-      `${baseUrl}/ml/analysis?${params.toString()}`,
-      { cache: 'no-store', signal: AbortSignal.timeout(15000) }
+      `${process.env.NEXT_PUBLIC_BACKEND_URL}/ml/analysis?ids=${articleIds.join(',')}`,
+      { cache: 'no-store' }
     );
     
     if (!response.ok) {
@@ -106,34 +89,51 @@ export async function fetchLatestAnalysisByIds(articleIds: number[]): Promise<Fe
     
     const data = await response.json();
     
-    // If the response contains an error
+    // Check if the response contains an error
     if (data.error) {
       console.error('API returned error:', data.error);
-      return { map: {}, unavailable: true };
+      return {};
     }
     
+    // Check if data.analysis exists and is an array
     if (!data.analysis || !Array.isArray(data.analysis)) {
       console.error('Invalid response format:', data);
-      return { map: {}, unavailable: true };
-    }
-    
-    const latestByArticle: Record<number, AnalysisRow> = {};
-    for (const analysis of data.analysis as AnalysisRow[]) {
-      const articleId = analysis.article_id;
-      if (!latestByArticle[articleId] || new Date(analysis.created_at) > new Date(latestByArticle[articleId].created_at)) {
-        latestByArticle[articleId] = analysis;
-      }
+      return {};
     }
     
     const analysisMap: Record<number, AnalysisRow | null> = {};
+    
+    // Group by article_id and prioritize sentiment analysis over political bias
+    const latestByArticle: Record<number, AnalysisRow> = {};
+    
+    // First pass: collect all sentiment analyses
+    for (const analysis of data.analysis) {
+      if (analysis.model_type === "sentiment") {
+        const articleId = analysis.article_id;
+        if (!latestByArticle[articleId] || new Date(analysis.created_at) > new Date(latestByArticle[articleId].created_at)) {
+          latestByArticle[articleId] = analysis;
+        }
+      }
+    }
+    
+    // Second pass: fill in missing articles with political bias analysis
+    for (const analysis of data.analysis) {
+      if (analysis.model_type === "political_bias") {
+        const articleId = analysis.article_id;
+        if (!latestByArticle[articleId]) {
+          latestByArticle[articleId] = analysis;
+        }
+      }
+    }
+    
+    // Create the final map
     for (const articleId of articleIds) {
       analysisMap[articleId] = latestByArticle[articleId] || null;
     }
     
-    // unavailable=false even if map is empty; it just means no data yet
-    return { map: analysisMap, unavailable: false };
+    return analysisMap;
   } catch (error) {
     console.error('Failed to fetch analysis:', error);
-    return { map: {}, unavailable: true };
+    return {};
   }
 }

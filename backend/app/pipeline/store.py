@@ -36,7 +36,7 @@ def insert_articles(articles: List[NormalizedArticle]) -> dict:
     # Filter out articles without URL (optional, but keeps DB clean)
     to_check = [a.url for a in articles if a.url]
     existing_urls: set[str] = set()
-
+    
     # FIXED: Re-enable duplicate check with proper error handling
     if to_check:
         try:
@@ -72,7 +72,7 @@ def insert_articles(articles: List[NormalizedArticle]) -> dict:
     inserted = 0
     inserted_ids: list[int] = []
     error_msg = None
-
+    
     if rows:
         try:
             ins = sb.table('articles').insert(rows).execute()
@@ -94,8 +94,8 @@ def insert_articles(articles: List[NormalizedArticle]) -> dict:
         'inserted': inserted,
         'inserted_ids': inserted_ids,
     }
-
+    
     if error_msg:
         result['error'] = error_msg
-
+        
     return result

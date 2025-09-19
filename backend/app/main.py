@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Body, Header
+from fastapi import FastAPI, Body, Header, Query
 from .core.config import settings
 from app.workers.tasks import scrape_inquirer_task, scrape_abs_cbn_task, scrape_gma_task, scrape_philstar_task, scrape_manila_bulletin_task, scrape_rappler_task, scrape_sunstar_task, scrape_manila_times_task
 from app.workers.celery_app import celery
@@ -9,6 +9,7 @@ from app.workers.ml_tasks import analyze_articles_task
 from fastapi.middleware.cors import CORSMiddleware
 from app.ml.bias import get_political_keywords_and_weights
 import os, json, subprocess, sys
+from datetime import datetime, timedelta
 
 app = FastAPI(title="PH Eye Backend", version="0.1.0")
 
@@ -522,3 +523,123 @@ async def get_comprehensive_dashboard(period: str = "7d", source: Optional[str] 
         
     except Exception as e:
         return {"ok": False, "error": str(e)}
+
+@app.get("/bias/summary")
+async def bias_summary(days: int = Query(default=30, ge=1, le=180), limit_rows: int = Query(default=5000, ge=100, le=20000)):
+    # Check cache first (disabled)
+    cache_key = f"bias_summary_{days}_{limit_rows}"
+    # cached = get_cached(cache_key, 300)  # 5 min cache
+    # if cached:
+        # return cached
+    
+    sb = get_supabase()
+    try:
+        # Calculate date range
+        start_date = (datetime.now() - timedelta(days=days)).isoformat()
+        
+        # Get articles from the period
+        articles_result = sb.table("articles").select("id,title,source,published_at").gte("published_at", start_date).order("published_at", desc=True).limit(limit_rows).execute()
+        articles = articles_result.data or []
+        
+        if not articles:
+            return {"ok": True, "daily_buckets": [], "distribution": {}, "top_sources": [], "top_categories": [], "recent_examples": []}
+        
+        # Get political bias analysis
+        article_ids = [a["id"] for a in articles]
+        analysis_result = sb.table("bias_analysis").select("*").in_("article_id", article_ids).eq("model_type", "political_bias").order("created_at", desc=True).limit(limit_rows).execute()
+        analysis = analysis_result.data or []
+        
+        # Calculate distribution
+        distribution = {}
+        for item in analysis:
+            direction = item.get("model_metadata", {}).get("direction", "unknown")
+            distribution[direction] = distribution.get(direction, 0) + 1
+        
+        # Calculate daily buckets
+        daily_buckets = {}
+        for item in analysis:
+            date = item.get("created_at", "")[:10]  # YYYY-MM-DD
+            if date:
+                if date not in daily_buckets:
+                    daily_buckets[date] = {"pro_government": 0, "pro_opposition": 0, "neutral": 0}
+                direction = item.get("model_metadata", {}).get("direction", "unknown")
+                if direction in daily_buckets[date]:
+                    daily_buckets[date][direction] += 1
+        
+        # Convert to array format
+        daily_buckets_array = [{"date": date, **counts} for date, counts in daily_buckets.items()]
+        daily_buckets_array.sort(key=lambda x: x["date"])
+        
+        # Calculate top sources
+        source_counts = {}
+        for item in analysis:
+            article_id = item.get("article_id")
+            article = next((a for a in articles if a["id"] == article_id), None)
+            if article:
+                source = article.get("source", "unknown")
+                direction = item.get("model_metadata", {}).get("direction", "unknown")
+                key = f"{source}_{direction}"
+                source_counts[key] = source_counts.get(key, 0) + 1
+        
+        top_sources = [{"source": k.split("_")[0], "direction": k.split("_")[1], "count": v} for k, v in source_counts.items()]
+        top_sources.sort(key=lambda x: x["count"], reverse=True)
+        
+        # Calculate top categories
+        category_counts = {}
+        for item in analysis:
+            metadata = item.get("model_metadata", {})
+            category = metadata.get("direction", "unknown")
+            direction = item.get("model_metadata", {}).get("direction", "unknown")
+            key = f"{category}_{direction}"
+            category_counts[key] = category_counts.get(key, 0) + 1
+        
+        top_categories = [{"category": k.split("_")[0], "direction": k.split("_")[1], "count": v} for k, v in category_counts.items()]
+        top_categories.sort(key=lambda x: x["count"], reverse=True)
+        
+        # Get recent examples
+        recent_examples = []
+        for item in analysis[:20]:  # Last 20
+            article_id = item.get("article_id")
+            article = next((a for a in articles if a["id"] == article_id), None)
+            if article:
+                recent_examples.append({
+                    "article_id": article_id,
+                    "title": article.get("title", ""),
+                    "source": article.get("source", ""),
+                    "category": item.get("model_metadata", {}).get("direction", "unknown"),
+                    "direction": item.get("model_metadata", {}).get("direction", "unknown"),
+                    "confidence_score": item.get("confidence_score"),
+                    "created_at": item.get("created_at", "")
+                })
+        
+        response = {
+            "ok": True,
+            "daily_buckets": daily_buckets_array,
+            "distribution": distribution,
+            "top_sources": top_sources,
+            "top_categories": top_categories,
+            "recent_examples": recent_examples,
+            "model_version": analysis[0].get("model_version") if analysis else None
+        }
+        
+        # Cache the result (disabled)
+        # set_cached(cache_key, response, 300)
+        return response
+        
+    except Exception as e:
+        return {"ok": False, "error": str(e), "daily_buckets": [], "distribution": {}, "top_sources": [], "top_categories": [], "recent_examples": []}
+
+@app.get("/bias/articles")
+async def bias_articles(direction: Optional[str] = Query(default=None), limit: int = Query(default=50, ge=1, le=200), offset: int = Query(default=0, ge=0)):
+    sb = get_supabase()
+    try:
+        # Get articles with political bias analysis
+        query = sb.table("bias_analysis").select("*, articles(*)").eq("model_type", "political_bias").order("created_at", desc=True).range(offset, offset + limit - 1)
+        
+        if direction:
+            query = query.eq("model_metadata->direction", direction)
+        
+        result = query.execute()
+        return {"ok": True, "items": result.data or [], "total": len(result.data or [])}
+    except Exception as e:
+        return {"ok": False, "error": str(e), "items": [], "total": 0}
