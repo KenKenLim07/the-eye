@@ -35,9 +35,8 @@ export default function ArticleCardsInteractive({ articles, analysisById }: Arti
         const analysis = analysisById ? analysisById[numericId] : undefined;
         const sentiment = analysis?.sentiment_label || null;
         return (
-          <>
+          <div key={a.id}>
             <Card
-              key={a.id}
               className="min-w-[280px] max-w-[320px] cursor-pointer"
               onClick={() => setOpenId(numericId)}
               role="button"
@@ -116,8 +115,8 @@ export default function ArticleCardsInteractive({ articles, analysisById }: Arti
                   )}
                 </div>
               </DialogContent>
-            </Dialog>
-          </>
+                        </Dialog>
+          </div>
         );
       })}
     </>

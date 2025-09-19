@@ -92,7 +92,8 @@ class RapplerScraper:
             ".post-card__title a",
             ".archive-article h3 a",
             ".trending-header a",
-            "a[href*='/20']",  # year-based URLs
+            # removed overly-broad year-based selector that captured media assets
+            # "a[href*='/20']",
             "article h2 a",
             "article h3 a",
         ],
@@ -159,13 +160,9 @@ class RapplerScraper:
             r"/login",
             r"/register",
             r"/wp-",
-            r"\.css",
-            r"\.js",
-            r"\.png",
-            r"\.jpg",
-            r"\.jpeg",
-            r"\.gif",
-            r"\.svg",
+            r"/wp-content/",
+            r"/tachyon/",
+            r"\.(css|js|png|jpg|jpeg|gif|svg|webp|avif|mp4|pdf)(\?|$)",
         ]
         
         for pattern in blacklist_patterns:
@@ -654,6 +651,19 @@ class RapplerScraper:
                 json_ld.get("articleBody") or 
                 self._extract_content(soup)
             )
+            
+            # Content gate: skip media/placeholder pages
+            minimal_content = (content or "").strip()
+            og_type = None
+            try:
+                og = soup.select_one("meta[property='og:type']")
+                if og:
+                    og_type = (og.get("content") or "").strip().lower()
+            except Exception:
+                pass
+            if (len(minimal_content) < 120) and (og_type and og_type != "article"):
+                logger.info(f"Skipping non-article page by content gate: {url} (og:type={og_type}, len={len(minimal_content)})")
+                return None
             
             raw_date = (
                 json_ld.get("datePublished") or 

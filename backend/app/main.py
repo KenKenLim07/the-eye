@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Body
+from fastapi import FastAPI, Body, Header
 from .core.config import settings
 from app.workers.tasks import scrape_inquirer_task, scrape_abs_cbn_task, scrape_gma_task, scrape_philstar_task, scrape_manila_bulletin_task, scrape_rappler_task, scrape_sunstar_task, scrape_manila_times_task
 from app.workers.celery_app import celery
@@ -7,6 +7,8 @@ from typing import Optional
 from app.core.supabase import get_supabase
 from app.workers.ml_tasks import analyze_articles_task
 from fastapi.middleware.cors import CORSMiddleware
+from app.ml.bias import get_political_keywords_and_weights
+import os, json, subprocess, sys
 
 app = FastAPI(title="PH Eye Backend", version="0.1.0")
 
@@ -78,6 +80,53 @@ async def get_scrape_status(task_id: str):
             return {"status": "pending"}
     except Exception as e:
         return {"status": "error", "error": str(e)}
+
+@app.get("/ml/keywords/status")
+async def get_keywords_status():
+    try:
+        kw, weights, version = get_political_keywords_and_weights()
+        categories = {k: len(v or []) for k, v in (kw or {}).items()}
+        return {
+            "ok": True,
+            "version": version,
+            "categories": categories,
+            "weights_present": bool(weights),
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+# Simple token guard using env ADMIN_TOKEN (optional)
+ADMIN_TOKEN = os.environ.get('ADMIN_TOKEN')
+
+@app.get("/ml/keywords/suggestions")
+async def get_keywords_suggestions(x_admin_token: Optional[str] = Header(default=None)):
+    if ADMIN_TOKEN and x_admin_token != ADMIN_TOKEN:
+        return {"ok": False, "error": "unauthorized"}
+    sugg_path = os.path.join(os.path.dirname(__file__), 'ml', 'suggestions', 'keywords_ph_suggestions.json')
+    try:
+        with open(sugg_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        return {"ok": True, "data": data}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+@app.post("/ml/keywords/apply_suggestions")
+async def apply_keywords_suggestions(category: str = Body(default='neutral_institutional'), apply: bool = Body(default=True), x_admin_token: Optional[str] = Header(default=None)):
+    if ADMIN_TOKEN and x_admin_token != ADMIN_TOKEN:
+        return {"ok": False, "error": "unauthorized"}
+    backend_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+    script_path = os.path.join(backend_root, 'scripts', 'apply_keywords_suggestions.py')
+    if not os.path.exists(script_path):
+        return {"ok": False, "error": f"script not found: {script_path}"}
+    cmd = [sys.executable, script_path, '--category', category]
+    if apply:
+        cmd.append('--apply')
+    try:
+        proc = subprocess.Popen(cmd, cwd=backend_root, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        out, err = proc.communicate(timeout=60)
+        return {"ok": proc.returncode == 0, "stdout": out.decode('utf-8', 'ignore'), "stderr": err.decode('utf-8', 'ignore')}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 @app.get("/articles")
 async def get_articles(limit: int = 50, offset: int = 0, source: Optional[str] = None, category: Optional[str] = None):
@@ -291,3 +340,185 @@ async def get_trends(period: str = "7d", source: Optional[str] = None):
         
     except Exception as e:
         return {"error": str(e)}
+
+
+@app.get("/ml/bias_analysis_political_latest")
+async def get_political_bias_latest(limit: int = 100):
+    """Get latest political bias analysis results."""
+    sb = get_supabase()
+    try:
+        result = sb.table("bias_analysis").select("*").eq("model_version", "philippine_bias_v1").eq("model_type", "political_bias").order("created_at", desc=True).limit(limit).execute()
+        return result.data or []
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/dashboard/comprehensive")
+async def get_comprehensive_dashboard(period: str = "7d", source: Optional[str] = None):
+    """Comprehensive dashboard data including both sentiment and political bias analysis."""
+    sb = get_supabase()
+    
+    # Calculate date range
+    from datetime import datetime, timedelta
+    now = datetime.now()
+    
+    if period == "1d":
+        start_date = now - timedelta(days=1)
+    elif period == "7d":
+        start_date = now - timedelta(days=7)
+    elif period == "30d":
+        start_date = now - timedelta(days=30)
+    else:
+        start_date = now - timedelta(days=7)
+    
+    start_date_str = start_date.isoformat()
+    
+    try:
+        # Get articles from the period
+        query = sb.table("articles").select("*").gte("published_at", start_date_str).order("published_at", desc=True)
+        
+        if source:
+            query = query.eq("source", source)
+        
+        articles_result = query.limit(1000).execute()
+        articles = articles_result.data or []
+        
+        if not articles:
+            return {
+                "ok": True,
+                "articles": {"total": 0, "by_source": {}, "by_date": {}},
+                "sentiment": {"total_analyses": 0, "avg_compound": 0, "distribution": {"positive": 0, "neutral": 0, "negative": 0}},
+                "political_bias": {"total_analyses": 0, "avg_bias_score": 0, "avg_confidence": 0, "distribution": {"pro_government": 0, "pro_opposition": 0, "neutral": 0, "mixed": 0}},
+                "source_comparison": [],
+                "timeline": [],
+                "generated_at": now.isoformat()
+            }
+        
+        # Get sentiment analysis
+        article_ids = [a["id"] for a in articles]
+        sentiment_result = sb.table("bias_analysis").select("*").in_("article_id", article_ids).eq("model_version", "vader_v1").eq("model_type", "sentiment").execute()
+        sentiment_data = sentiment_result.data or []
+        
+        # Get political bias analysis
+        political_result = sb.table("bias_analysis").select("*").in_("article_id", article_ids).eq("model_version", "philippine_bias_v1").eq("model_type", "political_bias").execute()
+        political_data = political_result.data or []
+        
+        # Process sentiment data
+        sentiment_scores = [s.get("sentiment_score", 0) for s in sentiment_data if s.get("sentiment_score") is not None]
+        sentiment_labels = [s.get("sentiment_label", "neutral") for s in sentiment_data]
+        
+        sentiment_distribution = {"positive": 0, "neutral": 0, "negative": 0}
+        for label in sentiment_labels:
+            if label in sentiment_distribution:
+                sentiment_distribution[label] += 1
+        
+        # Process political bias data
+        political_scores = [p.get("political_bias_score", 0) for p in political_data if p.get("political_bias_score") is not None]
+        political_directions = [p.get("model_metadata", {}).get("direction", "neutral") for p in political_data]
+        
+        political_distribution = {"pro_government": 0, "pro_opposition": 0, "neutral": 0, "mixed": 0}
+        for direction in political_directions:
+            if direction in political_distribution:
+                political_distribution[direction] += 1
+        
+        # Group by source
+        by_source = {}
+        for article in articles:
+            source_name = article.get("source", "Unknown")
+            by_source[source_name] = by_source.get(source_name, 0) + 1
+        
+        # Group by date
+        by_date = {}
+        for article in articles:
+            date_str = article.get("published_at", "")[:10]
+            if date_str:
+                by_date[date_str] = by_date.get(date_str, 0) + 1
+        
+        # Create timeline
+        timeline = []
+        for date_str in sorted(by_date.keys()):
+            day_articles = [a for a in articles if a.get("published_at", "").startswith(date_str)]
+            day_article_ids = [a["id"] for a in day_articles]
+            
+            day_sentiment = [s for s in sentiment_data if s.get("article_id") in day_article_ids]
+            day_political = [p for p in political_data if p.get("article_id") in day_article_ids]
+            
+            day_sentiment_scores = [s.get("sentiment_score", 0) for s in day_sentiment if s.get("sentiment_score") is not None]
+            day_political_scores = [p.get("political_bias_score", 0) for p in day_political if p.get("political_bias_score") is not None]
+            day_political_confidences = [p.get("confidence_score", 0) for p in day_political if p.get("confidence_score") is not None]
+            
+            timeline.append({
+                "date": date_str,
+                "articles": len(day_articles),
+                "sentiment": {
+                    "avg_score": sum(day_sentiment_scores) / len(day_sentiment_scores) if day_sentiment_scores else 0,
+                    "distribution": {
+                        "positive": len([s for s in day_sentiment if s.get("sentiment_label") == "positive"]),
+                        "neutral": len([s for s in day_sentiment if s.get("sentiment_label") == "neutral"]),
+                        "negative": len([s for s in day_sentiment if s.get("sentiment_label") == "negative"])
+                    }
+                },
+                "political_bias": {
+                    "avg_bias_score": sum(day_political_scores) / len(day_political_scores) if day_political_scores else 0,
+                    "avg_confidence": sum(day_political_confidences) / len(day_political_confidences) if day_political_confidences else 0,
+                    "distribution": {
+                        "pro_government": len([p for p in day_political if p.get("model_metadata", {}).get("direction") == "pro_government"]),
+                        "pro_opposition": len([p for p in day_political if p.get("model_metadata", {}).get("direction") == "pro_opposition"]),
+                        "neutral": len([p for p in day_political if p.get("model_metadata", {}).get("direction") == "neutral"])
+                    }
+                }
+            })
+        
+        # Source comparison
+        source_comparison = []
+        for source_name, count in by_source.items():
+            source_articles = [a for a in articles if a.get("source") == source_name]
+            source_article_ids = [a["id"] for a in source_articles]
+            
+            source_sentiment = [s for s in sentiment_data if s.get("article_id") in source_article_ids]
+            source_political = [p for p in political_data if p.get("article_id") in source_article_ids]
+            
+            source_political_scores = [p.get("political_bias_score", 0) for p in source_political if p.get("political_bias_score") is not None]
+            source_political_confidences = [p.get("confidence_score", 0) for p in source_political if p.get("confidence_score") is not None]
+            
+            source_political_distribution = {"pro_government": 0, "pro_opposition": 0, "neutral": 0}
+            for p in source_political:
+                direction = p.get("model_metadata", {}).get("direction", "neutral")
+                if direction in source_political_distribution:
+                    source_political_distribution[direction] += 1
+            
+            source_comparison.append({
+                "source": source_name,
+                "article_count": count,
+                "political_bias": {
+                    "avg_bias_score": sum(source_political_scores) / len(source_political_scores) if source_political_scores else 0,
+                    "avg_confidence": sum(source_political_confidences) / len(source_political_confidences) if source_political_confidences else 0,
+                    "distribution": source_political_distribution
+                }
+            })
+        
+        return {
+            "ok": True,
+            "articles": {
+                "total": len(articles),
+                "by_source": by_source,
+                "by_date": by_date
+            },
+            "sentiment": {
+                "total_analyses": len(sentiment_data),
+                "avg_compound": sum(sentiment_scores) / len(sentiment_scores) if sentiment_scores else 0,
+                "distribution": sentiment_distribution
+            },
+            "political_bias": {
+                "total_analyses": len(political_data),
+                "avg_bias_score": sum(political_scores) / len(political_scores) if political_scores else 0,
+                "avg_confidence": sum([p.get("confidence_score", 0) for p in political_data if p.get("confidence_score") is not None]) / len([p for p in political_data if p.get("confidence_score") is not None]) if political_data else 0,
+                "distribution": political_distribution
+            },
+            "source_comparison": source_comparison,
+            "timeline": timeline,
+            "generated_at": now.isoformat()
+        }
+        
+    except Exception as e:
+        return {"ok": False, "error": str(e)}

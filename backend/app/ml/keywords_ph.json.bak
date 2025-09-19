@@ -1,0 +1,52 @@
+{
+	"version": "ph_v1",
+	"updated_at": "2025-09-19T00:00:00Z",
+	"keywords": {
+		"pro_gov_current_admin": [
+			"ferdinand marcos jr", "bongbong marcos", "bbm", "sara duterte", "martin romualdez", "gilberto teodoro", "benjamin diokno", "amenah pangandaman", "malacañang", "palace"
+		],
+		"pro_gov_administration": [
+			"president", "administration", "cabinet", "executive", "leadership", "government", "official", "policy", "program", "initiative"
+		],
+		"pro_gov_policies": [
+			"build better more", "infrastructure", "economic growth", "investment pledge", "job creation", "public order", "anti-drug campaign", "anti-insurgency"
+		],
+		"pro_gov_positive_terms": [
+			"successful", "effective", "efficient", "progress", "achievement", "improvement", "beneficial", "good governance"
+		],
+		"pro_opp_opposition_figures": [
+			"leni robredo", "kiko pangilinan", "risa hontiveros", "leila de lima", "chel diokno", "ping lacson", "franklin drilon", "koko pimentel"
+		],
+		"pro_opp_criticism": [
+			"corruption", "incompetence", "failure", "scandal", "controversy", "investigation", "accountability", "transparency"
+		],
+		"pro_opp_protest": [
+			"protest", "rally", "demonstration", "activism", "dissent", "mobilization"
+		],
+		"pro_opp_negative_terms": [
+			"failed", "corrupt", "ineffective", "problematic", "controversial", "criticized", "questioned", "disputed"
+		],
+		"neutral_general": [
+			"philippines", "filipino", "manila", "cebu", "davao", "news", "report", "statement", "announcement", "conference"
+		],
+		"neutral_process": [
+			"congress", "senate", "house of representatives", "committee", "hearing", "plenary", "bill", "law", "amendment", "budget", "appropriation", "resolution"
+		],
+		"neutral_institutional": [
+			"supreme court", "court of appeals", "sandiganbayan", "comelec", "ombudsman", "coa", "dbm", "dof", "doj", "dilg", "doh", "deped", "dnd", "afp", "pnp", "bsp", "neda"
+		]
+	},
+	"weights": {
+		"pro_gov_current_admin": 0.4,
+		"pro_gov_administration": 0.3,
+		"pro_gov_policies": 0.2,
+		"pro_gov_positive_terms": 0.1,
+		"pro_opp_opposition_figures": 0.3,
+		"pro_opp_criticism": 0.3,
+		"pro_opp_protest": 0.2,
+		"pro_opp_negative_terms": 0.2,
+		"neutral_general": 0.4,
+		"neutral_process": 0.3,
+		"neutral_institutional": 0.3
+	}
+} 

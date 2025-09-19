@@ -60,4 +60,10 @@ celery.conf.beat_schedule = {
         "task": "app.workers.tasks.scrape_sunstar_task",
         "schedule": schedule(1.50 * 60 * 60),  # 1.50 hours - Regional focus
     },
+
+    # WEEKLY maintenance: entity mining to refresh suggestions
+    "mine_entities_weekly": {
+        "task": "app.workers.tasks.mine_entities_task",
+        "schedule": schedule(7 * 24 * 60 * 60),  # weekly
+    },
 }

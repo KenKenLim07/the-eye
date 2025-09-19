@@ -103,13 +103,26 @@ export async function fetchLatestAnalysisByIds(articleIds: number[]): Promise<Re
     
     const analysisMap: Record<number, AnalysisRow | null> = {};
     
-    // Group by article_id and get the latest analysis for each
+    // Group by article_id and prioritize sentiment analysis over political bias
     const latestByArticle: Record<number, AnalysisRow> = {};
     
+    // First pass: collect all sentiment analyses
     for (const analysis of data.analysis) {
-      const articleId = analysis.article_id;
-      if (!latestByArticle[articleId] || new Date(analysis.created_at) > new Date(latestByArticle[articleId].created_at)) {
-        latestByArticle[articleId] = analysis;
+      if (analysis.model_type === "sentiment") {
+        const articleId = analysis.article_id;
+        if (!latestByArticle[articleId] || new Date(analysis.created_at) > new Date(latestByArticle[articleId].created_at)) {
+          latestByArticle[articleId] = analysis;
+        }
+      }
+    }
+    
+    // Second pass: fill in missing articles with political bias analysis
+    for (const analysis of data.analysis) {
+      if (analysis.model_type === "political_bias") {
+        const articleId = analysis.article_id;
+        if (!latestByArticle[articleId]) {
+          latestByArticle[articleId] = analysis;
+        }
       }
     }
     

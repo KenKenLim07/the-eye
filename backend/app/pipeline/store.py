@@ -3,15 +3,40 @@ from app.core.supabase import get_supabase
 from .normalize import NormalizedArticle
 from app.scrapers.utils import normalize_source, normalize_category
 import logging
+from urllib.parse import urlparse, urlunparse
 
 logger = logging.getLogger(__name__)
 
+
+def _canonicalize_url(raw_url: str) -> str:
+    """Normalize URLs to avoid duplicate shapes (strip query/fragment, lower host, trim trailing slash)."""
+    if not raw_url:
+        return raw_url
+    try:
+        p = urlparse(raw_url)
+        # Lower-case hostname
+        netloc = p.netloc.lower()
+        # Remove query and fragment
+        path = p.path or "/"
+        # Trim trailing slash except for root
+        if path != "/" and path.endswith("/"):
+            path = path.rstrip("/")
+        canon = urlunparse((p.scheme, netloc, path, "", "", ""))
+        return canon
+    except Exception:
+        return raw_url
+
+
 def insert_articles(articles: List[NormalizedArticle]) -> dict:
     sb = get_supabase()
+    # Canonicalize URLs up-front
+    for a in articles:
+        if getattr(a, "url", None):
+            a.url = _canonicalize_url(a.url)
     # Filter out articles without URL (optional, but keeps DB clean)
     to_check = [a.url for a in articles if a.url]
     existing_urls: set[str] = set()
-    
+
     # FIXED: Re-enable duplicate check with proper error handling
     if to_check:
         try:
@@ -22,9 +47,19 @@ def insert_articles(articles: List[NormalizedArticle]) -> dict:
             logger.error(f'Error checking existing URLs: {e}')
             return {'checked': 0, 'skipped': 0, 'inserted': 0, 'error': str(e), 'inserted_ids': []}
 
-    # Filter out duplicates BEFORE attempting insert
-    rows = [
-        {
+    # Build rows and log skip reasons
+    rows = []
+    skipped = 0
+    for a in articles:
+        if not a.url:
+            logger.info(f"Skip reason: missing_url | title='{a.title}'")
+            skipped += 1
+            continue
+        if a.url in existing_urls:
+            logger.info(f"Skip reason: duplicate_url | url={a.url}")
+            skipped += 1
+            continue
+        rows.append({
             'source': normalize_source(a.source) or a.source,
             'category': normalize_category(a.category) if a.category else None,
             'raw_category': getattr(a, 'raw_category', None),
@@ -32,15 +67,12 @@ def insert_articles(articles: List[NormalizedArticle]) -> dict:
             'url': a.url,
             'content': a.content,
             'published_at': a.published_at,
-        }
-        for a in articles
-        if a.url and a.url not in existing_urls  # FIXED: Proper duplicate filtering
-    ]
+        })
 
     inserted = 0
     inserted_ids: list[int] = []
     error_msg = None
-    
+
     if rows:
         try:
             ins = sb.table('articles').insert(rows).execute()
@@ -54,16 +86,16 @@ def insert_articles(articles: List[NormalizedArticle]) -> dict:
             inserted_ids = []
             inserted = 0
     else:
-        logger.info('No new articles to insert (all were duplicates)')
+        logger.info('No new articles to insert (all were duplicates or invalid)')
 
     result = {
         'checked': len(to_check),
-        'skipped': len(articles) - len(rows),
+        'skipped': skipped,
         'inserted': inserted,
         'inserted_ids': inserted_ids,
     }
-    
+
     if error_msg:
         result['error'] = error_msg
-        
+
     return result

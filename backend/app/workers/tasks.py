@@ -302,7 +302,7 @@ def scrape_rappler_task(self):
     try:
         import random
         scraper = RapplerScraper()
-        result = scraper.scrape_latest(max_articles=10)
+        result = scraper.scrape_latest(max_articles=20)
         
         logger.info(f"Task {task_id} - Rappler scraped {len(result.articles)} articles, {len(result.errors)} errors")
         
@@ -488,3 +488,23 @@ def scrape_manila_times_task(self):
                 "error": error_msg,
                 "retries_exhausted": True
             }
+
+# Maintenance: weekly entity mining to refresh suggestions
+from subprocess import Popen, PIPE
+
+@shared_task(bind=True, max_retries=3, default_retry_delay=60)
+def mine_entities_task(self):
+    """Run the mining script to generate keyword suggestions."""
+    try:
+        import sys, os
+        backend_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+        script_path = os.path.join(backend_root, 'scripts', 'mine_entities.py')
+        if not os.path.exists(script_path):
+            return {"ok": False, "error": f"Script not found: {script_path}"}
+        proc = Popen([sys.executable, script_path], cwd=backend_root, stdout=PIPE, stderr=PIPE)
+        out, err = proc.communicate(timeout=300)
+        return {"ok": proc.returncode == 0, "code": proc.returncode, "stdout": out.decode('utf-8', 'ignore')[-1000:], "stderr": err.decode('utf-8', 'ignore')[-1000:]}
+    except Exception as e:
+        if self.request.retries < self.max_retries:
+            raise self.retry(exc=e, countdown=60 * (2 ** self.request.retries))
+        return {"ok": False, "error": str(e)}
