@@ -232,3 +232,81 @@ export async function fetchBiasArticles(direction?: string, limit: number = 50, 
     return null;
   }
 }
+
+export async function fetchAllArticlesWithSentiment(limit: number = 10): Promise<Record<string, Article[]>> {
+  const sources = [
+    "GMA",
+    "Inquirer", 
+    "Philstar",
+    "Sunstar",
+    "Manila Bulletin",
+    "Manila Times",
+    "Rappler"
+  ];
+
+  // Create parallel queries for all sources
+  const queries = sources.map(source => 
+    fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/articles?source=${source}&limit=${limit}&offset=0`, { cache: 'no-store' })
+  );
+
+  // Execute all queries in parallel
+  const results = await Promise.all(queries);
+  
+  // Process results and collect all article IDs
+  const articlesBySource: Record<string, Article[]> = {};
+  const allArticleIds: number[] = [];
+
+  for (let i = 0; i < results.length; i++) {
+    const response = results[i];
+    const source = sources[i];
+    
+    try {
+      if (!response.ok) {
+        console.error(`Error fetching ${source}: HTTP ${response.status}`);
+        articlesBySource[source] = [];
+        continue;
+      }
+      
+      const data = await response.json();
+      const articles = data.articles || [];
+      articlesBySource[source] = articles;
+      
+      // Collect article IDs for sentiment analysis
+      articles.forEach((article: Article) => {
+        if (article.id) {
+          allArticleIds.push(Number(article.id));
+        }
+      });
+    } catch (error) {
+      console.error(`Error fetching ${source}:`, error);
+      articlesBySource[source] = [];
+    }
+  }
+
+  // Fetch sentiment analysis for all articles
+  let sentimentData: Record<number, AnalysisRow | null> = {};
+  if (allArticleIds.length > 0) {
+    try {
+      sentimentData = await fetchLatestAnalysisByIds(allArticleIds);
+    } catch (error) {
+      console.error('Error fetching sentiment data:', error);
+    }
+  }
+
+  // Merge sentiment data with articles
+  const articlesWithSentiment: Record<string, Article[]> = {};
+  
+  for (const [source, articles] of Object.entries(articlesBySource)) {
+    articlesWithSentiment[source] = articles.map(article => {
+      const analysis = sentimentData[Number(article.id)];
+      const sentiment = analysis?.sentiment_label || null;
+      
+      return {
+        ...article,
+        sentiment: sentiment
+      };
+    });
+  }
+
+  return articlesWithSentiment;
+}

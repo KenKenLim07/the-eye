@@ -1,13 +1,13 @@
 import MainLayout from "@/components/layout/main-layout";
 import ArticleRowServer from "../components/articles/article-row-server";
-import { fetchAllArticles } from "@/lib/articles";
+import { fetchAllArticlesWithSentiment } from "@/lib/articles";
 
 // Force fresh data on every page load - no caching
 export const dynamic = 'force-dynamic';
 
 export default async function Home() {
-  // Fetch all articles server-side in parallel - always fresh
-  const articlesBySource = await fetchAllArticles(20);
+  // Fetch all articles with sentiment data server-side
+  const articlesBySource = await fetchAllArticlesWithSentiment(10);
 
   return (
     <MainLayout>

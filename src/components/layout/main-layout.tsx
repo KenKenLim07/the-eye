@@ -1,5 +1,6 @@
 import { ReactNode } from "react";
 import { getResponsivePadding, getContainerSize } from "@/lib/design-system";
+import Navigation from "./navigation";
 import Footer from "./footer";
 
 interface MainLayoutProps {
@@ -15,6 +16,7 @@ export default function MainLayout({
 }: MainLayoutProps) {
   return (
     <div className="min-h-screen bg-background flex flex-col">
+      <Navigation />
       <main className={`flex-1 ${className}`}>
         {/* Responsive padding using design system constants */}
         <div className={getResponsivePadding()}>
@@ -27,4 +29,4 @@ export default function MainLayout({
       <Footer />
     </div>
   );
-} 
+}

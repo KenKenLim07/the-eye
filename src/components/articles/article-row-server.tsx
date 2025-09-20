@@ -3,7 +3,7 @@ import { formatDate } from "@/lib/utils/date";
 import { Badge } from "@/components/ui/badge";
 import { fetchLatestAnalysisByIds } from "@/lib/articles";
 import Link from "next/link";
-import ArticleCardsInteractive from "./article-cards-interactive";
+import { ArticleCardsInteractive } from "./article-cards-interactive";
 
 interface Article {
   id: string | number;
@@ -49,7 +49,7 @@ export default async function ArticleRowServer({ articles, title, sourceValue }:
       <div className="overflow-x-auto">
         <div className="flex gap-4 pr-4">
           {safeArticles.length > 0 ? (
-            <ArticleCardsInteractive articles={safeArticles} analysisById={analysisById} />
+            <ArticleCardsInteractive articles={safeArticles} />
           ) : (
             <Card className="min-w-[280px] max-w-[320px]">
               <CardHeader>

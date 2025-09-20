@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatDate } from "@/lib/utils/date";
 import { supabaseServer } from "@/lib/supabase/server";
-import ArticleCardsInteractive from "@/components/articles/article-cards-interactive";
+import { ArticleCardsInteractive } from "@/components/articles/article-cards-interactive";
 
 interface PageProps {
   params: { source: string };
@@ -33,7 +33,6 @@ export default async function SourcePage({ params, searchParams }: PageProps) {
     .range(from, to);
 
   if (query) {
-    // Simple full-text like filter on title/content
     queryBuilder = queryBuilder.or(`title.ilike.%${query}%,content.ilike.%${query}%`);
   }
 
@@ -61,6 +60,37 @@ export default async function SourcePage({ params, searchParams }: PageProps) {
   const total = count ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
+  // Get sentiment data for articles (optional - don't block if it fails)
+  let articlesWithSentiment = data || [];
+  
+  if (data && data.length > 0) {
+    try {
+      const articleIds = data.map(a => Number(a.id));
+      const response = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/ml/analysis?ids=${articleIds.join(',')}`, {
+        cache: 'no-store'
+      });
+      
+      if (response.ok) {
+        const analysisData = await response.json();
+        const sentimentAnalysis = analysisData.analysis?.filter((a: { model_type: string }) => a.model_type === 'sentiment') || [];
+        
+        const sentimentData: Record<number, string> = {};
+        sentimentAnalysis.forEach((analysis: { article_id: number; sentiment_label: string }) => {
+          sentimentData[analysis.article_id] = analysis.sentiment_label;
+        });
+
+        // Merge sentiment data with articles
+        articlesWithSentiment = data.map(article => ({
+          ...article,
+          sentiment: sentimentData[Number(article.id)] || null
+        }));
+      }
+    } catch (error) {
+      console.error('Error fetching sentiment data:', error);
+      // Continue without sentiment data
+    }
+  }
+
   return (
     <div className="max-w-6xl mx-auto px-4 py-8 space-y-6">
       <div className="flex items-center justify-between gap-2">
@@ -82,7 +112,7 @@ export default async function SourcePage({ params, searchParams }: PageProps) {
         <button className="text-sm border rounded-md px-3 py-2">Search</button>
       </form>
 
-      {!data?.length ? (
+      {!articlesWithSentiment?.length ? (
         <Card>
           <CardHeader>
             <CardTitle>No results</CardTitle>
@@ -91,8 +121,7 @@ export default async function SourcePage({ params, searchParams }: PageProps) {
         </Card>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {/* Use interactive cards so users can quick view without leaving the page */}
-          <ArticleCardsInteractive articles={data} />
+          <ArticleCardsInteractive articles={articlesWithSentiment} />
         </div>
       )}
 
@@ -119,4 +148,4 @@ export default async function SourcePage({ params, searchParams }: PageProps) {
       )}
     </div>
   );
-} 
+}
