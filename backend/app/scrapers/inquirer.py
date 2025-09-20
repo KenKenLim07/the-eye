@@ -104,7 +104,7 @@ class InquirerScraper:
         logger.info(f"Performance - {operation}: {duration:.2f}s")
         
     def _validate_url(self, url: str) -> bool:
-        """Security: minimal validation – only allow inquirer.net domains with whitelisted sections."""
+        """Enhanced validation to only allow actual article URLs."""
         if not url:
             return False
         parsed = urlparse(url)
@@ -123,25 +123,24 @@ class InquirerScraper:
         # Reject obvious non-article utility pages
         blocked_paths = (
             '/tag/', '/author/', '/search', '/privacy-policy', '/user-agreement', '/contact', '/newsletter',
-            '/job-openings', '/article-index', '/fullfeed'
+            '/job-openings', '/article-index', '/fullfeed', '/category/', '/regions', '/regions/',
+            '/page-one-single/', '/page-one-single'
         )
         if any(bp in parsed.path for bp in blocked_paths):
             return False
-        # Whitelist: allow only key sections/domains
-        allowed_section_prefixes = (
-            '/news/',
-            '/headlines/',
-            '/nation/',
-            '/business/',
-            '/sports/',
-            '/entertainment/',
-            '/lifestyle/',
-            '/opinion/',
-            '/technology/',
-            '/globalnation/',
-        )
+        # Reject URLs that are too short (likely not articles)
+        if len(parsed.path) < 10:
+            return False
+        # Allow WP-style permalinks: https://newsinfo.inquirer.net/?p=ID
+        if parsed.netloc == 'newsinfo.inquirer.net' and parsed.path == '/' and 'p=' in (parsed.query or ''):
+            return True
+        # For newsinfo.inquirer.net, require numeric ID in path (like /2112172/article-title)
+        if parsed.netloc == 'newsinfo.inquirer.net':
+            path_parts = [p for p in parsed.path.split('/') if p]
+            if len(path_parts) >= 2 and path_parts[0].isdigit():
+                return True
+        # For other subdomains, require substantial content in path
         allowed_news_subdomains = (
-            'newsinfo.inquirer.net',
             'globalnation.inquirer.net',
             'business.inquirer.net',
             'sports.inquirer.net',
@@ -150,15 +149,10 @@ class InquirerScraper:
             'opinion.inquirer.net',
             'technology.inquirer.net',
         )
-        # Allow WP-style permalinks: https://newsinfo.inquirer.net/?p=ID
-        if parsed.netloc == 'newsinfo.inquirer.net' and parsed.path == '/' and 'p=' in (parsed.query or ''):
-            return True
-        # If on an allowed subdomain, accept if path is non-empty
         if parsed.netloc in allowed_news_subdomains:
-            return parsed.path not in ('', '/')
-        # Otherwise, require allowed section prefixes in the path
-        if any(parsed.path.startswith(prefix) for prefix in allowed_section_prefixes):
-            return True
+            path_parts = [p for p in parsed.path.split('/') if p]
+            # Must have at least 2 path segments and not be a category page
+            return len(path_parts) >= 2 and not any(part in ['category', 'regions', 'tag', 'author'] for part in path_parts)
         return False
     
     def _sanitize_text(self, text: str) -> str:

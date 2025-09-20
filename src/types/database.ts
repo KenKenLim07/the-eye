@@ -246,6 +246,68 @@ export type Database = {
       }
     }
     Views: {
+      bias_analysis_political_latest: {
+        Row: {
+          article_id: number | null
+          confidence_score: number | null
+          created_at: string | null
+          id: number | null
+          model_metadata: Json | null
+          model_type: string | null
+          model_version: string | null
+          political_bias_score: number | null
+          processing_time_ms: number | null
+          sentiment_label: string | null
+          sentiment_score: number | null
+          toxicity_score: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bias_analysis_article_id_fkey"
+            columns: ["article_id"]
+            isOneToOne: false
+            referencedRelation: "articles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      bias_analysis_sentiment_latest: {
+        Row: {
+          article_id: number | null
+          confidence_score: number | null
+          created_at: string | null
+          id: number | null
+          model_metadata: Json | null
+          model_type: string | null
+          model_version: string | null
+          political_bias_score: number | null
+          processing_time_ms: number | null
+          sentiment_label: string | null
+          sentiment_score: number | null
+          toxicity_score: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bias_analysis_article_id_fkey"
+            columns: ["article_id"]
+            isOneToOne: false
+            referencedRelation: "articles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      mv_sentiment_daily: {
+        Row: {
+          articles: number | null
+          avg_sentiment: number | null
+          day: string | null
+          neg: number | null
+          neu: number | null
+          pos: number | null
+          source: string | null
+        }
+        Relationships: []
+      }
       v_article_counts_weekly: {
         Row: {
           category: string | null

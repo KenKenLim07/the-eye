@@ -74,15 +74,15 @@ class ManilaTimesScraper:
     
     # Discovery entry points for latest news
     DISCOVERY_PATHS = [
+        "/news/",
+        "/news/latest/",
+        "/politics/",
         "/business/",
         "/sports/",
         "/opinion/",
         "/world/",
         "/lifestyle/",
-        "/entertainment/",
-        "/politics/",
-        "/news/latest/",
-        "/news/"
+        "/entertainment/"
     ]
     
     # Rotating User-Agents for stealth
