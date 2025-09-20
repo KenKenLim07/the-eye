@@ -104,47 +104,23 @@ export async function fetchLatestAnalysisByIds(articleIds: number[]): Promise<Re
 }
 
 export async function fetchAllArticles(limit: number = 10): Promise<Record<string, Article[]>> {
-  const sources = [
-    "GMA",
-    "Inquirer", 
-    "Philstar",
-    "Sunstar",
-    "Manila Bulletin",
-    "Manila Times",
-    "Rappler"
-  ];
-
-  // Create parallel queries for all sources
-  const queries = sources.map(source => 
-    fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/articles?source=${source}&limit=10&offset=0`, { cache: 'no-store' })
-  );
-
-  // Execute all queries in parallel
-  const results = await Promise.all(queries);
-  
-  // Process results
-  const articlesBySource: Record<string, Article[]> = {};
-
-  for (let i = 0; i < results.length; i++) {
-    const response = results[i];
-    const source = sources[i];
+  try {
+    // Use optimized single-query endpoint instead of 7 separate queries
+    const response = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/articles/home-optimized?limit_per_source=${limit}`, { 
+      cache: 'no-store' 
+    });
     
-    try {
-      if (!response.ok) {
-        console.error(`Error fetching ${source}: HTTP ${response.status}`);
-        articlesBySource[source] = [];
-        continue;
-      }
-      
-      const data = await response.json();
-      articlesBySource[source] = data.articles || [];
-    } catch (error) {
-      console.error(`Error fetching ${source}:`, error);
-      articlesBySource[source] = [];
+    if (!response.ok) {
+      console.error(`Error fetching articles: HTTP ${response.status}`);
+      return {};
     }
+    
+    const data = await response.json();
+    return data.articles_by_source || {};
+  } catch (error) {
+    console.error('Error fetching articles:', error);
+    return {};
   }
-
-  return articlesBySource;
 }
 
 export async function fetchDashboardData(): Promise<any> {

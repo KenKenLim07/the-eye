@@ -148,6 +148,31 @@ async def get_articles(limit: int = 50, offset: int = 0, source: Optional[str] =
     except Exception as e:
         return {"error": str(e), "articles": []}
 
+@app.get("/articles/home-optimized")
+async def get_home_articles(limit_per_source: int = 10):
+    """Optimized endpoint for home page - single query instead of 7 separate ones"""
+    sb = get_supabase()
+    
+    try:
+        # Single query to get latest articles from all sources
+        result = sb.table("articles").select("*").order("published_at", desc=True).limit(70).execute()
+        
+        if not result.data:
+            return {"articles_by_source": {}}
+        
+        # Group by source
+        articles_by_source = {}
+        for article in result.data:
+            source = article.get("source", "Unknown")
+            if source not in articles_by_source:
+                articles_by_source[source] = []
+            if len(articles_by_source[source]) < limit_per_source:
+                articles_by_source[source].append(article)
+        
+        return {"articles_by_source": articles_by_source}
+    except Exception as e:
+        return {"error": str(e), "articles_by_source": {}}
+
 @app.get("/articles/{article_id}")
 async def get_article(article_id: int):
     sb = get_supabase()
