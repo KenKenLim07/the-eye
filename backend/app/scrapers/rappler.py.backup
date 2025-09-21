@@ -15,6 +15,29 @@ import json
 import httpx
 from app.scrapers.utils import resolve_category_pair
 
+# Feature flags (env-driven) for gradual rollout
+import os
+
+def _env_flag(name: str, default: bool = False) -> bool:
+    val = os.getenv(name, str(default)).strip().lower()
+    return val in {"1", "true", "yes", "on"}
+
+USE_ADV_HEADERS = _env_flag("USE_ADV_HEADERS", False)
+USE_HUMAN_DELAY = _env_flag("USE_HUMAN_DELAY", False)
+USE_URL_FILTER = _env_flag("USE_URL_FILTER", False)
+
+# Optional advanced utils
+try:
+    from app.scrapers.utils import (
+        get_advanced_stealth_headers,
+        get_human_like_delay,
+        is_valid_news_url,
+    )
+except Exception:
+    get_advanced_stealth_headers = None
+    get_human_like_delay = None
+    is_valid_news_url = None
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -52,8 +75,8 @@ class RapplerScraper:
     ]
 
     # Respectful crawling delays
-    MIN_DELAY = 4.0
-    MAX_DELAY = 8.0
+    MIN_DELAY = 10.0
+    MAX_DELAY = 20.0
 
     # Content selectors for Rappler
     SELECTORS = {
@@ -69,7 +92,8 @@ class RapplerScraper:
             ".post-card__title a",
             ".archive-article h3 a",
             ".trending-header a",
-            "a[href*='/20']",  # year-based URLs
+            # removed overly-broad year-based selector that captured media assets
+            # "a[href*='/20']",
             "article h2 a",
             "article h3 a",
         ],
@@ -100,7 +124,10 @@ class RapplerScraper:
         return random.choice(self.USER_AGENTS)
 
     def _human_delay(self):
-        delay = random.uniform(self.MIN_DELAY, self.MAX_DELAY)
+        if USE_HUMAN_DELAY and get_human_like_delay is not None:
+            delay = get_human_like_delay()
+        else:
+            delay = random.uniform(self.MIN_DELAY, self.MAX_DELAY)
         logger.info(f"Rappler: stealth delay {delay:.1f}s")
         time.sleep(delay)
 
@@ -114,6 +141,14 @@ class RapplerScraper:
         if not ("rappler.com" in parsed.netloc):
             return False
         
+        if USE_URL_FILTER and is_valid_news_url is not None:
+            # Use advanced validator with domain guard
+            if not is_valid_news_url(url, "rappler.com"):
+                return False
+            # Passed advanced checks
+            return True
+        
+        # Legacy checks (fallback)
         # Filter out non-article URLs
         blacklist_patterns = [
             r"/feed/",
@@ -125,13 +160,9 @@ class RapplerScraper:
             r"/login",
             r"/register",
             r"/wp-",
-            r"\.css",
-            r"\.js",
-            r"\.png",
-            r"\.jpg",
-            r"\.jpeg",
-            r"\.gif",
-            r"\.svg",
+            r"/wp-content/",
+            r"/tachyon/",
+            r"\.(css|js|png|jpg|jpeg|gif|svg|webp|avif|mp4|pdf)(\?|$)",
         ]
         
         for pattern in blacklist_patterns:
@@ -264,18 +295,142 @@ class RapplerScraper:
             pass
         return data
 
+    def _extract_rappler_category(self, url: str, soup: BeautifulSoup) -> Tuple[str, Optional[str]]:
+        """Extract category specifically for Rappler's structure."""
+        raw_category = None
+        
+        # 1. Try to extract from URL structure first (most reliable)
+        if url:
+            try:
+                from urllib.parse import urlparse
+                parsed = urlparse(url)
+                path_parts = [p for p in parsed.path.split('/') if p]
+                
+                if path_parts:
+                    # Rappler URLs: /technology/article-name or /newsbreak/politics/article-name
+                    first_segment = path_parts[0].lower()
+                    category_map = {
+                        'technology': 'Technology',
+                        'tech': 'Technology', 
+                        'business': 'Business',
+                        'sports': 'Sports',
+                        'world': 'World',
+                        'entertainment': 'Entertainment',
+                        'nation': 'Nation',
+                        'newsbreak': 'News',
+                        'latest': 'News',
+                        'politics': 'Politics',
+                        'lifestyle': 'Lifestyle',
+                        'opinion': 'Opinion'
+                    }
+                    
+                    if first_segment in category_map:
+                        raw_category = category_map[first_segment]
+                    
+                    # For newsbreak URLs, check second segment
+                    if first_segment == 'newsbreak' and len(path_parts) > 1:
+                        second_segment = path_parts[1].lower()
+                        if second_segment in category_map:
+                            raw_category = category_map[second_segment]
+            except Exception:
+                pass
+        
+        # 2. Extract from JavaScript dataLayer (very reliable for Rappler)
+        if not raw_category:
+            try:
+                # Look for window.dataLayer.push with primary_category
+                for script in soup.find_all('script'):
+                    if script.string and 'primary_category' in script.string:
+                        script_text = script.string
+                        import re
+                        match = re.search(r'"primary_category":"([^"]+)"', script_text)
+                        if match:
+                            raw_category = match.group(1)
+                            break
+            except Exception:
+                pass
+        
+        # 3. Extract from JSON-LD structured data
+        if not raw_category:
+            try:
+                for script in soup.find_all('script', type='application/ld+json'):
+                    try:
+                        import json
+                        data = json.loads(script.string or '')
+                        if isinstance(data, dict) and '@graph' in data:
+                            for item in data['@graph']:
+                                if item.get('@type') == 'NewsArticle':
+                                    section = item.get('articleSection')
+                                    if section:
+                                        raw_category = section
+                                        break
+                        elif isinstance(data, dict) and data.get('@type') == 'NewsArticle':
+                            section = data.get('articleSection')
+                            if section:
+                                raw_category = section
+                    except:
+                        continue
+            except Exception:
+                pass
+        
+        # 4. Fallback to breadcrumbs
+        if not raw_category:
+            try:
+                for selector in ['nav.breadcrumb a', '.breadcrumb a', '.breadcrumbs a']:
+                    breadcrumb = soup.select_one(selector)
+                    if breadcrumb:
+                        text = breadcrumb.get_text(strip=True)
+                        if text and text.lower() not in ['home', 'latest news', 'rappler']:
+                            raw_category = text
+                            break
+            except Exception:
+                pass
+        
+        # Normalize the category
+        if raw_category:
+            # Clean up the category name
+            raw_category = raw_category.strip().title()
+            # Map common variations
+            if raw_category.lower() in ['tech', 'technology']:
+                normalized = 'Technology'
+            elif raw_category.lower() in ['biz', 'business']:
+                normalized = 'Business'
+            elif raw_category.lower() in ['sports', 'sport']:
+                normalized = 'Sports'
+            elif raw_category.lower() in ['world', 'international']:
+                normalized = 'World'
+            elif raw_category.lower() in ['entertainment', 'showbiz']:
+                normalized = 'Entertainment'
+            elif raw_category.lower() in ['nation', 'national', 'politics']:
+                normalized = 'Nation'
+            elif raw_category.lower() in ['news', 'newsbreak', 'latest']:
+                normalized = 'News'
+            else:
+                normalized = raw_category
+        else:
+            normalized = 'General'
+            raw_category = None
+        
+        return normalized, raw_category
+
+
     def _fetch_with_httpx(self, url: str, timeout: int = 15) -> Optional[str]:
         """Fetch URL with httpx and stealth headers."""
         try:
-            headers = {
-                "User-Agent": self._get_random_ua(),
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-                "Accept-Language": "en-US,en;q=0.5",
-                "Accept-Encoding": "gzip, deflate, br",
-                "Referer": self.BASE_URL,
-                "Connection": "keep-alive",
-                "Upgrade-Insecure-Requests": "1",
-            }
+            if USE_ADV_HEADERS and get_advanced_stealth_headers is not None:
+                headers = get_advanced_stealth_headers()
+                # Ensure referer points to Rappler
+                headers.setdefault('Referer', self.BASE_URL)
+            else:
+                headers = {
+                    "User-Agent": self._get_random_ua(),
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+                    "Accept-Language": "en-US,en;q=0.5",
+                    "Accept-Encoding": "gzip, deflate, br",
+                    "Referer": self.BASE_URL,
+                    "Connection": "keep-alive",
+                    "Upgrade-Insecure-Requests": "1",
+                }
             
             with httpx.Client(timeout=timeout, follow_redirects=True) as client:
                 response = client.get(url, headers=headers)
@@ -296,7 +451,7 @@ class RapplerScraper:
             soup = BeautifulSoup(xml_content, "xml")
             links = []
             
-            for item in soup.select("item"):
+            for item in soup:
                 link_el = item.select_one("link")
                 if link_el:
                     url = link_el.get_text().strip()
@@ -323,7 +478,7 @@ class RapplerScraper:
             soup = BeautifulSoup(xml_content, "xml")
             links = []
             
-            for item in soup.select("item"):
+            for item in soup:
                 link_el = item.select_one("link")
                 if link_el:
                     gn_url = link_el.get_text().strip()
@@ -354,9 +509,17 @@ class RapplerScraper:
             with launch_browser() as browser:
                 for section in self.SECTIONS[:3]:  # Limit to first 3 sections
                     try:
+                        if USE_ADV_HEADERS and get_advanced_stealth_headers is not None:
+                            headers = get_advanced_stealth_headers()
+                            headers.setdefault('Referer', self.BASE_URL)
+                            user_agent = headers.get('User-Agent', self._get_random_ua())
+                        else:
+                            user_agent = self._get_random_ua()
+                            headers = {"Referer": self.BASE_URL}
+                        
                         context = browser.new_context(
-                            user_agent=self._get_random_ua(),
-                            extra_http_headers={"Referer": self.BASE_URL}
+                            user_agent=user_agent,
+                            extra_http_headers=headers
                         )
                         page = context.new_page()
                         
@@ -429,11 +592,19 @@ class RapplerScraper:
     def _scrape_article(self, url: str, browser: Browser) -> Optional[NormalizedArticle]:
         """Scrape individual article with stealth techniques."""
         try:
+            if USE_ADV_HEADERS and get_advanced_stealth_headers is not None:
+                headers = get_advanced_stealth_headers()
+                headers.setdefault('Referer', self.BASE_URL)
+                user_agent = headers.get('User-Agent', self._get_random_ua())
+            else:
+                user_agent = self._get_random_ua()
+                headers = {"Referer": self.BASE_URL}
+            
             context = browser.new_context(
-                user_agent=self._get_random_ua(),
+                user_agent=user_agent,
                 locale="en-PH",
                 timezone_id="Asia/Manila",
-                extra_http_headers={"Referer": self.BASE_URL}
+                extra_http_headers=headers
             )
             page = context.new_page()
             
@@ -481,6 +652,19 @@ class RapplerScraper:
                 self._extract_content(soup)
             )
             
+            # Content gate: skip media/placeholder pages
+            minimal_content = (content or "").strip()
+            og_type = None
+            try:
+                og = soup.select_one("meta[property='og:type']")
+                if og:
+                    og_type = (og.get("content") or "").strip().lower()
+            except Exception:
+                pass
+            if (len(minimal_content) < 120) and (og_type and og_type != "article"):
+                logger.info(f"Skipping non-article page by content gate: {url} (og:type={og_type}, len={len(minimal_content)})")
+                return None
+            
             raw_date = (
                 json_ld.get("datePublished") or 
                 self._extract_with_fallbacks(soup, self.SELECTORS["published_date"])
@@ -488,7 +672,7 @@ class RapplerScraper:
             published_at = self._parse_published_date(raw_date)
             
             # Build normalized article
-            norm_cat, raw_cat = resolve_category_pair(url, soup)
+            norm_cat, raw_cat = self._extract_rappler_category(url, soup)
             article = build_article(
                 source="Rappler",
                 title=title,
@@ -510,6 +694,8 @@ class RapplerScraper:
         start_time = time.time()
         articles = []
         errors = []
+        
+        logger.info(f"Rappler: flags USE_ADV_HEADERS={USE_ADV_HEADERS}, USE_HUMAN_DELAY={USE_HUMAN_DELAY}, USE_URL_FILTER={USE_URL_FILTER}")
         
         # Multi-source discovery strategy
         all_links = []

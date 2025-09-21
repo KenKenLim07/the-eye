@@ -238,7 +238,7 @@ async def get_home_articles(limit_per_source: int = 10):
         result_data = {"articles_by_source": articles_by_source}
         
         # Cache the result for 2 minutes (home page changes more frequently)
-        set_cached(cache_key, result_data, 120)
+        set_cached(cache_key, result_data, 600)
         return result_data
         
     except Exception as e:
@@ -444,7 +444,7 @@ async def get_trends(period: str = "7d", source: Optional[str] = None):
         }
         
         # Cache the result for 5 minutes
-        set_cached(cache_key, result, 300)
+        set_cached(cache_key, result, 1800)
         return result
         
     except Exception as e:
@@ -735,6 +735,7 @@ async def bias_summary(days: int = Query(default=30, ge=1, le=180)):
         
     except Exception as e:
         return {"ok": False, "error": str(e), "daily_buckets": [], "distribution": {}, "top_sources": [], "top_categories": [], "recent_examples": []}
+@app.get("/cache/stats")
 async def get_cache_stats():
     """Get Redis cache statistics"""
     try:

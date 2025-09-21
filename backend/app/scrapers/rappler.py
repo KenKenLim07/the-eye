@@ -96,6 +96,7 @@ class RapplerScraper:
             # "a[href*='/20']",
             "article h2 a",
             "article h3 a",
+            ".archive-article__latest-post h3 a",
         ],
         "title": [
             "h1.post-single__title",
@@ -451,7 +452,7 @@ class RapplerScraper:
             soup = BeautifulSoup(xml_content, "xml")
             links = []
             
-            for item in soup:
+            for item in soup.find_all("item"):
                 link_el = item.select_one("link")
                 if link_el:
                     url = link_el.get_text().strip()
@@ -478,7 +479,7 @@ class RapplerScraper:
             soup = BeautifulSoup(xml_content, "xml")
             links = []
             
-            for item in soup:
+            for item in soup.find_all("item"):
                 link_el = item.select_one("link")
                 if link_el:
                     gn_url = link_el.get_text().strip()
@@ -536,7 +537,7 @@ class RapplerScraper:
                         
                         # Wait for content to load
                         try:
-                            page.wait_for_selector("article, .post-card", timeout=10000)
+                            page.wait_for_selector(".archive-article, .post-card", timeout=15000)
                         except Exception:
                             pass
                         
