@@ -12,7 +12,6 @@ const COLORS: Record<string, string> = {
   pro_opposition: "#ef4444",
   neutral: "#6b7280",
 };
-
 const PERIODS = [
   { value: "1", label: "Last 24 Hours" },
   { value: "7", label: "Last 7 Days" },
@@ -68,44 +67,39 @@ export default function BiasTrendsPage() {
   const [selectedDirection, setSelectedDirection] = useState<string | undefined>(undefined);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [isFilterLoading, setIsFilterLoading] = useState(false);
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [isPeriodChanging, setIsPeriodChanging] = useState(false);
 
-  const loadData = async (showRefreshIndicator = false) => {
-    if (showRefreshIndicator) {
-      setIsRefreshing(true);
-    } else {
-      setIsLoading(true);
-    }
-    
+  const loadData = async (period: string, direction?: string) => {
+    setIsLoading(true);
     try {
       const [summaryData, articlesData] = await Promise.all([
-        fetchBiasSummary(Number(selectedPeriod)),
-        fetchBiasArticles(selectedDirection, 20)
+        fetchBiasSummary(Number(period)),
+        fetchBiasArticles(direction, 20)
       ]);
       setSummary(summaryData);
       setArticles(articlesData);
-      setLastUpdated(new Date());
     } catch (error) {
       console.error("Error loading data:", error);
     } finally {
       setIsLoading(false);
-      setIsRefreshing(false);
-      setIsFilterLoading(false);
     }
   };
 
   const handlePeriodChange = async (period: string) => {
-    setIsFilterLoading(true);
+    setIsPeriodChanging(true);
     setSelectedPeriod(period);
+    await loadData(period, selectedDirection);
+    setIsPeriodChanging(false);
   };
 
   const handleRefresh = async () => {
-    loadData(true);
+    setIsRefreshing(true);
+    await loadData(selectedPeriod, selectedDirection);
+    setIsRefreshing(false);
   };
 
   useEffect(() => {
-    loadData();
+    loadData(selectedPeriod, selectedDirection);
   }, [selectedPeriod, selectedDirection]);
 
   const chartData = useMemo(() => {
@@ -127,7 +121,7 @@ export default function BiasTrendsPage() {
     }));
   }, [summary]);
 
-  if (isLoading && !summary) {
+  if (isLoading) {
     return (
       <div className="container mx-auto p-6">
         <div className="flex items-center justify-center h-64">
@@ -146,7 +140,7 @@ export default function BiasTrendsPage() {
         <div className="text-center">
           <h1 className="text-2xl font-bold text-red-600 mb-4">Error Loading Data</h1>
           <p className="text-gray-600 mb-4">Failed to load bias analysis data.</p>
-          <Button onClick={() => loadData()}>
+          <Button onClick={() => loadData(selectedPeriod, selectedDirection)}>
             Try Again
           </Button>
         </div>
@@ -159,7 +153,7 @@ export default function BiasTrendsPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold">Political Bias Analysis</h1>
         <div className="flex items-center gap-4">
-          <Select value={selectedPeriod} onValueChange={handlePeriodChange} disabled={isFilterLoading}>
+          <Select value={selectedPeriod} onValueChange={handlePeriodChange} disabled={isPeriodChanging}>
             <SelectTrigger className="w-40">
               <SelectValue />
             </SelectTrigger>
@@ -175,21 +169,15 @@ export default function BiasTrendsPage() {
             variant="outline"
             size="sm"
             onClick={handleRefresh}
-            disabled={isRefreshing || isFilterLoading}
+            disabled={isRefreshing}
           >
-            <RefreshCw className={`h-4 w-4 ${(isRefreshing || isFilterLoading) ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
           </Button>
-          {lastUpdated && (
-            <span className="text-xs text-muted-foreground">
-              Last updated: {lastUpdated.toLocaleTimeString()}
-            </span>
-          )}
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Daily Sentiment Timeline Chart - Trends-style animation */}
-        <Card className={`transition-all duration-500 ${isFilterLoading ? 'opacity-50' : 'opacity-100'}`}>
+        <Card>
           <CardHeader>
             <CardTitle>Daily Sentiment Timeline</CardTitle>
             <p className="text-sm text-muted-foreground">
@@ -204,40 +192,15 @@ export default function BiasTrendsPage() {
                 <YAxis />
                 <Tooltip />
                 <Legend />
-                <Line 
-                  type="monotone" 
-                  dataKey="Pro-Government" 
-                  stroke={COLORS.pro_government} 
-                  strokeWidth={3}
-                  dot={{ fill: COLORS.pro_government, strokeWidth: 2, r: 4 }}
-                  animationDuration={isFilterLoading ? 0 : 1000}
-                  animationEasing="ease-in-out"
-                />
-                <Line 
-                  type="monotone" 
-                  dataKey="Pro-Opposition" 
-                  stroke={COLORS.pro_opposition} 
-                  strokeWidth={3}
-                  dot={{ fill: COLORS.pro_opposition, strokeWidth: 2, r: 4 }}
-                  animationDuration={isFilterLoading ? 0 : 1000}
-                  animationEasing="ease-in-out"
-                />
-                <Line 
-                  type="monotone" 
-                  dataKey="Neutral" 
-                  stroke={COLORS.neutral} 
-                  strokeWidth={3}
-                  dot={{ fill: COLORS.neutral, strokeWidth: 2, r: 4 }}
-                  animationDuration={isFilterLoading ? 0 : 1000}
-                  animationEasing="ease-in-out"
-                />
+                <Line type="monotone" dataKey="Pro-Government" stroke={COLORS.pro_government} strokeWidth={2} />
+                <Line type="monotone" dataKey="Pro-Opposition" stroke={COLORS.pro_opposition} strokeWidth={2} />
+                <Line type="monotone" dataKey="Neutral" stroke={COLORS.neutral} strokeWidth={2} />
               </LineChart>
             </ResponsiveContainer>
           </CardContent>
         </Card>
 
-        {/* Overall Distribution Chart - Trends-style animation */}
-        <Card className={`transition-all duration-500 ${isFilterLoading ? 'opacity-50' : 'opacity-100'}`}>
+        <Card>
           <CardHeader>
             <CardTitle>Overall Distribution</CardTitle>
             <p className="text-sm text-muted-foreground">
@@ -251,21 +214,15 @@ export default function BiasTrendsPage() {
                 <XAxis dataKey="name" />
                 <YAxis />
                 <Tooltip />
-                <Bar 
-                  dataKey="value" 
-                  fill="#8884d8"
-                  animationDuration={isFilterLoading ? 0 : 1000}
-                  animationEasing="ease-in-out"
-                />
+                <Bar dataKey="value" fill="#8884d8" />
               </BarChart>
             </ResponsiveContainer>
           </CardContent>
         </Card>
       </div>
 
-      {/* Summary Cards - Trends-style opacity/scale animation */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <Card className={`transition-all duration-500 ${isFilterLoading ? 'opacity-50 scale-98' : 'opacity-100 scale-100'}`}>
+        <Card>
           <CardHeader>
             <CardTitle>Top Sources</CardTitle>
             <p className="text-sm text-muted-foreground">
@@ -275,14 +232,7 @@ export default function BiasTrendsPage() {
           <CardContent>
             <div className="space-y-2">
               {summary.top_sources.slice(0, 5).map((item, i) => (
-                <div 
-                  key={i} 
-                  className="flex items-center justify-between transition-all duration-700 ease-out"
-                  style={{
-                    animationDelay: isFilterLoading ? '0ms' : `${i * 100}ms`,
-                    animation: isFilterLoading ? 'none' : 'fadeInUp 0.8s ease-out forwards'
-                  }}
-                >
+                <div key={i} className="flex items-center justify-between">
                   <span className="text-sm">{item.source}</span>
                   <div className="flex items-center gap-2">
                     <span className="text-xs px-2 py-1 rounded bg-gray-100 text-gray-600">
@@ -296,7 +246,7 @@ export default function BiasTrendsPage() {
           </CardContent>
         </Card>
 
-        <Card className={`transition-all duration-500 ${isFilterLoading ? 'opacity-50 scale-98' : 'opacity-100 scale-100'}`}>
+        <Card>
           <CardHeader>
             <CardTitle>Top Categories</CardTitle>
             <p className="text-sm text-muted-foreground">
@@ -306,14 +256,7 @@ export default function BiasTrendsPage() {
           <CardContent>
             <div className="space-y-2">
               {summary.top_categories.slice(0, 5).map((item, i) => (
-                <div 
-                  key={i} 
-                  className="flex items-center justify-between transition-all duration-700 ease-out"
-                  style={{
-                    animationDelay: isFilterLoading ? '0ms' : `${i * 100}ms`,
-                    animation: isFilterLoading ? 'none' : 'fadeInUp 0.8s ease-out forwards'
-                  }}
-                >
+                <div key={i} className="flex items-center justify-between">
                   <span className="text-sm">{item.category}</span>
                   <div className="flex items-center gap-2">
                     <span className="text-xs px-2 py-1 rounded bg-gray-100 text-gray-600">
@@ -327,7 +270,7 @@ export default function BiasTrendsPage() {
           </CardContent>
         </Card>
 
-        <Card className={`transition-all duration-500 ${isFilterLoading ? 'opacity-50 scale-98' : 'opacity-100 scale-100'}`}>
+        <Card>
           <CardHeader>
             <CardTitle>Recent Examples</CardTitle>
             <p className="text-sm text-muted-foreground">
@@ -337,14 +280,7 @@ export default function BiasTrendsPage() {
           <CardContent>
             <div className="space-y-3">
               {summary.recent_examples.slice(0, 3).map((item, i) => (
-                <div 
-                  key={i} 
-                  className="space-y-1 transition-all duration-700 ease-out"
-                  style={{
-                    animationDelay: isFilterLoading ? '0ms' : `${i * 100}ms`,
-                    animation: isFilterLoading ? 'none' : 'fadeInUp 0.8s ease-out forwards'
-                  }}
-                >
+                <div key={i} className="space-y-1">
                   <h4 className="text-sm font-medium line-clamp-2">{item.title}</h4>
                   <div className="flex items-center gap-2">
                     <span className="text-xs px-2 py-1 rounded bg-gray-100 text-gray-600">
@@ -359,9 +295,8 @@ export default function BiasTrendsPage() {
         </Card>
       </div>
 
-      {/* Recent Articles - Trends-style animation */}
       {articles?.items && articles.items.length > 0 && articles.items.filter(item => item.articles).length > 0 && (
-        <Card className={`transition-all duration-500 ${isFilterLoading ? 'opacity-50' : 'opacity-100'}`}>
+        <Card>
           <CardHeader>
             <CardTitle>Recent Articles</CardTitle>
             <p className="text-sm text-muted-foreground">
@@ -371,14 +306,7 @@ export default function BiasTrendsPage() {
           <CardContent>
             <div className="space-y-3">
               {articles.items.filter(item => item.articles).slice(0, 10).map((item, i) => (
-                <div 
-                  key={i} 
-                  className="flex items-start justify-between p-3 border rounded-lg transition-all duration-700 ease-out hover:shadow-sm"
-                  style={{
-                    animationDelay: isFilterLoading ? '0ms' : `${i * 100}ms`,
-                    animation: isFilterLoading ? 'none' : 'fadeInUp 0.8s ease-out forwards'
-                  }}
-                >
+                <div key={i} className="flex items-start justify-between p-3 border rounded-lg">
                   <div className="flex-1">
                     <h4 className="font-medium line-clamp-2">{item.articles?.title || "No title"}</h4>
                     <p className="text-sm text-muted-foreground mt-1">
@@ -399,19 +327,6 @@ export default function BiasTrendsPage() {
           </CardContent>
         </Card>
       )}
-
-      <style jsx>{`
-        @keyframes fadeInUp {
-          from {
-            opacity: 0;
-            transform: translateY(20px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
-      `}</style>
     </div>
   );
 }

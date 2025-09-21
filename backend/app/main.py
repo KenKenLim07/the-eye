@@ -616,22 +616,29 @@ async def get_comprehensive_dashboard(period: str = "7d", source: Optional[str] 
 
 @app.get("/bias/summary")
 async def bias_summary(days: int = Query(default=30, ge=1, le=180)):
+    """OPTIMIZED: Get political bias summary with trends-style caching"""
+    cache_key = f"bias_summary:{days}"
+    
+    # Try cache first (like trends)
+    cached_data = get_cached(cache_key)
+    if cached_data:
+        return cached_data
+    
     sb = get_supabase()
     try:
         # Calculate date range
         start_date = (datetime.now() - timedelta(days=days)).isoformat()
         
-        # Get articles from the period
-        articles_result = sb.table("articles").select("*").gte("published_at", start_date).order("published_at", desc=True).limit(1000).execute()
-        articles = articles_result.data or []
+        # OPTIMIZED: Single query with JOIN instead of N+1
+        result = sb.table("bias_analysis").select("*, articles(*)").eq("model_type", "political_bias").gte("created_at", start_date).order("created_at", desc=True).execute()
         
-        if not articles:
-            return {"ok": True, "daily_buckets": [], "distribution": {}, "top_sources": [], "top_categories": [], "recent_examples": []}
+        all_analysis = result.data or []
         
-        # Get political bias analysis
-        article_ids = [a["id"] for a in articles]
-        analysis_result = sb.table("bias_analysis").select("*").in_("article_id", article_ids).eq("model_type", "political_bias").execute()
-        all_analysis = analysis_result.data or []
+        if not all_analysis:
+            empty_response = {"ok": True, "daily_buckets": [], "distribution": {}, "top_sources": [], "top_categories": [], "recent_examples": []}
+            # Cache empty result for 1 minute (like trends)
+            set_cached(cache_key, empty_response, 60)
+            return empty_response
         
         # Calculate distribution
         distribution = {}
@@ -660,17 +667,19 @@ async def bias_summary(days: int = Query(default=30, ge=1, le=180)):
                 "by_direction": data["by_direction"]
             })
         
-        # Calculate top sources
+        # Calculate top sources from articles
         source_counts = {}
-        for article in articles:
+        for item in all_analysis:
+            article = item.get("articles", {})
             source = article.get("source", "Unknown")
             source_counts[source] = source_counts.get(source, 0) + 1
         
         top_sources = sorted(source_counts.items(), key=lambda x: x[1], reverse=True)[:10]
         
-        # Calculate top categories
+        # Calculate top categories from articles
         category_counts = {}
-        for article in articles:
+        for item in all_analysis:
+            article = item.get("articles", {})
             category = article.get("category", "Unknown")
             if category:
                 category_counts[category] = category_counts.get(category, 0) + 1
@@ -679,15 +688,16 @@ async def bias_summary(days: int = Query(default=30, ge=1, le=180)):
         
         # Get recent examples
         recent_examples = []
-        for article in articles[:5]:
+        for item in all_analysis[:5]:
+            article = item.get("articles", {})
             recent_examples.append({
-                "id": article["id"],
-                "title": article["title"],
+                "id": article.get("id", 0),
+                "title": article.get("title", ""),
                 "source": article.get("source", "Unknown"),
                 "published_at": article.get("published_at", "")
             })
         
-        return {
+        response = {
             "ok": True,
             "daily_buckets": daily_buckets_list,
             "distribution": distribution,
@@ -696,8 +706,12 @@ async def bias_summary(days: int = Query(default=30, ge=1, le=180)):
             "recent_examples": recent_examples
         }
         
+        # Cache for 5 minutes (like trends)
+        set_cached(cache_key, response, 300)
+        return response
+        
     except Exception as e:
-        return {"ok": False, "error": str(e), "daily_buckets": [], "distribution": {}, "top_sources": [], "top_categories": [], "recent_examples": []}@app.get("/cache/stats")
+        return {"ok": False, "error": str(e), "daily_buckets": [], "distribution": {}, "top_sources": [], "top_categories": [], "recent_examples": []}
 async def get_cache_stats():
     """Get Redis cache statistics"""
     try:
