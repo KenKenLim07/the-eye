@@ -5,11 +5,43 @@ from app.workers.celery_app import celery
 from celery.result import AsyncResult
 from typing import Optional
 from app.core.supabase import get_supabase
+from app.cache import get_cached, set_cached
 from app.workers.ml_tasks import analyze_articles_task
 from fastapi.middleware.cors import CORSMiddleware
 from app.ml.bias import get_political_keywords_and_weights
 import os, json, subprocess, sys
 from datetime import datetime, timedelta
+
+
+
+def get_all_articles_paginated(sb, start_date, source=None, end_date=None, limit_per_batch=1000):
+    """Get ALL articles with proper pagination to bypass 1000-row limit"""
+    all_articles = []
+    offset = 0
+    
+    while True:
+        query = sb.table('articles').select('*').gte('published_at', start_date).order('published_at', desc=True)
+        
+        if end_date:
+            query = query.lte('published_at', end_date)
+        
+        if source:
+            query = query.eq('source', source)
+        
+        result = query.range(offset, offset + limit_per_batch - 1).execute()
+        articles = result.data or []
+        
+        if not articles:
+            break
+            
+        all_articles.extend(articles)
+        offset += limit_per_batch
+        
+        # Safety check to prevent infinite loops
+        if len(articles) < limit_per_batch:
+            break
+    
+    return all_articles
 
 app = FastAPI(title="PH Eye Backend", version="0.1.0")
 
@@ -151,6 +183,14 @@ async def get_articles(limit: int = 50, offset: int = 0, source: Optional[str] =
 @app.get("/articles/home-optimized")
 async def get_home_articles(limit_per_source: int = 10):
     """Optimized endpoint for home page - single query instead of 7 separate ones"""
+    # Generate cache key
+    cache_key = f"home_articles:{limit_per_source}"
+    
+    # Check cache first
+    cached_result = get_cached(cache_key)
+    if cached_result:
+        return cached_result
+    
     sb = get_supabase()
     
     try:
@@ -158,7 +198,10 @@ async def get_home_articles(limit_per_source: int = 10):
         result = sb.table("articles").select("*").order("published_at", desc=True).limit(70).execute()
         
         if not result.data:
-            return {"articles_by_source": {}}
+            empty_result = {"articles_by_source": {}}
+            # Cache empty result for 1 minute
+            set_cached(cache_key, empty_result, 60)
+            return empty_result
         
         # Group by source
         articles_by_source = {}
@@ -169,11 +212,14 @@ async def get_home_articles(limit_per_source: int = 10):
             if len(articles_by_source[source]) < limit_per_source:
                 articles_by_source[source].append(article)
         
-        return {"articles_by_source": articles_by_source}
+        result_data = {"articles_by_source": articles_by_source}
+        
+        # Cache the result for 2 minutes (home page changes more frequently)
+        set_cached(cache_key, result_data, 120)
+        return result_data
+        
     except Exception as e:
-        return {"error": str(e), "articles_by_source": {}}
-
-@app.get("/articles/{article_id}")
+        return {"error": str(e), "articles_by_source": {}}@app.get("/articles/{article_id}")
 async def get_article(article_id: int):
     sb = get_supabase()
     try:
@@ -241,9 +287,17 @@ async def get_analysis(ids: str):
 
 @app.get("/ml/trends")
 async def get_trends(period: str = "7d", source: Optional[str] = None):
+    # Generate cache key
+    cache_key = f"trends:{period}:{source or 'all'}"
+    
+    # Check cache first
+    cached_result = get_cached(cache_key)
+    if cached_result:
+        return cached_result
+    
     sb = get_supabase()
     
-    # Calculate date range
+    # Calculate date range (SIMPLE VERSION)
     from datetime import datetime, timedelta
     now = datetime.now()
     
@@ -259,17 +313,11 @@ async def get_trends(period: str = "7d", source: Optional[str] = None):
     start_date_str = start_date.isoformat()
     
     try:
-        # Get articles from the period
-        query = sb.table("articles").select("*").gte("published_at", start_date_str).order("published_at", desc=True)
-        
-        if source:
-            query = query.eq("source", source)
-        
-        articles_result = query.limit(1000).execute()
-        articles = articles_result.data or []
+        # Get articles from the period (with pagination)
+        articles = get_all_articles_paginated(sb, start_date_str, source)
         
         if not articles:
-            return {
+            result = {
                 "ok": True,
                 "summary": {
                     "period": period,
@@ -282,17 +330,25 @@ async def get_trends(period: str = "7d", source: Optional[str] = None):
                 },
                 "timeline": []
             }
+            # Cache empty result for 1 minute
+            set_cached(cache_key, result, 60)
+            return result
         
-        # Get analysis for these articles
+        # Get analysis for these articles (in batches)
         article_ids = [a["id"] for a in articles]
-        analysis_result = sb.table("bias_analysis").select("*").in_("article_id", article_ids).eq("model_version", "vader_v1").eq("model_type", "sentiment").execute()
-        analysis_data = analysis_result.data or []
+        all_analysis = []
+        batch_size = 500
+        
+        for i in range(0, len(article_ids), batch_size):
+            batch_ids = article_ids[i:i + batch_size]
+            analysis_result = sb.table("bias_analysis").select("*").in_("article_id", batch_ids).eq("model_type", "sentiment").execute()
+            all_analysis.extend(analysis_result.data or [])
         
         # Group by date
         from collections import defaultdict
         daily_data = defaultdict(lambda: {"positive": 0, "negative": 0, "neutral": 0, "total": 0, "sentiment_scores": []})
         
-        for analysis in analysis_data:
+        for analysis in all_analysis:
             article_id = analysis["article_id"]
             sentiment_label = analysis.get("sentiment_label", "neutral")
             sentiment_score = analysis.get("sentiment_score", 0)
@@ -350,7 +406,7 @@ async def get_trends(period: str = "7d", source: Optional[str] = None):
         neutral_pct = round((total_neutral / total_articles * 100) if total_articles > 0 else 0, 1)
         avg_daily_articles = round(total_articles / len(timeline), 1) if timeline else 0
         
-        return {
+        result = {
             "ok": True,
             "summary": {
                 "period": period,
@@ -364,11 +420,12 @@ async def get_trends(period: str = "7d", source: Optional[str] = None):
             "timeline": timeline
         }
         
+        # Cache the result for 5 minutes
+        set_cached(cache_key, result, 300)
+        return result
+        
     except Exception as e:
-        return {"error": str(e)}
-
-
-@app.get("/ml/bias_analysis_political_latest")
+        return {"error": str(e)}@app.get("/ml/bias_analysis_political_latest")
 async def get_political_bias_latest(limit: int = 100):
     """Get latest political bias analysis results."""
     sb = get_supabase()
@@ -384,18 +441,26 @@ async def get_comprehensive_dashboard(period: str = "7d", source: Optional[str] 
     """Comprehensive dashboard data including both sentiment and political bias analysis."""
     sb = get_supabase()
     
-    # Calculate date range
+    # Calculate date range (FIXED: Use yesterday as end date for proper day counting)
     from datetime import datetime, timedelta
     now = datetime.now()
     
     if period == "1d":
-        start_date = now - timedelta(days=1)
+        # Last complete day (yesterday)
+        start_date = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        end_date = (now - timedelta(days=1)).replace(hour=23, minute=59, second=59, microsecond=999999)
     elif period == "7d":
-        start_date = now - timedelta(days=7)
+        # Last 7 complete days (ending yesterday)
+        start_date = (now - timedelta(days=8)).replace(hour=0, minute=0, second=0, microsecond=0)
+        end_date = (now - timedelta(days=1)).replace(hour=23, minute=59, second=59, microsecond=999999)
     elif period == "30d":
-        start_date = now - timedelta(days=30)
+        # Last 30 complete days (ending yesterday)
+        start_date = (now - timedelta(days=31)).replace(hour=0, minute=0, second=0, microsecond=0)
+        end_date = (now - timedelta(days=1)).replace(hour=23, minute=59, second=59, microsecond=999999)
     else:
-        start_date = now - timedelta(days=7)
+        # Default to 7 complete days (ending yesterday)
+        start_date = (now - timedelta(days=8)).replace(hour=0, minute=0, second=0, microsecond=0)
+        end_date = (now - timedelta(days=1)).replace(hour=23, minute=59, second=59, microsecond=999999)
     
     start_date_str = start_date.isoformat()
     
@@ -550,20 +615,14 @@ async def get_comprehensive_dashboard(period: str = "7d", source: Optional[str] 
         return {"ok": False, "error": str(e)}
 
 @app.get("/bias/summary")
-async def bias_summary(days: int = Query(default=30, ge=1, le=180), limit_rows: int = Query(default=5000, ge=100, le=20000)):
-    # Check cache first (disabled)
-    cache_key = f"bias_summary_{days}_{limit_rows}"
-    # cached = get_cached(cache_key, 300)  # 5 min cache
-    # if cached:
-        # return cached
-    
+async def bias_summary(days: int = Query(default=30, ge=1, le=180)):
     sb = get_supabase()
     try:
         # Calculate date range
         start_date = (datetime.now() - timedelta(days=days)).isoformat()
         
         # Get articles from the period
-        articles_result = sb.table("articles").select("id,title,source,published_at").gte("published_at", start_date).order("published_at", desc=True).limit(limit_rows).execute()
+        articles_result = sb.table("articles").select("*").gte("published_at", start_date).order("published_at", desc=True).limit(1000).execute()
         articles = articles_result.data or []
         
         if not articles:
@@ -571,89 +630,111 @@ async def bias_summary(days: int = Query(default=30, ge=1, le=180), limit_rows: 
         
         # Get political bias analysis
         article_ids = [a["id"] for a in articles]
-        analysis_result = sb.table("bias_analysis").select("*").in_("article_id", article_ids).eq("model_type", "political_bias").order("created_at", desc=True).limit(limit_rows).execute()
-        analysis = analysis_result.data or []
+        analysis_result = sb.table("bias_analysis").select("*").in_("article_id", article_ids).eq("model_type", "political_bias").execute()
+        all_analysis = analysis_result.data or []
         
         # Calculate distribution
         distribution = {}
-        for item in analysis:
+        for item in all_analysis:
             direction = item.get("model_metadata", {}).get("direction", "unknown")
             distribution[direction] = distribution.get(direction, 0) + 1
         
         # Calculate daily buckets
         daily_buckets = {}
-        for item in analysis:
-            date = item.get("created_at", "")[:10]  # YYYY-MM-DD
-            if date:
-                if date not in daily_buckets:
-                    daily_buckets[date] = {"pro_government": 0, "pro_opposition": 0, "neutral": 0}
-                direction = item.get("model_metadata", {}).get("direction", "unknown")
-                if direction in daily_buckets[date]:
-                    daily_buckets[date][direction] += 1
+        for item in all_analysis:
+            date = item.get("created_at", "")[:10]
+            if date not in daily_buckets:
+                daily_buckets[date] = {"total": 0, "by_direction": {}}
+            
+            direction = item.get("model_metadata", {}).get("direction", "unknown")
+            daily_buckets[date]["total"] += 1
+            daily_buckets[date]["by_direction"][direction] = daily_buckets[date]["by_direction"].get(direction, 0) + 1
         
-        # Convert to array format
-        daily_buckets_array = [{"date": date, **counts} for date, counts in daily_buckets.items()]
-        daily_buckets_array.sort(key=lambda x: x["date"])
+        # Convert to list format
+        daily_buckets_list = []
+        for date in sorted(daily_buckets.keys(), reverse=True):
+            data = daily_buckets[date]
+            daily_buckets_list.append({
+                "date": date,
+                "total": data["total"],
+                "by_direction": data["by_direction"]
+            })
         
         # Calculate top sources
         source_counts = {}
-        for item in analysis:
-            article_id = item.get("article_id")
-            article = next((a for a in articles if a["id"] == article_id), None)
-            if article:
-                source = article.get("source", "unknown")
-                direction = item.get("model_metadata", {}).get("direction", "unknown")
-                key = f"{source}_{direction}"
-                source_counts[key] = source_counts.get(key, 0) + 1
+        for article in articles:
+            source = article.get("source", "Unknown")
+            source_counts[source] = source_counts.get(source, 0) + 1
         
-        top_sources = [{"source": k.split("_")[0], "direction": k.split("_")[1], "count": v} for k, v in source_counts.items()]
-        top_sources.sort(key=lambda x: x["count"], reverse=True)
+        top_sources = sorted(source_counts.items(), key=lambda x: x[1], reverse=True)[:10]
         
         # Calculate top categories
         category_counts = {}
-        for item in analysis:
-            metadata = item.get("model_metadata", {})
-            category = metadata.get("direction", "unknown")
-            direction = item.get("model_metadata", {}).get("direction", "unknown")
-            key = f"{category}_{direction}"
-            category_counts[key] = category_counts.get(key, 0) + 1
+        for article in articles:
+            category = article.get("category", "Unknown")
+            if category:
+                category_counts[category] = category_counts.get(category, 0) + 1
         
-        top_categories = [{"category": k.split("_")[0], "direction": k.split("_")[1], "count": v} for k, v in category_counts.items()]
-        top_categories.sort(key=lambda x: x["count"], reverse=True)
+        top_categories = sorted(category_counts.items(), key=lambda x: x[1], reverse=True)[:10]
         
         # Get recent examples
         recent_examples = []
-        for item in analysis[:20]:  # Last 20
-            article_id = item.get("article_id")
-            article = next((a for a in articles if a["id"] == article_id), None)
-            if article:
-                recent_examples.append({
-                    "article_id": article_id,
-                    "title": article.get("title", ""),
-                    "source": article.get("source", ""),
-                    "category": item.get("model_metadata", {}).get("direction", "unknown"),
-                    "direction": item.get("model_metadata", {}).get("direction", "unknown"),
-                    "confidence_score": item.get("confidence_score"),
-                    "created_at": item.get("created_at", "")
-                })
+        for article in articles[:5]:
+            recent_examples.append({
+                "id": article["id"],
+                "title": article["title"],
+                "source": article.get("source", "Unknown"),
+                "published_at": article.get("published_at", "")
+            })
         
-        response = {
+        return {
             "ok": True,
-            "daily_buckets": daily_buckets_array,
+            "daily_buckets": daily_buckets_list,
             "distribution": distribution,
-            "top_sources": top_sources,
-            "top_categories": top_categories,
-            "recent_examples": recent_examples,
-            "model_version": analysis[0].get("model_version") if analysis else None
+            "top_sources": [{"source": k, "count": v} for k, v in top_sources],
+            "top_categories": [{"category": k, "count": v} for k, v in top_categories],
+            "recent_examples": recent_examples
         }
         
-        # Cache the result (disabled)
-        # set_cached(cache_key, response, 300)
-        return response
-        
     except Exception as e:
-        return {"ok": False, "error": str(e), "daily_buckets": [], "distribution": {}, "top_sources": [], "top_categories": [], "recent_examples": []}
+        return {"ok": False, "error": str(e), "daily_buckets": [], "distribution": {}, "top_sources": [], "top_categories": [], "recent_examples": []}@app.get("/cache/stats")
+async def get_cache_stats():
+    """Get Redis cache statistics"""
+    try:
+        from app.cache import cache
+        info = cache.redis_client.info()
+        return {
+            "ok": True,
+            "stats": {
+                "connected_clients": info.get("connected_clients", 0),
+                "used_memory_human": info.get("used_memory_human", "0B"),
+                "keyspace_hits": info.get("keyspace_hits", 0),
+                "keyspace_misses": info.get("keyspace_misses", 0),
+                "total_commands_processed": info.get("total_commands_processed", 0)
+            }
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
+@app.get("/cache/clear")
+async def clear_cache():
+    """Clear all cache"""
+    try:
+        from app.cache import clear_cache
+        cleared = clear_cache()
+        return {"ok": True, "cleared_keys": cleared}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+@app.get("/cache/keys")
+async def list_cache_keys():
+    """List all cache keys"""
+    try:
+        from app.cache import cache
+        keys = cache.redis_client.keys("*")
+        return {"ok": True, "keys": keys, "count": len(keys)}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 @app.get("/bias/articles")
 async def bias_articles(direction: Optional[str] = Query(default=None), limit: int = Query(default=50, ge=1, le=200), offset: int = Query(default=0, ge=0)):
     sb = get_supabase()
@@ -665,6 +746,8 @@ async def bias_articles(direction: Optional[str] = Query(default=None), limit: i
             query = query.eq("model_metadata->direction", direction)
         
         result = query.execute()
+        
         return {"ok": True, "items": result.data or [], "total": len(result.data or [])}
+        
     except Exception as e:
         return {"ok": False, "error": str(e), "items": [], "total": 0}
