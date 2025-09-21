@@ -40,7 +40,30 @@ def get_all_articles_paginated(sb, start_date, source=None, end_date=None, limit
         # Safety check to prevent infinite loops
         if len(articles) < limit_per_batch:
             break
+    return all_articles
     
+
+def get_all_bias_analysis_paginated(sb, start_date, model_type="political_bias", limit_per_batch=1000):
+    """Get ALL bias analysis records with proper pagination to bypass 1000-row limit"""
+    all_analysis = []
+    offset = 0
+    
+    while True:
+        query = sb.table("bias_analysis").select("*, articles(*)").eq("model_type", model_type).gte("created_at", start_date).order("created_at", desc=True)
+        
+        result = query.range(offset, offset + limit_per_batch - 1).execute()
+        analysis_batch = result.data or []
+        
+        if not analysis_batch:
+            break
+            
+        all_analysis.extend(analysis_batch)
+        offset += limit_per_batch
+        
+        if len(analysis_batch) < limit_per_batch:
+            break
+            
+    return all_analysis
     return all_articles
 
 app = FastAPI(title="PH Eye Backend", version="0.1.0")
@@ -630,9 +653,9 @@ async def bias_summary(days: int = Query(default=30, ge=1, le=180)):
         start_date = (datetime.now() - timedelta(days=days)).isoformat()
         
         # OPTIMIZED: Single query with JOIN instead of N+1
-        result = sb.table("bias_analysis").select("*, articles(*)").eq("model_type", "political_bias").gte("created_at", start_date).order("created_at", desc=True).execute()
+        # SENIOR APPROACH: Use pagination function like trends endpoint
         
-        all_analysis = result.data or []
+        all_analysis = get_all_bias_analysis_paginated(sb, start_date, "political_bias")
         
         if not all_analysis:
             empty_response = {"ok": True, "daily_buckets": [], "distribution": {}, "top_sources": [], "top_categories": [], "recent_examples": []}
