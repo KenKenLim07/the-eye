@@ -63,6 +63,16 @@ class RapplerScraper:
         "/technology/",
         "/world/",
         "/entertainment/",
+        "/philippines/",
+        "/politics/",
+        "/economy/",
+        "/lifestyle/",
+        "/opinion/",
+        "/multimedia/",
+        "/investigative/",
+        "/data/",
+        "/civic-engagement/",
+        "/public-interest/",
     ]
     GOOGLE_NEWS_RSS = "https://news.google.com/rss/search?q=site:rappler.com&hl=en-PH&gl=PH&ceid=PH:en"
 
@@ -97,6 +107,39 @@ class RapplerScraper:
             "article h2 a",
             "article h3 a",
             ".archive-article__latest-post h3 a",
+            
+            # TARGETED SELECTORS FOR LATEST ARTICLES - SURGICAL APPROACH
+            # Catch specific article patterns found on latest page
+            "a[href*='/sports/volleyball/']",
+            "a[href*='/sports/uaap/']",
+            "a[href*='/sports/']",
+            "a[href*='/philippines/']",
+            "a[href*='/nation/']",
+            "a[href*='/business/']",
+            "a[href*='/world/']",
+            "a[href*='/entertainment/']",
+            "a[href*='/technology/']",
+            "a[href*='/newsbreak/']",
+            "a[href*='/news/']",
+            
+            # Catch headlines in article containers (not pagination)
+            ".post-card a[href*='/sports/']",
+            ".post-card a[href*='/philippines/']",
+            ".post-card a[href*='/nation/']",
+            ".archive-article a[href*='/sports/']",
+            ".archive-article a[href*='/philippines/']",
+            ".archive-article a[href*='/nation/']",
+            "article a[href*='/sports/']",
+            "article a[href*='/philippines/']",
+            "article a[href*='/nation/']",
+            
+            # Catch links in specific containers (avoid pagination)
+            "h2 a[href*='/sports/']",
+            "h2 a[href*='/philippines/']",
+            "h2 a[href*='/nation/']",
+            "h3 a[href*='/sports/']",
+            "h3 a[href*='/philippines/']",
+            "h3 a[href*='/nation/']",
         ],
         "title": [
             "h1.post-single__title",
