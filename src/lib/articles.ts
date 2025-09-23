@@ -90,8 +90,8 @@ export async function fetchLatestAnalysisByIds(articleIds: number[]): Promise<Re
       // Merge batch results
       Object.assign(results, latestByArticle);
       
-    } catch (error) {
-      if (error.name === 'AbortError') {
+    } catch (error: unknown) {
+      if (error instanceof Error && error.name === 'AbortError') {
         console.log(`Timeout fetching analysis for batch of ${batch.length} articles`);
       } else {
         console.log(`Error fetching analysis for batch:`, error);
@@ -220,22 +220,33 @@ export async function fetchAllArticlesWithSentiment(limit: number = 10): Promise
     "Rappler"
   ];
 
+  // Resolve backend URL with safe default for local dev
+  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
+
   // Create parallel queries for all sources
   const queries = sources.map(source => 
-    fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/articles?source=${source}&limit=${limit}&offset=0`, { cache: 'no-store' })
+    fetch(`${backendUrl}/articles?source=${encodeURIComponent(source)}&limit=${limit}&offset=0`, { cache: 'no-store' })
   );
 
-  // Execute all queries in parallel
-  const results = await Promise.all(queries);
+  // Execute all queries in parallel, but don't fail fast if one fetch rejects
+  const settled = await Promise.allSettled(queries);
   
   // Process results and collect all article IDs
   const articlesBySource: Record<string, Article[]> = {};
   const allArticleIds: number[] = [];
 
-  for (let i = 0; i < results.length; i++) {
-    const response = results[i];
+  for (let i = 0; i < settled.length; i++) {
+    const outcome = settled[i];
     const source = sources[i];
-    
+
+    if (outcome.status === 'rejected') {
+      console.error(`Error fetching ${source}:`, outcome.reason);
+      articlesBySource[source] = [];
+      continue;
+    }
+
+    const response = outcome.value;
+
     try {
       if (!response.ok) {
         console.error(`Error fetching ${source}: HTTP ${response.status}`);
@@ -254,7 +265,7 @@ export async function fetchAllArticlesWithSentiment(limit: number = 10): Promise
         }
       });
     } catch (error) {
-      console.error(`Error fetching ${source}:`, error);
+      console.error(`Error parsing ${source}:`, error);
       articlesBySource[source] = [];
     }
   }

@@ -735,6 +735,52 @@ async def bias_summary(days: int = Query(default=30, ge=1, le=180)):
         
     except Exception as e:
         return {"ok": False, "error": str(e), "daily_buckets": [], "distribution": {}, "top_sources": [], "top_categories": [], "recent_examples": []}
+
+@app.get("/bias/explain/{article_id}")
+async def bias_explain(article_id: int):
+    """Return detailed bias analysis (latest) for a specific article, with keyword matches and components."""
+    sb = get_supabase()
+    try:
+        result = sb.table("bias_analysis").select("*, articles(*)").eq("article_id", article_id).eq("model_type", "political_bias").order("created_at", desc=True).limit(1).execute()
+        rows = result.data or []
+        if not rows:
+            return {"ok": False, "error": "No political_bias analysis found for article"}
+        row = rows[0]
+        md = row.get("model_metadata") or {}
+        return {
+            "ok": True,
+            "article": row.get("articles", {}),
+            "direction": md.get("direction"),
+            "keyword_matches": md.get("keyword_matches", {}),
+            "analysis_components": md.get("analysis_components", {}),
+            "political_bias_score": row.get("political_bias_score"),
+            "confidence_score": row.get("confidence_score"),
+            "created_at": row.get("created_at")
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+@app.get("/bias/source_summary")
+async def bias_source_summary(days: int = Query(default=30, ge=1, le=180)):
+    """Return per-source distribution of political_bias directions within the time window."""
+    sb = get_supabase()
+    try:
+        start_date = (datetime.now() - timedelta(days=days)).isoformat()
+        all_analysis = get_all_bias_analysis_paginated(sb, start_date, "political_bias")
+        if not all_analysis:
+            return {"ok": True, "by_source": {}}
+        by_source = {}
+        for item in all_analysis:
+            article = item.get("articles", {})
+            source = article.get("source", "Unknown")
+            direction = item.get("model_metadata", {}).get("direction", "unknown")
+            if source not in by_source:
+                by_source[source] = {}
+            by_source[source][direction] = by_source[source].get(direction, 0) + 1
+        return {"ok": True, "by_source": by_source}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
 @app.get("/cache/stats")
 async def get_cache_stats():
     """Get Redis cache statistics"""

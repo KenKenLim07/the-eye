@@ -55,6 +55,7 @@ class RapplerScraper:
     BASE_URL = "https://www.rappler.com"
     FEED_URL = "https://www.rappler.com/feed/"
     SECTIONS = [
+        "/",
         "/latest/",
         "/newsbreak/", 
         "/nation/",
@@ -107,6 +108,18 @@ class RapplerScraper:
             "article h2 a",
             "article h3 a",
             ".archive-article__latest-post h3 a",
+            
+            # TARGET: Latest News container
+            ".latest-news a[href*='/']",
+            ".latest a[href*='/']",
+            "section[aria-label*='Latest'] a[href*='/']",
+            "h2:contains('Latest News') ~ * a[href*='/']",
+            
+            # TARGET: Thematic blocks (Philippine tropical cyclones, UAAP, House, flood control)
+            "section:has(h2:contains('Philippine tropical cyclones')) a[href*='/']",
+            "section:has(h2:contains('UAAP')) a[href*='/']",
+            "section:has(h2:contains('House of Representatives')) a[href*='/']",
+            "section:has(h2:contains('flood control')) a[href*='/']",
             
             # TARGETED SELECTORS FOR LATEST ARTICLES - SURGICAL APPROACH
             # Catch specific article patterns found on latest page
@@ -206,6 +219,8 @@ class RapplerScraper:
             r"/wp-",
             r"/wp-content/",
             r"/tachyon/",
+            r"/page/\d+/?$",
+            r"/latest/$",
             r"\.(css|js|png|jpg|jpeg|gif|svg|webp|avif|mp4|pdf)(\?|$)",
         ]
         
@@ -545,13 +560,145 @@ class RapplerScraper:
             logger.error(f"Google News discovery failed: {e}")
             return []
 
+    def _discover_from_homepage(self, max_links: int = 20) -> List[str]:
+        """Discover from homepage blocks (Latest News, thematic sections) using Playwright locators."""
+        links = []
+        try:
+            with launch_browser() as browser:
+                if USE_ADV_HEADERS and get_advanced_stealth_headers is not None:
+                    headers = get_advanced_stealth_headers()
+                    headers.setdefault('Referer', self.BASE_URL)
+                    user_agent = headers.get('User-Agent', self._get_random_ua())
+                else:
+                    user_agent = self._get_random_ua()
+                    headers = {"Referer": self.BASE_URL}
+                
+                context = browser.new_context(
+                    user_agent=user_agent,
+                    extra_http_headers=headers
+                )
+                page = context.new_page()
+                
+                # Block heavy resources
+                page.route("**/*", lambda route: (
+                    route.abort() if any(
+                        route.request.url.lower().endswith(ext) 
+                        for ext in [".png", ".jpg", ".jpeg", ".gif", ".css", ".woff", ".woff2", ".svg"]
+                    ) else route.continue_()
+                ))
+                
+                page.goto(self.BASE_URL + "/", wait_until="domcontentloaded", timeout=20000)
+                try:
+                    page.wait_for_selector("section", timeout=10000)
+                except Exception:
+                    pass
+                
+                # Robust locators for blocks by visible text
+                block_locators = [
+                    "section:has-text('Top stories')",
+                    "section:has-text('Latest news')",
+                    "section:has-text('Latest News')",
+                    "section:has-text('Budget Watch')",
+                    "section:has-text('Philippine tropical cyclones')",
+                    "section:has-text('UAAP Basketball')",
+                    "section:has-text('House of Representatives')",
+                    "section:has-text('protests in the Philippines')",
+                ]
+                
+                seen = set()
+                for locator in block_locators:
+                    try:
+                        els = page.locator(locator)
+                        count = els.count()
+                        for i in range(count):
+                            # anchor tags inside the block
+                            for a in els.nth(i).locator("a").all():
+                                href = a.get_attribute("href")
+                                if not href:
+                                    continue
+                                full_url = urljoin(self.BASE_URL, href)
+                                if full_url in seen:
+                                    continue
+                                if self._validate_url(full_url):
+                                    seen.add(full_url)
+                                    links.append(full_url)
+                                    if len(links) >= max_links:
+                                        break
+                            if len(links) >= max_links:
+                                break
+                        if len(links) >= max_links:
+                            break
+                    except Exception:
+                        continue
+                
+                context.close()
+            logger.info(f"Homepage discovered {len(links)} links")
+            return links
+        except Exception as e:
+            logger.error(f"Homepage discovery failed: {e}")
+            return []
+
+    def _discover_from_latest(self, max_links: int = 30) -> List[str]:
+        """Discover strictly from /latest/ page, preserve page order, exclude BrandRap."""
+        links = []
+        try:
+            with launch_browser() as browser:
+                if USE_ADV_HEADERS and get_advanced_stealth_headers is not None:
+                    headers = get_advanced_stealth_headers()
+                    headers.setdefault('Referer', self.BASE_URL)
+                    user_agent = headers.get('User-Agent', self._get_random_ua())
+                else:
+                    user_agent = self._get_random_ua()
+                    headers = {"Referer": self.BASE_URL}
+
+                context = browser.new_context(
+                    user_agent=user_agent,
+                    extra_http_headers=headers
+                )
+                page = context.new_page()
+
+                # Block heavy resources for speed
+                page.route("**/*", lambda route: (
+                    route.abort() if any(
+                        route.request.url.lower().endswith(ext)
+                        for ext in [".png", ".jpg", ".jpeg", ".gif", ".woff", ".woff2", ".svg"]
+                    ) else route.continue_()
+                ))
+
+                url = urljoin(self.BASE_URL, "/latest/")
+                page.goto(url, wait_until="domcontentloaded", timeout=25000)
+                try:
+                    page.wait_for_selector(".archive-article, article, .post-card", timeout=15000)
+                except Exception:
+                    pass
+
+                soup = BeautifulSoup(page.content(), "html.parser")
+                raw_links = self._extract_links_from_html(soup)
+
+                seen = set()
+                for l in raw_links:
+                    if len(links) >= max_links:
+                        break
+                    if "brandrap" in l.lower():
+                        continue
+                    if l not in seen and self._validate_url(l):
+                        seen.add(l)
+                        links.append(l)
+
+                context.close()
+            logger.info(f"Latest discovered {len(links)} links")
+            return links
+        except Exception as e:
+            logger.error(f"Latest discovery failed: {e}")
+            return []
+
     def _discover_from_sections(self, max_links: int = 20) -> List[str]:
         """Discover from section pages using Playwright."""
         links = []
         try:
             logger.info("Discovering from section pages")
             with launch_browser() as browser:
-                for section in self.SECTIONS[:3]:  # Limit to first 3 sections
+                for section in self.SECTIONS[:10]:  # Expand to first 10 sections
                     try:
                         if USE_ADV_HEADERS and get_advanced_stealth_headers is not None:
                             headers = get_advanced_stealth_headers()
@@ -666,7 +813,16 @@ class RapplerScraper:
             # Random delay before navigation
             self._human_delay()
             
-            page.goto(url, wait_until="domcontentloaded")
+            resp = page.goto(url, wait_until="domcontentloaded")
+            try:
+                status = resp.status if resp else None
+                if status in (403, 429):
+                    raise Exception(f"rappler_cooldown: upstream status {status}")
+                if status in (500, 502, 503):
+                    logger.info(f"Transient upstream error {status}; backing off briefly")
+                    time.sleep(random.randint(5, 12))
+            except Exception:
+                raise
             
             # Wait for content
             try:
@@ -751,6 +907,20 @@ class RapplerScraper:
         except Exception as e:
             errors.append(f"RSS: {e}")
         
+        # 1.4 Latest page (prioritize newest)
+        try:
+            latest_links = self._discover_from_latest(max_articles * 2)
+            all_links.extend(latest_links)
+        except Exception as e:
+            errors.append(f"Latest: {e}")
+        
+        # 1.5 Homepage blocks (Latest News + thematic blocks)
+        try:
+            homepage_links = self._discover_from_homepage(max_articles * 3)
+            all_links.extend(homepage_links)
+        except Exception as e:
+            errors.append(f"Homepage: {e}")
+        
         # 2. Google News RSS (backup)
         if len(all_links) < max_articles * 2:
             try:
@@ -778,6 +948,8 @@ class RapplerScraper:
         candidates = candidates[:max_articles * 3]  # Give some buffer
         
         logger.info(f"Rappler discovered {len(candidates)} candidate articles")
+        for preview in candidates[:8]:
+            logger.info(f"Candidate: {preview}")
         
         # Scrape articles
         try:
@@ -802,7 +974,7 @@ class RapplerScraper:
         
         metadata = {
             "domain": "rappler.com",
-            "discovery_sources": ["rss", "google_news", "sections"],
+            "discovery_sources": ["rss", "latest", "homepage", "google_news", "sections"],
             "total_links_discovered": len(all_links)
         }
         

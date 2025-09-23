@@ -26,7 +26,6 @@ services:
       - "8000:8000"
     depends_on:
       - redis
-    
 
   worker:
     build:
@@ -51,7 +50,7 @@ services:
       - redis
     shm_size: "1gb"
     ipc: host
-   
+
   beat:
     build:
       context: /Users/mac/ph-eye
@@ -67,7 +66,6 @@ services:
     volumes:
       - /Users/mac/ph-eye:/app
     depends_on:
-      - redis 
+      - redis
     shm_size: "1gb"
     ipc: host
-    

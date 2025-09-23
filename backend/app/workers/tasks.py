@@ -302,7 +302,7 @@ def scrape_rappler_task(self):
     try:
         import random
         scraper = RapplerScraper()
-        result = scraper.scrape_latest(max_articles=20)
+        result = scraper.scrape_latest(max_articles=50)
         
         logger.info(f"Task {task_id} - Rappler scraped {len(result.articles)} articles, {len(result.errors)} errors")
         

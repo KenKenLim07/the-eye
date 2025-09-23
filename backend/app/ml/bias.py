@@ -229,9 +229,15 @@ def analyze_political_bias_philippine(text: str) -> Tuple[float, str, float, Dic
         abs(language_patterns) * 0.1 +
         sentiment_context * 0.2
     )
-    if pro_gov_score > pro_opp_score and bias_score > 0.1:
+
+    # Require political entities to consider non-neutral directions
+    has_gov_entity = keyword_matches.get("pro_gov_current_admin", 0) > 0
+    has_opp_entity = keyword_matches.get("pro_opp_opposition_figures", 0) > 0
+    has_political_entity = has_gov_entity or has_opp_entity
+
+    if has_political_entity and pro_gov_score > pro_opp_score and bias_score > 0.1:
         direction = "pro_government"
-    elif pro_opp_score > pro_gov_score and bias_score > 0.1:
+    elif has_political_entity and pro_opp_score > pro_gov_score and bias_score > 0.1:
         direction = "pro_opposition"
     else:
         direction = "neutral"

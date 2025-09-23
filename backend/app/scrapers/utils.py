@@ -398,21 +398,39 @@ def is_valid_news_url(url: str, base_domain: str) -> bool:
         if not parsed.netloc.endswith(base_domain):
             return False
         
+        # Extract path and segments once
+        path_lower = (parsed.path or "").lower()
+        segments = [s for s in (parsed.path or "").split('/') if s]
+        
+        # Reject pagination/listing URLs
+        if any(s == "page" for s in segments):
+            return False
+        if re.search(r"/page/\d+/?$", path_lower, re.IGNORECASE):
+            return False
+        # Reject obvious listing roots (keeps article subpaths)
+        listing_roots = [
+            "/latest/", "/section/", "/tag/", "/author/", "/topics/",
+        ]
+        if any(path_lower.rstrip('/') == root.rstrip('/') for root in listing_roots):
+            return False
+        
         # Check for blocked patterns
         blocked_patterns = [
             "lotto", "swertres", "stl", "pcso", "gambling", "betting",
             "photo", "photos", "video", "videos", "modal", "popup",
             "advertisement", "ad", "promo", "promotion", "results",
-            "draw", "winning", "numbers", "play", "ticket"
+            "draw", "winning", "numbers", "play", "ticket",
+            "/wp-content/", "/wp-", "/tachyon/",
         ]
-        
-        path_lower = (parsed.path or "").lower()
         if any(pattern in path_lower for pattern in blocked_patterns):
             return False
         
-        # Check for valid article structure
-        segments = [s for s in parsed.path.split('/') if s]
-        return len(segments) >= 3  # At least 3 path segments
+        # Check for valid article structure: require at least 3 segments and not just section root
+        # e.g., /philippines/politics/slug
+        if len(segments) < 3:
+            return False
+        
+        return True
         
     except Exception:
         return False
