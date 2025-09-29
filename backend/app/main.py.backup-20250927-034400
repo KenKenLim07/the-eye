@@ -367,16 +367,10 @@ async def get_trends(period: str = "7d", source: Optional[str] = None):
             analysis_result = sb.table("bias_analysis").select("*").in_("article_id", batch_ids).eq("model_type", "sentiment").execute()
             all_analysis.extend(analysis_result.data or [])
         
-        # Group by date - FIXED: Count ALL articles per date, not just those with sentiment analysis
+        # Group by date
         from collections import defaultdict
         daily_data = defaultdict(lambda: {"positive": 0, "negative": 0, "neutral": 0, "total": 0, "sentiment_scores": []})
         
-        # First, count all articles by date
-        for article in articles:
-            date_str = article["published_at"][:10]  # YYYY-MM-DD
-            daily_data[date_str]["total"] += 1
-        
-        # Then, add sentiment analysis data
         for analysis in all_analysis:
             article_id = analysis["article_id"]
             sentiment_label = analysis.get("sentiment_label", "neutral")
@@ -386,6 +380,7 @@ async def get_trends(period: str = "7d", source: Optional[str] = None):
             article = next((a for a in articles if a["id"] == article_id), None)
             if article:
                 date_str = article["published_at"][:10]  # YYYY-MM-DD
+                daily_data[date_str]["total"] += 1
                 daily_data[date_str]["sentiment_scores"].append(sentiment_score)
                 
                 if sentiment_label == "positive":
@@ -395,25 +390,15 @@ async def get_trends(period: str = "7d", source: Optional[str] = None):
                 else:
                     daily_data[date_str]["neutral"] += 1
         
-        # Convert to timeline format - FIXED: Aggregate all sources per date
+        # Convert to timeline format
         timeline = []
         total_articles = 0
         total_positive = 0
         total_negative = 0
         total_neutral = 0
         
-        # Group by date only (aggregate all sources)
-        aggregated_daily_data = defaultdict(lambda: {"positive": 0, "negative": 0, "neutral": 0, "total": 0, "sentiment_scores": []})
-        
-        for date_str, data in daily_data.items():
-            aggregated_daily_data[date_str]["total"] += data["total"]
-            aggregated_daily_data[date_str]["positive"] += data["positive"]
-            aggregated_daily_data[date_str]["negative"] += data["negative"]
-            aggregated_daily_data[date_str]["neutral"] += data["neutral"]
-            aggregated_daily_data[date_str]["sentiment_scores"].extend(data["sentiment_scores"])
-        
-        for date_str in sorted(aggregated_daily_data.keys()):
-            data = aggregated_daily_data[date_str]
+        for date_str in sorted(daily_data.keys()):
+            data = daily_data[date_str]
             total = data["total"]
             positive = data["positive"]
             negative = data["negative"]
@@ -556,7 +541,7 @@ async def get_comprehensive_dashboard(period: str = "7d", source: Optional[str] 
             source_name = article.get("source", "Unknown")
             by_source[source_name] = by_source.get(source_name, 0) + 1
         
-        # Group by date - FIXED: Count ALL articles per date
+        # Group by date
         by_date = {}
         for article in articles:
             date_str = article.get("published_at", "")[:10]

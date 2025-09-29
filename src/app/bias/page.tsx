@@ -112,9 +112,9 @@ export default function BiasTrendsPage() {
     if (!summary?.daily_buckets) return [];
     return summary.daily_buckets.map(bucket => ({
       date: bucket.date,
-      "Pro-Government": bucket.by_direction.pro_government,
-      "Pro-Opposition": bucket.by_direction.pro_opposition,
-      "Neutral": bucket.by_direction.neutral,
+      "Pro-Government": bucket.by_direction.pro_government || 0,
+      "Pro-Opposition": bucket.by_direction.pro_opposition || 0,
+      "Neutral": bucket.by_direction.neutral || 0,
     }));
   }, [summary]);
 
