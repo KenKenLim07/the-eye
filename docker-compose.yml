@@ -26,6 +26,8 @@ services:
       - "8000:8000"
     depends_on:
       - redis
+    sysctls:
+      - "net.ipv6.conf.all.disable_ipv6=1"
 
   worker:
     build:
@@ -50,6 +52,8 @@ services:
       - redis
     shm_size: "1gb"
     ipc: host
+    sysctls:
+      - "net.ipv6.conf.all.disable_ipv6=1"
 
   beat:
     build:
@@ -69,3 +73,5 @@ services:
       - redis
     shm_size: "1gb"
     ipc: host
+    sysctls:
+      - "net.ipv6.conf.all.disable_ipv6=1"
