@@ -1,4 +1,5 @@
 from typing import List
+import re
 from app.core.supabase import get_supabase
 from .normalize import NormalizedArticle
 from app.scrapers.utils import normalize_source, normalize_category
@@ -7,6 +8,21 @@ from urllib.parse import urlparse, urlunparse
 
 logger = logging.getLogger(__name__)
 
+
+MONEY = r"(fund|budget|appropriation|allocation|disbursement|audit|coa|\\bphp\\b|billion|million|trillion|peso|pesos)"
+PUBLIC_SECTOR = r"(gov(ernment)?|government|public|senate|house|congress|dbm|doe|dotr|doh|dep(ed)?|dpwh|coa|comelec|dilg|lgu|city|province|barangay|state|national|solon|lawmaker|bill|appropriation|budget)"
+CORRUPTION = r"(pork|kickback|anomaly|graft|plunder|misuse|overprice|overpriced|scam|whistleblower)"
+SPORTS = r"(basketball|volleyball|football|soccer|nba|pba|uaap|ncaa|tournament|match|game|coach|player|club)"
+CRIME = r"(shabu|buy-bust|drug|narcotics|illegal\s+drugs|anti-drug|meth|pdea)"
+
+POSITIVE_PATTERN = re.compile(fr"(?=.*{MONEY}).*(?:{PUBLIC_SECTOR}|{CORRUPTION})", re.IGNORECASE | re.DOTALL)
+NEGATIVE_PATTERN = re.compile(fr"(?:{SPORTS})|(?:{CRIME})", re.IGNORECASE)
+
+def classify_is_funds(title: str | None, content: str | None) -> bool:
+    text = ((title or "") + "\n" + (content or "")).lower()
+    if NEGATIVE_PATTERN.search(text):
+        return False
+    return bool(POSITIVE_PATTERN.search(text))
 
 def _canonicalize_url(raw_url: str) -> str:
     """Normalize URLs to avoid duplicate shapes (strip query/fragment, lower host, trim trailing slash)."""
@@ -67,6 +83,7 @@ def insert_articles(articles: List[NormalizedArticle]) -> dict:
             'url': a.url,
             'content': a.content,
             'published_at': a.published_at,
+            'is_funds': classify_is_funds(a.title, a.content),
         })
 
     inserted = 0

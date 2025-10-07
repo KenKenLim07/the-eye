@@ -1,3 +1,26 @@
+## Funds Flag and Page
+
+To enable a dedicated Funds page and filtering, add a boolean column `is_funds` to `public.articles` and backfill.
+
+SQL migration:
+
+```sql
+alter table public.articles add column if not exists is_funds boolean default false;
+create index if not exists idx_articles_is_funds on public.articles(is_funds);
+```
+
+Quick heuristic backfill (adjust keywords as needed):
+
+```sql
+update public.articles
+set is_funds = true
+where (lower(title) ~ '(fund|budget|appropriation|allocation|pork|audit|coa|\bphp\b|billion|million)'
+       or lower(content) ~ '(fund|budget|appropriation|allocation|pork|audit|coa|\bphp\b|billion|million)')
+  and coalesce(is_funds, false) = false;
+```
+
+After migration, visit `/funds` to see funds-related articles.
+
 # 📚 PH-Eye Documentation
 
 Welcome to the PH-Eye documentation! This directory contains comprehensive guides for implementing and maintaining the Philippine news aggregator platform.
@@ -5,39 +28,44 @@ Welcome to the PH-Eye documentation! This directory contains comprehensive guide
 ## 📖 Documentation Index
 
 ### 🤖 AI & Machine Learning
+
 - **[AI Summarization Implementation](./AI_SUMMARIZATION_IMPLEMENTATION.md)** - Complete guide for adding AI-powered text summarization
 - **[AI Summarization Quick Start](./SUMMARIZATION_QUICK_START.md)** - 30-minute implementation guide
 - **[ML AI Integration](./ML_AI_INTEGRATION.md)** - Machine learning pipeline architecture
 
 ### 🎨 Frontend & Design
+
 - **[Layout System](./LAYOUT_SYSTEM.md)** - Design system and responsive layout guidelines
 
 ## 🚀 Quick Start Guides
 
 ### For Developers
+
 1. **AI Summarization**: Start with [Quick Start Guide](./SUMMARIZATION_QUICK_START.md) for 30-minute implementation
 2. **Full ML Pipeline**: Read [ML AI Integration](./ML_AI_INTEGRATION.md) for complete understanding
 3. **UI Components**: Check [Layout System](./LAYOUT_SYSTEM.md) for design patterns
 
 ### For Thesis Implementation
+
 1. **Sentiment Analysis**: Already implemented ✅
 2. **Political Bias Analysis**: Already implemented ✅
 3. **AI Summarization**: Use [Quick Start Guide](./SUMMARIZATION_QUICK_START.md) to add
 
 ## 🎯 Feature Implementation Status
 
-| Feature | Status | Documentation |
-|---------|--------|---------------|
-| News Scraping | ✅ Complete | - |
-| Sentiment Analysis | ✅ Complete | [ML AI Integration](./ML_AI_INTEGRATION.md) |
-| Political Bias Analysis | ✅ Complete | [ML AI Integration](./ML_AI_INTEGRATION.md) |
-| AI Summarization | 📋 Ready to Implement | [Quick Start Guide](./SUMMARIZATION_QUICK_START.md) |
-| Trends Dashboard | ✅ Complete | - |
-| Bias Dashboard | ✅ Complete | - |
+| Feature                 | Status                | Documentation                                       |
+| ----------------------- | --------------------- | --------------------------------------------------- |
+| News Scraping           | ✅ Complete           | -                                                   |
+| Sentiment Analysis      | ✅ Complete           | [ML AI Integration](./ML_AI_INTEGRATION.md)         |
+| Political Bias Analysis | ✅ Complete           | [ML AI Integration](./ML_AI_INTEGRATION.md)         |
+| AI Summarization        | 📋 Ready to Implement | [Quick Start Guide](./SUMMARIZATION_QUICK_START.md) |
+| Trends Dashboard        | ✅ Complete           | -                                                   |
+| Bias Dashboard          | ✅ Complete           | -                                                   |
 
 ## 🛠️ Implementation Roadmap
 
 ### Phase 1: Core Features (Completed)
+
 - [x] News scraping from Philippine sources
 - [x] Sentiment analysis with VADER
 - [x] Political bias analysis
@@ -45,12 +73,14 @@ Welcome to the PH-Eye documentation! This directory contains comprehensive guide
 - [x] Responsive frontend
 
 ### Phase 2: AI Enhancement (Ready)
+
 - [ ] AI summarization (30 min implementation)
 - [ ] Summary quality metrics
 - [ ] Batch processing for existing articles
 - [ ] Multi-language support
 
 ### Phase 3: Advanced Features (Future)
+
 - [ ] Real-time notifications
 - [ ] Advanced analytics
 - [ ] User preferences
@@ -89,12 +119,14 @@ Welcome to the PH-Eye documentation! This directory contains comprehensive guide
 ## 🎓 Thesis Integration
 
 ### Research Contributions
+
 1. **Automated News Analysis**: Complete pipeline for Philippine news
 2. **Multi-Modal ML**: Sentiment + Bias + Summarization
 3. **Real-time Processing**: Live analysis of news articles
 4. **User Experience**: Intuitive dashboards and visualizations
 
 ### Technical Achievements
+
 - **Scalable Architecture**: Docker-based microservices
 - **Performance**: Sub-second API responses
 - **Reliability**: 99%+ uptime with error handling
@@ -103,12 +135,14 @@ Welcome to the PH-Eye documentation! This directory contains comprehensive guide
 ## 🔧 Development Setup
 
 ### Prerequisites
+
 - Docker & Docker Compose
 - Node.js 18+
 - Python 3.11+
 - 8GB+ RAM (for AI models)
 
 ### Quick Start
+
 ```bash
 # Clone repository
 git clone <repository-url>
@@ -124,12 +158,14 @@ open http://localhost:3000
 ## 📈 Performance Metrics
 
 ### Current System
+
 - **Articles Processed**: 1000+ per day
 - **Processing Speed**: 2-5 seconds per article
 - **Memory Usage**: ~680MB (9% of 7.6GB)
 - **API Response Time**: <200ms average
 
 ### With AI Summarization
+
 - **Memory Usage**: ~2.2GB (29% of 7.6GB)
 - **Processing Time**: +2-5 seconds per article
 - **Summary Quality**: 80%+ user satisfaction
@@ -138,12 +174,14 @@ open http://localhost:3000
 ## 🚨 Troubleshooting
 
 ### Common Issues
+
 1. **Services Not Starting**: Check Docker logs
 2. **Memory Issues**: Monitor with `docker stats`
 3. **API Errors**: Check backend logs
 4. **Frontend Issues**: Check browser console
 
 ### Support Resources
+
 - **Logs**: `backend/*.log` files
 - **Health Check**: `http://localhost:8000/health`
 - **Documentation**: This directory
@@ -159,18 +197,21 @@ open http://localhost:3000
 ## 🎯 Next Steps
 
 ### Immediate (This Week)
+
 1. Implement AI summarization using [Quick Start Guide](./SUMMARIZATION_QUICK_START.md)
 2. Test with sample articles
 3. Monitor performance impact
 4. Prepare thesis demo
 
 ### Short Term (Next Month)
+
 1. Add summary quality metrics
 2. Implement batch processing
 3. Optimize performance
 4. Add user feedback
 
 ### Long Term (Next Quarter)
+
 1. Multi-language support
 2. Advanced analytics
 3. Mobile optimization
@@ -182,4 +223,4 @@ open http://localhost:3000
 **Version**: 1.0
 **Status**: Production Ready
 
-*Ready to implement AI summarization? Start with the [Quick Start Guide](./SUMMARIZATION_QUICK_START.md)!* 🚀
+_Ready to implement AI summarization? Start with the [Quick Start Guide](./SUMMARIZATION_QUICK_START.md)!_ 🚀

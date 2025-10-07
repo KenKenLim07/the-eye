@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.ml.bias import get_political_keywords_and_weights
 import os, json, subprocess, sys
 from datetime import datetime, timedelta
+from subprocess import Popen, PIPE
 
 
 
@@ -185,7 +186,7 @@ async def apply_keywords_suggestions(category: str = Body(default='neutral_insti
         return {"ok": False, "error": str(e)}
 
 @app.get("/articles")
-async def get_articles(limit: int = 50, offset: int = 0, source: Optional[str] = None, category: Optional[str] = None):
+async def get_articles(limit: int = 50, offset: int = 0, source: Optional[str] = None, category: Optional[str] = None, is_funds: Optional[bool] = None):
     sb = get_supabase()
     
     query = sb.table("articles").select("*")
@@ -194,6 +195,8 @@ async def get_articles(limit: int = 50, offset: int = 0, source: Optional[str] =
         query = query.eq("source", source)
     if category:
         query = query.eq("category", category)
+    if is_funds is not None:
+        query = query.eq("is_funds", is_funds)
     
     query = query.order("published_at", desc=True).range(offset, offset + limit - 1)
     
@@ -832,6 +835,39 @@ async def list_cache_keys():
         from app.cache import cache
         keys = cache.redis_client.keys("*")
         return {"ok": True, "keys": keys, "count": len(keys)}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+@app.post("/maintenance/backfill_is_funds")
+async def backfill_is_funds(x_admin_token: Optional[str] = Header(default=None)):
+    if ADMIN_TOKEN and x_admin_token != ADMIN_TOKEN:
+        return {"ok": False, "error": "unauthorized"}
+    try:
+        backend_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+        script_path = os.path.join(backend_root, 'scripts', 'backfill_is_funds.py')
+        if not os.path.exists(script_path):
+            return {"ok": False, "error": f"Script not found: {script_path}"}
+        # Prefer running as a module so package imports work reliably in Docker
+        env = os.environ.copy()
+        # Ensure backend root is on PYTHONPATH so 'scripts' is importable as a top-level package
+        env["PYTHONPATH"] = backend_root + (":" + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+        # Run as module to keep consistent imports in Docker container
+        proc = Popen([sys.executable, "-m", "scripts.backfill_is_funds"], cwd=backend_root, stdout=PIPE, stderr=PIPE, env=env)
+        # Return immediately; let it run in background to avoid blocking the request
+        return {"ok": True, "pid": proc.pid, "started": True}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+@app.post("/maintenance/recompute_is_funds")
+async def recompute_is_funds(x_admin_token: Optional[str] = Header(default=None)):
+    if ADMIN_TOKEN and x_admin_token != ADMIN_TOKEN:
+        return {"ok": False, "error": "unauthorized"}
+    try:
+        backend_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+        env = os.environ.copy()
+        env["PYTHONPATH"] = backend_root + (":" + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+        proc = Popen([sys.executable, "-m", "scripts.recompute_is_funds"], cwd=backend_root, stdout=PIPE, stderr=PIPE, env=env)
+        return {"ok": True, "pid": proc.pid, "started": True}
     except Exception as e:
         return {"ok": False, "error": str(e)}
 @app.get("/bias/articles")

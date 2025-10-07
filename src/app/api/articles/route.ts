@@ -11,6 +11,7 @@ export async function GET(req: NextRequest) {
     const pageSize = Math.min(Number(searchParams.get("pageSize") || 10), 50);
     const source = searchParams.get("source");
     const category = searchParams.get("category");
+    const isFundsParam = searchParams.get("is_funds");
 
     const from = (page - 1) * pageSize;
     const to = from + pageSize - 1;
@@ -26,6 +27,10 @@ export async function GET(req: NextRequest) {
     }
     if (category) {
       query = query.eq("category", category);
+    }
+    if (isFundsParam !== null) {
+      const isFunds = isFundsParam === "true" || isFundsParam === "1";
+      query = query.eq("is_funds", isFunds);
     }
 
     const { data, error, count } = await query;
