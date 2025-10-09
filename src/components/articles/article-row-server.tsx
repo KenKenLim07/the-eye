@@ -1,7 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { formatDate } from "@/lib/utils/date";
 import { Badge } from "@/components/ui/badge";
-import { fetchLatestAnalysisByIds } from "@/lib/articles";
 import Link from "next/link";
 import { ArticleCardsInteractive } from "./article-cards-interactive";
 
@@ -25,9 +24,6 @@ interface ArticleRowServerProps {
 
 export default async function ArticleRowServer({ articles, title, sourceValue }: ArticleRowServerProps) {
   const label = title ?? sourceValue;
-
-  const idList = (articles || []).map(a => Number(a.id)).filter(Boolean);
-  const analysisById = await fetchLatestAnalysisByIds(idList);
 
   // Ensure articles is always an array to prevent hydration mismatches
   const safeArticles = articles || [];

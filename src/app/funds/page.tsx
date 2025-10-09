@@ -33,7 +33,12 @@ export default async function FundsPage({ searchParams }: { searchParams?: { pag
 
   return (
     <div className="container mx-auto px-4 py-6">
-      <h1 className="text-2xl font-semibold mb-4">Funds-related News</h1>
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <div className="space-y-1">
+          <h1 className="text-2xl font-semibold">Funds-related News</h1>
+          <p className="text-sm text-muted-foreground">{total.toLocaleString()} articles</p>
+        </div>
+      </div>
       {!data?.length ? (
         <Card>
           <CardHeader>
@@ -43,14 +48,6 @@ export default async function FundsPage({ searchParams }: { searchParams?: { pag
         </Card>
       ) : (
         <>
-          <div className="flex items-center justify-between mb-3 text-sm text-muted-foreground">
-            <div>
-              Page {page} of {totalPages}
-            </div>
-            <div>
-              Total: {total.toLocaleString()} articles
-            </div>
-          </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {data.map((a) => (
               <Card key={a.id}>
@@ -76,20 +73,27 @@ export default async function FundsPage({ searchParams }: { searchParams?: { pag
               </Card>
             ))}
           </div>
-          <div className="flex items-center justify-between mt-6">
-            <Link
-              href={`/funds?page=${Math.max(page - 1, 1)}&pageSize=${pageSize}`}
-              className={`px-3 py-2 rounded-md text-sm ${page <= 1 ? "pointer-events-none opacity-50" : "underline"}`}
-            >
-              Previous
-            </Link>
-            <Link
-              href={`/funds?page=${Math.min(page + 1, totalPages)}&pageSize=${pageSize}`}
-              className={`px-3 py-2 rounded-md text-sm ${page >= totalPages ? "pointer-events-none opacity-50" : "underline"}`}
-            >
-              Next
-            </Link>
-          </div>
+          {totalPages > 1 && (
+            <div className="flex items-center justify-center gap-2 mt-6">
+              {page > 1 && (
+                <Link
+                  href={{ pathname: "/funds", query: { page: page - 1, pageSize } }}
+                  className="text-sm border rounded-md px-3 py-2"
+                >
+                  Previous
+                </Link>
+              )}
+              <span className="text-sm text-muted-foreground">Page {page} of {totalPages}</span>
+              {page < totalPages && (
+                <Link
+                  href={{ pathname: "/funds", query: { page: page + 1, pageSize } }}
+                  className="text-sm border rounded-md px-3 py-2"
+                >
+                  Next
+                </Link>
+              )}
+            </div>
+          )}
         </>
       )}
     </div>

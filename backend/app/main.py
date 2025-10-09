@@ -208,44 +208,57 @@ async def get_articles(limit: int = 50, offset: int = 0, source: Optional[str] =
 
 @app.get("/articles/home-optimized")
 async def get_home_articles(limit_per_source: int = 10):
-    """Optimized endpoint for home page - single query instead of 7 separate ones"""
+    """Optimized endpoint for home page - up to N articles per canonical source with caching."""
     # Generate cache key
     cache_key = f"home_articles:{limit_per_source}"
-    
+
     # Check cache first
     cached_result = get_cached(cache_key)
     if cached_result:
         return cached_result
-    
+
     sb = get_supabase()
-    
+
     try:
-        # Single query to get latest articles from all sources
-        result = sb.table("articles").select("*").order("published_at", desc=True).limit(70).execute()
-        
-        if not result.data:
-            empty_result = {"articles_by_source": {}}
-            # Cache empty result for 1 minute
-            set_cached(cache_key, empty_result, 60)
-            return empty_result
-        
-        # Group by source
+        # Define canonical sources shown on the homepage
+        sources = [
+            "GMA",
+            "Rappler",
+            "Inquirer",
+            "Manila Times",
+            "Philstar",
+            "Sunstar",
+            "Manila Bulletin",
+        ]
+
         articles_by_source = {}
-        for article in result.data:
-            source = article.get("source", "Unknown")
-            if source not in articles_by_source:
-                articles_by_source[source] = []
-            if len(articles_by_source[source]) < limit_per_source:
-                articles_by_source[source].append(article)
-        
+
+        # Query per source with ordered limit for predictable results
+        for src in sources:
+            try:
+                res = (
+                    sb.table("articles")
+                    .select("*")
+                    .eq("source", src)
+                    .order("published_at", desc=True)
+                    .limit(limit_per_source)
+                    .execute()
+                )
+                articles_by_source[src] = res.data or []
+            except Exception as inner_e:
+                # On per-source failure, continue with empty list
+                articles_by_source[src] = []
+
         result_data = {"articles_by_source": articles_by_source}
-        
-        # Cache the result for 2 minutes (home page changes more frequently)
+
+        # Cache the result (e.g., 10 minutes)
         set_cached(cache_key, result_data, 600)
         return result_data
-        
+
     except Exception as e:
-        return {"error": str(e), "articles_by_source": {}}@app.get("/articles/{article_id}")
+        return {"error": str(e), "articles_by_source": {}}
+
+@app.get("/articles/{article_id}")
 async def get_article(article_id: int):
     sb = get_supabase()
     try:
