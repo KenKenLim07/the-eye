@@ -1,4 +1,5 @@
-fastapi==0.111.0
+fastapi==0.104.1
+# Note: fastapi-cli removed to avoid typer conflict with spaCy
 uvicorn[standard]==0.30.1
 celery==5.3.6
 redis==5.0.4
@@ -15,3 +16,6 @@ pandas==2.2.2
 numpy==2.0.1
 celery-redbeat==2.3.3
 brotli>=1.0.9
+spacy==3.7.4
+# Remove fastapi-cli to avoid typer conflict
+# fastapi-cli is optional and not needed for production

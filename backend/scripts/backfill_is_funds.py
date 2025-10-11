@@ -1,20 +1,9 @@
-import re
 from typing import Iterable, List
 from app.core.supabase import get_supabase
-
-MONEY = r"(fund|budget|appropriation|allocation|disbursement|audit|coa|\bphp\b|billion|million|trillion|peso|pesos)"
-PUBLIC_SECTOR = r"(gov(ernment)?|government|public|senate|house|congress|dbm|doe|dotr|doh|dep(ed)?|dpwh|coa|comelec|dilg|lgu|city|province|barangay|state|national|solon|lawmaker|bill|appropriation|budget)"
-CORRUPTION = r"(pork|kickback|anomaly|graft|plunder|misuse|overprice|overpriced|scam|whistleblower)"
-SPORTS = r"(basketball|volleyball|football|soccer|nba|pba|uaap|ncaa|tournament|match|game|coach|player|club)"
-
-POSITIVE_PATTERN = re.compile(fr"(?=.*{MONEY}).*(?:{PUBLIC_SECTOR}|{CORRUPTION})", re.IGNORECASE | re.DOTALL)
-NEGATIVE_PATTERN = re.compile(SPORTS, re.IGNORECASE)
+from app.pipeline.store import classify_is_funds
 
 def is_funds_related(title: str | None, content: str | None) -> bool:
-    text = ((title or "") + "\n" + (content or "")).lower()
-    if NEGATIVE_PATTERN.search(text):
-        return False
-    return bool(POSITIVE_PATTERN.search(text))
+    return classify_is_funds(title, content)
 
 def chunked(items: List[int], size: int) -> Iterable[List[int]]:
     for i in range(0, len(items), size):

@@ -53,6 +53,7 @@ export type Database = {
           content: string | null
           id: number
           inserted_at: string | null
+          is_funds: boolean | null
           published_at: string | null
           raw_category: string | null
           source: string
@@ -66,6 +67,7 @@ export type Database = {
           content?: string | null
           id?: number
           inserted_at?: string | null
+          is_funds?: boolean | null
           published_at?: string | null
           raw_category?: string | null
           source: string
@@ -79,6 +81,7 @@ export type Database = {
           content?: string | null
           id?: number
           inserted_at?: string | null
+          is_funds?: boolean | null
           published_at?: string | null
           raw_category?: string | null
           source?: string

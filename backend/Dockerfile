@@ -7,7 +7,9 @@ WORKDIR /app
 COPY backend /app/backend
 
 # Install Python deps (Playwright and browsers already in base image)
+# Install Python deps with spaCy support
 RUN pip install --no-cache-dir -r /app/backend/requirements.txt && \
+    python -m spacy download en_core_web_sm && \
     python -c "print('Installed deps OK')"
 
 ENV PYTHONUNBUFFERED=1

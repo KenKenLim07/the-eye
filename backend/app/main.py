@@ -883,6 +883,231 @@ async def recompute_is_funds(x_admin_token: Optional[str] = Header(default=None)
         return {"ok": True, "pid": proc.pid, "started": True}
     except Exception as e:
         return {"ok": False, "error": str(e)}
+
+@app.post("/maintenance/cleanup_funds_sync")
+async def cleanup_funds_sync(limit: int = 100, x_admin_token: Optional[str] = Header(default=None)):
+    """Synchronously clean up funds classifications for testing"""
+    if ADMIN_TOKEN and x_admin_token != ADMIN_TOKEN:
+        return {"ok": False, "error": "unauthorized"}
+    
+    try:
+        from app.pipeline.store import classify_is_funds
+        sb = get_supabase()
+        
+        # Get a limited batch for testing
+        res = sb.table("articles").select("id,title,content,is_funds").eq("is_funds", True).limit(limit).execute()
+        articles = res.data or []
+        
+        to_false = []
+        for article in articles:
+            want_true = classify_is_funds(article.get("title"), article.get("content"))
+            if not want_true:
+                to_false.append(article["id"])
+        
+        # Update to false
+        if to_false:
+            sb.table("articles").update({"is_funds": False}).in_("id", to_false).execute()
+        
+        return {
+            "ok": True,
+            "checked": len(articles),
+            "removed_from_funds": len(to_false),
+            "removed_ids": to_false
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+@app.post("/maintenance/fix_specific_articles")
+async def fix_specific_articles(article_ids: list[int], x_admin_token: Optional[str] = Header(default=None)):
+    """Fix specific articles by setting is_funds to false"""
+    if ADMIN_TOKEN and x_admin_token != ADMIN_TOKEN:
+        return {"ok": False, "error": "unauthorized"}
+    
+    try:
+        sb = get_supabase()
+        
+        # Update articles to is_funds = false
+        result = sb.table("articles").update({"is_funds": False}).in_("id", article_ids).execute()
+        
+        return {
+            "ok": True,
+            "updated_count": len(result.data or []),
+            "article_ids": article_ids
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+@app.post("/analytics/funds/extract")
+async def extract_funds_analytics(article_ids: list[int], x_admin_token: Optional[str] = Header(default=None)):
+    """Extract detailed analytics from funds articles"""
+    if ADMIN_TOKEN and x_admin_token != ADMIN_TOKEN:
+        return {"ok": False, "error": "unauthorized"}
+    
+    try:
+        from app.analytics.funds_analytics import extract_funds_analytics
+        sb = get_supabase()
+        
+        # Get articles
+        res = sb.table("articles").select("id,title,content,published_at").in_("id", article_ids).execute()
+        articles = res.data or []
+        
+        analytics_results = []
+        for article in articles:
+            analytics = extract_funds_analytics(
+                article_id=article["id"],
+                title=article.get("title", ""),
+                content=article.get("content", ""),
+                published_at=article.get("published_at", "")
+            )
+            analytics_results.append({
+                "article_id": analytics.article_id,
+                "agencies": [{"text": a.text, "confidence": a.confidence} for a in analytics.agencies],
+                "amounts": [{"text": a.text, "confidence": a.confidence} for a in analytics.amounts],
+                "locations": [{"text": a.text, "confidence": a.confidence} for a in analytics.locations],
+                "people": [{"text": a.text, "confidence": a.confidence} for a in analytics.people],
+                "total_amount": analytics.total_amount,
+                "primary_agency": analytics.primary_agency,
+                "project_types": analytics.project_types,
+                "corruption_indicators": analytics.corruption_indicators,
+                "extraction_confidence": analytics.extraction_confidence,
+                "funds_relevance_score": analytics.funds_relevance_score
+            })
+        
+        return {
+            "ok": True,
+            "analytics": analytics_results,
+            "total_processed": len(analytics_results)
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+@app.get("/analytics/funds/trends")
+async def get_funds_trends(days_back: int = 30, source: Optional[str] = None):
+    """Get comprehensive funds trends and analytics"""
+    try:
+        from app.analytics.funds_analytics import extract_funds_analytics, analyze_funds_trends
+        sb = get_supabase()
+        
+        # Calculate date range
+        from datetime import datetime, timedelta
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=days_back)
+        
+        # Build query
+        query = sb.table("articles").select("id,title,content,published_at").eq("is_funds", True)
+        
+        if source:
+            query = query.eq("source", source)
+        
+        # Get articles
+        res = query.gte("published_at", start_date.isoformat()).lte("published_at", end_date.isoformat()).execute()
+        articles = res.data or []
+        
+        # Extract analytics for all articles
+        analytics_list = []
+        for article in articles:
+            analytics = extract_funds_analytics(
+                article_id=article["id"],
+                title=article.get("title", ""),
+                content=article.get("content", ""),
+                published_at=article.get("published_at", "")
+            )
+            analytics_list.append(analytics)
+        
+        # Analyze trends
+        trends = analyze_funds_trends(analytics_list)
+        
+        return {
+            "ok": True,
+            "period": f"{days_back} days",
+            "source": source or "all",
+            "trends": trends,
+            "articles_analyzed": len(analytics_list)
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+@app.get("/ml/funds/insights")
+async def get_funds_insights(days_back: int = 30, source: Optional[str] = None):
+    """Get comprehensive funds analytics and insights"""
+    sb = get_supabase()
+    
+    try:
+        # Calculate date range
+        from datetime import datetime, timedelta
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=days_back)
+        
+        # Get funds articles
+        query = sb.table("articles").select("*").eq("is_funds", True).gte("published_at", start_date.isoformat())
+        if source:
+            query = query.eq("source", source)
+        
+        result = query.execute()
+        articles = result.data or []
+        
+        if not articles:
+            return {
+                "ok": True,
+                "insights": {
+                    "summary": {"total_articles": 0},
+                    "entities": {},
+                    "trends": {}
+                },
+                "articles_analyzed": 0
+            }
+        
+        # Extract insights using the same logic as the Celery task
+        from app.workers.ml_tasks import _extract_funds_insights
+        insights = _extract_funds_insights(articles)
+        
+        return {
+            "ok": True,
+            "insights": insights,
+            "articles_analyzed": len(articles),
+            "date_range": {
+                "start": start_date.isoformat(),
+                "end": end_date.isoformat()
+            }
+        }
+        
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.post("/ml/funds/analyze")
+async def trigger_funds_analysis(days_back: int = 30):
+    """Trigger background funds analysis task"""
+    try:
+        from app.workers.ml_tasks import analyze_funds_insights_task
+        task = analyze_funds_insights_task.delay(days_back)
+        return {"message": "Funds analysis started", "task_id": task.id}
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.get("/ml/funds/classify")
+async def classify_funds_text(title: str, content: str = ""):
+    """Test funds classification with spaCy and regex"""
+    try:
+        from app.pipeline.store import classify_is_funds, _spacy_funds_analysis
+        import os
+        
+        # Get both regex and spaCy results
+        text = f"{title}\n{content}"
+        regex_result = classify_is_funds(title, content)
+        
+        spacy_result = None
+        if os.getenv("USE_SPACY_FUNDS", "false").lower() == "true":
+            spacy_result = _spacy_funds_analysis(text)
+        
+        return {
+            "ok": True,
+            "text": text[:200] + "..." if len(text) > 200 else text,
+            "regex_result": regex_result,
+            "spacy_result": spacy_result,
+            "final_result": regex_result
+        }
+    except Exception as e:
+        return {"error": str(e)}
 @app.get("/bias/articles")
 async def bias_articles(direction: Optional[str] = Query(default=None), limit: int = Query(default=50, ge=1, le=200), offset: int = Query(default=0, ge=0)):
     sb = get_supabase()
