@@ -12,6 +12,7 @@ export default function Navigation() {
     { href: "/", label: "Home" },
     { href: "/trends", label: "Sentiment Trends" },
     { href: "/bias", label: "Bias Analysis" },
+    { href: "/research", label: "Advanced Research" },
   ];
 
   const toggleMobileMenu = () => {

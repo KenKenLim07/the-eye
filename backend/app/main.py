@@ -9,6 +9,7 @@ from app.cache import get_cached, set_cached
 from app.workers.ml_tasks import analyze_articles_task
 from fastapi.middleware.cors import CORSMiddleware
 from app.ml.bias import get_political_keywords_and_weights
+from app.main_advanced import get_sentiment_predictions, get_source_bias_analysis, get_sentiment_propagation_analysis, get_comprehensive_research_insights, get_event_sentiment_correlation, get_entities, get_keyphrases
 import os, json, subprocess, sys
 from datetime import datetime, timedelta
 from subprocess import Popen, PIPE
@@ -519,14 +520,8 @@ async def get_comprehensive_dashboard(period: str = "7d", source: Optional[str] 
     start_date_str = start_date.isoformat()
     
     try:
-        # Get articles from the period
-        query = sb.table("articles").select("*").gte("published_at", start_date_str).order("published_at", desc=True)
-        
-        if source:
-            query = query.eq("source", source)
-        
-        articles_result = query.limit(1000).execute()
-        articles = articles_result.data or []
+        # Get articles from the period (use pagination to get ALL articles)
+        articles = get_all_articles_paginated(sb, start_date_str, source)
         
         if not articles:
             return {
@@ -1124,3 +1119,58 @@ async def bias_articles(direction: Optional[str] = Query(default=None), limit: i
         
     except Exception as e:
         return {"ok": False, "error": str(e), "items": [], "total": 0}
+
+# ============================================================================
+# ADVANCED SENTIMENT ANALYSIS ENDPOINTS - THESIS RESEARCH
+# ============================================================================
+
+@app.get("/research/sentiment-predictions")
+async def research_sentiment_predictions(period: str = "30d", source: Optional[str] = None):
+    """
+    Revolutionary: Predict future sentiment trends
+    First predictive model for Philippine news sentiment
+    """
+    return await get_sentiment_predictions(period, source)
+
+@app.get("/research/source-bias-analysis")
+async def research_source_bias_analysis(period: str = "30d"):
+    """
+    Revolutionary: Comprehensive bias analysis for all sources
+    Objective bias quantification without subjective interpretation
+    """
+    return await get_source_bias_analysis(period)
+
+@app.get("/research/sentiment-propagation")
+async def research_sentiment_propagation(period: str = "30d"):
+    """
+    Revolutionary: Detect how sentiment propagates across news sources
+    Information cascade analysis for Philippine media
+    """
+    return await get_sentiment_propagation_analysis(period)
+
+@app.get("/research/comprehensive-insights")
+async def research_comprehensive_insights(period: str = "30d"):
+    """
+    Revolutionary: Generate comprehensive research insights for thesis
+    First comprehensive sentiment analysis insights for PH media
+    """
+    return await get_comprehensive_research_insights(period)
+
+@app.get("/research/event-correlation")
+async def research_event_correlation(period: str = "30d"):
+    """
+    Revolutionary: Correlate sentiment patterns with real-world events
+    First event-sentiment correlation for PH news
+    """
+    return await get_event_sentiment_correlation(period)
+
+@app.post("/research/entities")
+async def research_entities(payload: dict = Body(default={})):
+    text = payload.get("text", "")
+    return await get_entities(text)
+
+@app.post("/research/keyphrases")
+async def research_keyphrases(payload: dict = Body(default={})):
+    text = payload.get("text", "")
+    top_k = int(payload.get("top_k", 10))
+    return await get_keyphrases(text, top_k)

@@ -113,6 +113,10 @@ class RapplerScraper:
             ".latest-news a[href*='/']",
             ".latest a[href*='/']",
             "section[aria-label*='Latest'] a[href*='/']",
+            "section[aria-label*='Latest News'] a[href*='/']",
+            "section:has(h2:contains('Latest News')) a[href]",
+            "section:has(h2:contains('Latest news')) a[href]",
+            "section:has(h2:contains('Latest')) a[href]",
             "h2:contains('Latest News') ~ * a[href*='/']",
             
             # TARGET: Thematic blocks (Philippine tropical cyclones, UAAP, House, flood control)
@@ -177,6 +181,30 @@ class RapplerScraper:
         ],
     }
 
+    # Known section/landing endpoints we want to exclude (not individual articles)
+    DISALLOWED_SECTION_PATHS = {
+        "/newsbreak/fact-check",
+        "/newsbreak/inside-track",
+        "/newsbreak/podcasts-videos",
+        "/newsbreak/data-documents",
+        "/philippines/rappler-talk",
+        "/philippines/special-coverage",
+        "/philippines/overseas-filipinos",
+        "/philippines/metro-manila",
+        "/sports/gilas-pilipinas",
+        "/business/personal-finance",
+        "/business/stocks-banking",
+        "/business/consumer-issues",
+        "/world/asia-pacific",
+        "/world/global-affairs",
+        "/world/latin-america",
+        "/world/middle-east",
+        "/world/us-canada",
+        "/world/south-central-asia",
+        "/technology/internet-culture",
+        "/technology/social-media",
+    }
+
     def _get_random_ua(self) -> str:
         return random.choice(self.USER_AGENTS)
 
@@ -200,10 +228,9 @@ class RapplerScraper:
         
         if USE_URL_FILTER and is_valid_news_url is not None:
             # Use advanced validator with domain guard
-            if not is_valid_news_url(url, "rappler.com"):
-                return False
-            # Passed advanced checks
-            return True
+            if is_valid_news_url(url, "rappler.com"):
+                return True
+            # If advanced filter rejects, fall back to legacy heuristics below
         
         # Legacy checks (fallback)
         # Filter out non-article URLs
@@ -219,6 +246,10 @@ class RapplerScraper:
             r"/wp-",
             r"/wp-content/",
             r"/tachyon/",
+            r"/latest-from",  # listing hubs
+            r"/topics/",
+            r"/section/",
+            r"/categories?/",
             r"/page/\d+/?$",
             r"/latest/$",
             r"\.(css|js|png|jpg|jpeg|gif|svg|webp|avif|mp4|pdf)(\?|$)",
@@ -227,15 +258,36 @@ class RapplerScraper:
         for pattern in blacklist_patterns:
             if re.search(pattern, url, re.IGNORECASE):
                 return False
+
+        # Block exact-known section landing endpoints
+        try:
+            norm_path = (parsed.path or "/").rstrip("/")
+            if norm_path in self.DISALLOWED_SECTION_PATHS:
+                return False
+        except Exception:
+            pass
         
         # Must have date pattern or be in valid sections
         path = parsed.path
         if not (
             re.search(r"/20\d{2}/", path) or  # year pattern
-            any(section in path for section in ["/news/", "/newsbreak/", "/nation/", "/business/", "/sports/", "/technology/", "/world/", "/entertainment/"])
+            any(section in path for section in ["/news/", "/newsbreak/", "/nation/", "/business/", "/sports/", "/technology/", "/world/", "/entertainment/", "/philippines/"])
         ):
             return False
-            
+        
+        # Stricter shape: avoid section roots; prefer article-like slug
+        try:
+            segments = [s for s in (parsed.path or "").split('/') if s]
+            if len(segments) < 2:
+                return False
+            last = segments[-1]
+            # Article-ish if has hyphenated slug or date segments exist
+            looks_like_slug = ('-' in last and len(last) > 8) or re.search(r"/20\d{2}/", path)
+            if not looks_like_slug:
+                return False
+        except Exception:
+            return False
+
         return True
 
     def _extract_with_fallbacks(self, soup: BeautifulSoup, selectors: List[str]) -> Optional[str]:
@@ -639,10 +691,11 @@ class RapplerScraper:
             return []
 
     def _discover_from_latest(self, max_links: int = 30) -> List[str]:
-        """Discover strictly from /latest/ page, preserve page order, exclude BrandRap."""
+        """Discover strictly from /latest/ page, with dynamic scroll & 'Load more' handling."""
         links = []
         try:
             with launch_browser() as browser:
+                # Setup advanced or fallback headers
                 if USE_ADV_HEADERS and get_advanced_stealth_headers is not None:
                     headers = get_advanced_stealth_headers()
                     headers.setdefault('Referer', self.BASE_URL)
@@ -666,14 +719,132 @@ class RapplerScraper:
                 ))
 
                 url = urljoin(self.BASE_URL, "/latest/")
+                logger.info(f"[+] Navigating to {url}")
                 page.goto(url, wait_until="domcontentloaded", timeout=25000)
+
+                # Wait for article elements to appear
                 try:
                     page.wait_for_selector(".archive-article, article, .post-card", timeout=15000)
                 except Exception:
+                    logger.warning("[!] Initial selector not found — continuing anyway")
+
+                prev_height = 0
+                scroll_round = 0
+                no_change_rounds = 0
+                load_more_clicks = 0
+                # Cap how deep we go to avoid endless scrolling
+                try:
+                    max_pages = int(os.getenv("RAPPLER_LATEST_MAX_PAGES", "2"))
+                except Exception:
+                    max_pages = 2
+                max_scroll_rounds = 12
+
+                # Dynamic scrolling to load more content
+                while (
+                    len(links) < max_links and
+                    no_change_rounds < 3 and
+                    scroll_round < max_scroll_rounds and
+                    load_more_clicks < max_pages
+                ):
+                    scroll_round += 1
+                    try:
+                        page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                    except Exception:
+                        pass
+                    time.sleep(2)
+
+                    # Try to click "Load more" if available (several selector variants)
+                    try:
+                        clicked = False
+                        for btn_selector in [
+                            "button:has-text('Load more')",
+                            "button:has-text('LOAD MORE')",
+                            "button.load-more",
+                            ".load-more button",
+                        ]:
+                            btn = page.locator(btn_selector)
+                            if btn.count() > 0 and btn.first.is_visible():
+                                try:
+                                    btn.first.click()
+                                    clicked = True
+                                    logger.info("[+] Clicked 'Load more' button")
+                                    time.sleep(2)
+                                    load_more_clicks += 1
+                                    break
+                                except Exception:
+                                    continue
+                        if not clicked:
+                            # Some implementations use anchor links
+                            a_more = page.locator("a:has-text('Load more')")
+                            if a_more.count() > 0 and a_more.first.is_visible():
+                                try:
+                                    a_more.first.click()
+                                    logger.info("[+] Clicked 'Load more' link")
+                                    time.sleep(2)
+                                    load_more_clicks += 1
+                                except Exception:
+                                    pass
+                        if load_more_clicks >= max_pages:
+                            logger.info(f"[+] Reached configured max pages ({max_pages}); stopping further clicks")
+                    except Exception:
+                        pass
+
+                    # Detect scroll end by page height
+                    try:
+                        curr_height = page.evaluate("document.body.scrollHeight")
+                    except Exception:
+                        curr_height = prev_height
+                    if curr_height == prev_height:
+                        no_change_rounds += 1
+                    else:
+                        no_change_rounds = 0
+                    prev_height = curr_height
+
+                    logger.info(f"[+] Scroll round {scroll_round}, page height={curr_height}")
+
+                logger.info(f"[+] Finished scrolling after {scroll_round} rounds (load_more_clicks={load_more_clicks})")
+
+                # Prefer extracting anchors inside the Latest section directly via Playwright first
+                raw_links: List[str] = []
+                try:
+                    latest_section_locator_candidates = [
+                        "section:has(h2:has-text('Latest News'))",
+                        "section:has(h2:has-text('Latest news'))",
+                        "section[aria-label*='Latest']",
+                    ]
+                    seen_href = set()
+                    for sec_sel in latest_section_locator_candidates:
+                        try:
+                            sec = page.locator(sec_sel)
+                            count = sec.count()
+                            for i in range(count):
+                                anchors = sec.nth(i).locator("a")
+                                a_count = anchors.count()
+                                for j in range(min(a_count, 200)):
+                                    href = anchors.nth(j).get_attribute("href")
+                                    if not href:
+                                        continue
+                                    full_url = urljoin(self.BASE_URL, href)
+                                    if full_url in seen_href:
+                                        continue
+                                    seen_href.add(full_url)
+                                    raw_links.append(full_url)
+                        except Exception:
+                            continue
+                except Exception:
                     pass
 
-                soup = BeautifulSoup(page.content(), "html.parser")
-                raw_links = self._extract_links_from_html(soup)
+                # Fallback to BeautifulSoup parsing
+                try:
+                    soup = BeautifulSoup(page.content(), "html.parser")
+                    if not raw_links:
+                        raw_links = self._extract_links_from_html(soup)
+                    else:
+                        # Merge with soup extraction for completeness
+                        merged = self._extract_links_from_html(soup)
+                        raw_links.extend([u for u in merged if u not in raw_links])
+                except Exception:
+                    soup = None
 
                 seen = set()
                 for l in raw_links:
@@ -766,6 +937,9 @@ class RapplerScraper:
                     if href:
                         full_url = urljoin(self.BASE_URL, href)
                         if self._validate_url(full_url):
+                            # Exclude listing hub patterns like /latest-from-/ /latest-from
+                            if re.search(r"/latest-from|/latest-from-", full_url, re.IGNORECASE):
+                                continue
                             links.append(full_url)
             except Exception:
                 continue
@@ -861,7 +1035,8 @@ class RapplerScraper:
                     og_type = (og.get("content") or "").strip().lower()
             except Exception:
                 pass
-            if (len(minimal_content) < 120) and (og_type and og_type != "article"):
+            # Relax content gate: allow if content is moderately sized even if og:type is not strictly 'article'
+            if (len(minimal_content) < 80) and (og_type and og_type != "article"):
                 logger.info(f"Skipping non-article page by content gate: {url} (og:type={og_type}, len={len(minimal_content)})")
                 return None
             
