@@ -11,8 +11,7 @@ export default function Navigation() {
   const navItems = [
     { href: "/", label: "Home" },
     { href: "/trends", label: "Sentiment Trends" },
-    { href: "/bias", label: "Bias Analysis" },
-    { href: "/research", label: "Advanced Research" },
+    { href: "/bias", label: "Bias Analysis" }
   ];
 
   const toggleMobileMenu = () => {

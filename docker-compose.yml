@@ -20,7 +20,7 @@ services:
     environment:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/1
-      - USE_SPACY_FUNDS=false
+      - USE_SPACY_FUNDS=true
       - USE_SPACY_ANALYTICS=false
     volumes:
       - /Users/mac/ph-eye:/app

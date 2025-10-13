@@ -14,15 +14,39 @@ _nlp = None
 USE_SPACY_FUNDS = os.getenv("USE_SPACY_FUNDS", "false").lower() == "true"
 
 def _get_spacy_nlp():
-    """Lazy load spaCy model for funds detection"""
+    """Lazy load spaCy model for funds detection; reuse shared app.nlp.spacy_nlp pipeline when available."""
     global _nlp
-    if _nlp is None and USE_SPACY_FUNDS:
+    if not USE_SPACY_FUNDS:
+        return False
+    if _nlp is None:
         try:
-            import spacy
-            _nlp = spacy.load("en_core_web_sm")
-            logger.info("spaCy model loaded for funds detection")
+            # Reuse the central loader so it can auto-upgrade to en_core_web_sm
+            from app.nlp.spacy_nlp import get_nlp as get_shared_nlp
+            base_nlp = get_shared_nlp()
+            # Attach an EntityRuler with PH-specific patterns if not already present
+            if "entity_ruler" not in base_nlp.pipe_names:
+                from spacy.pipeline import EntityRuler
+                ruler = EntityRuler(base_nlp, overwrite_ents=False)
+                patterns = []
+                # Government agencies and bodies (common acronyms and names)
+                gov_terms = [
+                    "DPWH","DBM","COA","COMELEC","DILG","DOH","DepEd","DOTr","DOTR","Senate","House","Congress","LGU",
+                    "barangay","province","city","municipality","Malacañang","Palace","Ombudsman","Commission on Audit",
+                    "Department of Public Works and Highways","Department of Budget and Management","Department of Health",
+                    "Department of Education","Department of the Interior and Local Government","Department of Transportation"
+                ]
+                for term in gov_terms:
+                    patterns.append({"label": "ORG", "pattern": term})
+                # Money cues
+                money_terms = ["budget","allocation","appropriation","disbursement","fund","funds","billion","million","trillion","pesos","peso","PHP","Php","₱"]
+                for term in money_terms:
+                    patterns.append({"label": "MONEY", "pattern": term})
+                ruler.add_patterns(patterns)
+                base_nlp.add_pipe(ruler, name="entity_ruler", before="ner" if "ner" in base_nlp.pipe_names else None)
+            _nlp = base_nlp
+            logger.info("spaCy funds pipeline initialized with EntityRuler")
         except Exception as e:
-            logger.warning(f"Failed to load spaCy model: {e}. Falling back to regex-only detection.")
+            logger.warning(f"Failed to initialize spaCy funds pipeline: {e}. Falling back to regex-only detection.")
             _nlp = False
     return _nlp
 

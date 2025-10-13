@@ -9,7 +9,6 @@ from app.cache import get_cached, set_cached
 from app.workers.ml_tasks import analyze_articles_task
 from fastapi.middleware.cors import CORSMiddleware
 from app.ml.bias import get_political_keywords_and_weights
-from app.main_advanced import get_sentiment_predictions, get_source_bias_analysis, get_sentiment_propagation_analysis, get_comprehensive_research_insights, get_event_sentiment_correlation, get_entities, get_keyphrases
 import os, json, subprocess, sys
 from datetime import datetime, timedelta
 from subprocess import Popen, PIPE
@@ -480,7 +479,9 @@ async def get_trends(period: str = "7d", source: Optional[str] = None):
         return result
         
     except Exception as e:
-        return {"error": str(e)}@app.get("/ml/bias_analysis_political_latest")
+        return {"error": str(e)}
+
+@app.get("/ml/bias_analysis_political_latest")
 async def get_political_bias_latest(limit: int = 100):
     """Get latest political bias analysis results."""
     sb = get_supabase()
@@ -1103,6 +1104,140 @@ async def classify_funds_text(title: str, content: str = ""):
         }
     except Exception as e:
         return {"error": str(e)}
+
+@app.get("/ml/funds/eval")
+async def eval_funds_classifier(
+    sample_size: int = 200,
+    days_back: int = 30,
+    source: Optional[str] = None,
+    spacy_confidence_confirm: float = 0.6,
+    spacy_confidence_veto: float = 0.5,
+    only_candidates: bool = False
+):
+    """Compare regex vs spaCy decisions on a recent sample with configurable thresholds.
+    Returns agreement metrics, confusion breakdowns, and top-entity evidence for disagreements.
+    """
+    try:
+        from app.core.supabase import get_supabase
+        from app.pipeline.store import classify_is_funds as classify_regex
+        from app.pipeline.store import _spacy_funds_analysis
+        import os
+        now = datetime.now()
+        start = now - timedelta(days=days_back)
+
+        sb = get_supabase()
+        query = (
+            sb.table("articles")
+            .select("id,title,content,published_at,source")
+            .gte("published_at", start.isoformat())
+            .lte("published_at", now.isoformat())
+            .order("published_at", desc=True)
+            .limit(sample_size)
+        )
+        if source:
+            query = query.eq("source", source)
+        res = query.execute()
+        articles = res.data or []
+
+        use_spacy = os.getenv("USE_SPACY_FUNDS", "false").lower() == "true"
+
+        total = len(articles)
+        agree = 0
+        disagree = 0
+        disagreements = []
+        # Confusion-style counts
+        # regex_decision vs spacy_raw (ungated) and vs final_spacy_decision (gated)
+        confusion_raw = {"regex_true_spacy_true": 0, "regex_true_spacy_false": 0, "regex_false_spacy_true": 0, "regex_false_spacy_false": 0}
+        confusion_final = {"regex_true_spacy_true": 0, "regex_true_spacy_false": 0, "regex_false_spacy_true": 0, "regex_false_spacy_false": 0}
+
+        for a in articles:
+            title = (a.get("title") or "")
+            content = (a.get("content") or "")
+            text = f"{title}\n{content}"
+
+            regex_decision = classify_regex(title, content)
+            spacy_info = _spacy_funds_analysis(text) if use_spacy else {"is_funds": None, "confidence": 0.0, "entities": []}
+
+            # If only_candidates is set, skip items that are unlikely funds to focus evaluation
+            if only_candidates:
+                has_money_token = any(tok in text.lower() for tok in [
+                    "budget","allocation","appropriation","disbursement","fund","funds","billion","million","trillion","peso","pesos","php","₱","php "
+                ])
+                ents = spacy_info.get("entities") or {}
+                has_spacy_money = bool((ents.get("money") or []))
+                # Consider gov org cues from NER
+                gov_org_cues = {"dpwh","dbm","coa","comelec","dilg","doh","deped","dotr","senate","house","congress","lgu","barangay","province","city","municipality","malacañang","palace","ombudsman","commission on audit","department of budget and management","department of public works and highways","department of health","department of education","department of transportation"}
+                orgs_lower = {o.lower() for o in (ents.get("orgs") or [])}
+                has_gov_org = any(term in orgs_lower for term in gov_org_cues)
+                spacy_raw_bool_tmp = None if spacy_info.get("is_funds") is None else bool(spacy_info.get("is_funds"))
+                if (not regex_decision) and (not has_money_token) and (not has_spacy_money) and (not has_gov_org) and (spacy_raw_bool_tmp is not True):
+                    continue
+
+            spacy_raw_bool = None if spacy_info.get("is_funds") is None else bool(spacy_info.get("is_funds"))
+            if spacy_raw_bool is True and regex_decision is True:
+                confusion_raw["regex_true_spacy_true"] += 1
+            elif spacy_raw_bool is False and regex_decision is True:
+                confusion_raw["regex_true_spacy_false"] += 1
+            elif spacy_raw_bool is True and regex_decision is False:
+                confusion_raw["regex_false_spacy_true"] += 1
+            elif spacy_raw_bool is False and regex_decision is False:
+                confusion_raw["regex_false_spacy_false"] += 1
+
+            final_spacy_decision = regex_decision
+            if spacy_info.get("is_funds") is not None:
+                if spacy_info.get("confidence", 0.0) > spacy_confidence_confirm:
+                    final_spacy_decision = bool(spacy_info["is_funds"])
+                elif regex_decision and spacy_info.get("confidence", 0.0) < spacy_confidence_veto:
+                    final_spacy_decision = False
+
+            # Confusion for gated decision
+            if final_spacy_decision and regex_decision:
+                confusion_final["regex_true_spacy_true"] += 1
+            elif (not final_spacy_decision) and regex_decision:
+                confusion_final["regex_true_spacy_false"] += 1
+            elif final_spacy_decision and (not regex_decision):
+                confusion_final["regex_false_spacy_true"] += 1
+            else:
+                confusion_final["regex_false_spacy_false"] += 1
+
+            if regex_decision == final_spacy_decision:
+                agree += 1
+            else:
+                disagree += 1
+                if len(disagreements) < 25:
+                    # Pull light-weight entity evidence for inspection
+                    ents = spacy_info.get("entities") or {}
+                    disagreements.append({
+                        "id": a.get("id"),
+                        "source": a.get("source"),
+                        "published_at": a.get("published_at"),
+                        "title": title[:160],
+                        "regex": regex_decision,
+                        "spacy": final_spacy_decision,
+                        "spacy_confidence": spacy_info.get("confidence"),
+                        "evidence": {
+                            "orgs": ents.get("orgs", [])[:5],
+                            "money": ents.get("money", [])[:5],
+                            "gpes": ents.get("gpes", [])[:5],
+                            "laws": ents.get("laws", [])[:5],
+                        }
+                    })
+
+        return {
+            "ok": True,
+            "config": {"use_spacy": use_spacy, "sample_size": total, "days_back": days_back, "source": source or "all", "confirm": spacy_confidence_confirm, "veto": spacy_confidence_veto, "only_candidates": only_candidates},
+            "metrics": {
+                "agreement": agree,
+                "disagreement": disagree,
+                "agreement_rate": (agree / total) if total else 0.0,
+                "confusion_raw": confusion_raw,
+                "confusion_final": confusion_final,
+            },
+            "examples": disagreements,
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
 @app.get("/bias/articles")
 async def bias_articles(direction: Optional[str] = Query(default=None), limit: int = Query(default=50, ge=1, le=200), offset: int = Query(default=0, ge=0)):
     sb = get_supabase()
@@ -1119,58 +1254,3 @@ async def bias_articles(direction: Optional[str] = Query(default=None), limit: i
         
     except Exception as e:
         return {"ok": False, "error": str(e), "items": [], "total": 0}
-
-# ============================================================================
-# ADVANCED SENTIMENT ANALYSIS ENDPOINTS - THESIS RESEARCH
-# ============================================================================
-
-@app.get("/research/sentiment-predictions")
-async def research_sentiment_predictions(period: str = "30d", source: Optional[str] = None):
-    """
-    Revolutionary: Predict future sentiment trends
-    First predictive model for Philippine news sentiment
-    """
-    return await get_sentiment_predictions(period, source)
-
-@app.get("/research/source-bias-analysis")
-async def research_source_bias_analysis(period: str = "30d"):
-    """
-    Revolutionary: Comprehensive bias analysis for all sources
-    Objective bias quantification without subjective interpretation
-    """
-    return await get_source_bias_analysis(period)
-
-@app.get("/research/sentiment-propagation")
-async def research_sentiment_propagation(period: str = "30d"):
-    """
-    Revolutionary: Detect how sentiment propagates across news sources
-    Information cascade analysis for Philippine media
-    """
-    return await get_sentiment_propagation_analysis(period)
-
-@app.get("/research/comprehensive-insights")
-async def research_comprehensive_insights(period: str = "30d"):
-    """
-    Revolutionary: Generate comprehensive research insights for thesis
-    First comprehensive sentiment analysis insights for PH media
-    """
-    return await get_comprehensive_research_insights(period)
-
-@app.get("/research/event-correlation")
-async def research_event_correlation(period: str = "30d"):
-    """
-    Revolutionary: Correlate sentiment patterns with real-world events
-    First event-sentiment correlation for PH news
-    """
-    return await get_event_sentiment_correlation(period)
-
-@app.post("/research/entities")
-async def research_entities(payload: dict = Body(default={})):
-    text = payload.get("text", "")
-    return await get_entities(text)
-
-@app.post("/research/keyphrases")
-async def research_keyphrases(payload: dict = Body(default={})):
-    text = payload.get("text", "")
-    top_k = int(payload.get("top_k", 10))
-    return await get_keyphrases(text, top_k)
