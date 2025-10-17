@@ -6,8 +6,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { RefreshCw, Loader2, TrendingUp, TrendingDown, Minus } from "lucide-react";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, BarChart, Bar } from "recharts";
 import { Skeleton } from "@/components/ui/skeleton";
+
+// Simple in-memory cache and inflight dedupe for trends fetches
+const trendsCache = new Map<string, { expires: number; data: TrendsData }>();
+const inflightRequests = new Map<string, Promise<TrendsData>>();
 
 interface TrendsData {
   ok: boolean;
@@ -45,7 +49,6 @@ const SOURCES = [
 ];
 
 const PERIODS = [
-  { value: "1d", label: "Last 24 Hours" },
   { value: "7d", label: "Last 7 Days" },
   { value: "30d", label: "Last 30 Days" }
 ];
@@ -56,15 +59,35 @@ const COLORS = {
   neutral: "#6b7280"
 };
 
-async function fetchTrends(source?: string, period: string = "7d"): Promise<TrendsData> {
+async function fetchTrends(source?: string, period: string = "7d", opts?: { refresh?: boolean, ttlMs?: number }): Promise<TrendsData> {
   const base = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
-  const params = new URLSearchParams({ period });
+  const params = new URLSearchParams({ period, include_today: 'true' });
   if (source && source !== "all") params.set('source', source);
+  if (opts?.refresh) params.set('refresh', 'true');
+  const key = `trends:${period}:${source || 'all'}:today:1`;
+  const now = Date.now();
+  const ttl = opts?.ttlMs ?? 60_000;
+
+  if (!opts?.refresh) {
+    const cached = trendsCache.get(key);
+    if (cached && cached.expires > now) {
+      return cached.data;
+    }
+    const inflight = inflightRequests.get(key);
+    if (inflight) return inflight;
+  }
   
   try {
-    const res = await fetch(`${base}/ml/trends?${params}`, { cache: 'no-store' });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return await res.json();
+    const p = fetch(`${base}/ml/trends?${params}`, { cache: 'no-store' })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const json = await res.json();
+        trendsCache.set(key, { expires: now + ttl, data: json });
+        return json;
+      })
+      .finally(() => inflightRequests.delete(key));
+    inflightRequests.set(key, p);
+    return await p;
   } catch (error) {
     console.error('Failed to fetch trends:', error);
     return {
@@ -148,16 +171,25 @@ export default function TrendsPage() {
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isFilterLoading, setIsFilterLoading] = useState(false);
+  const [isPending, startTransition] = useTransition();
 
-  const loadData = async (showRefreshIndicator = false) => {
+  const loadData = async (showRefreshIndicator = false, forceRefresh = false) => {
     if (showRefreshIndicator) {
       setIsRefreshing(true);
-    } else {
+    } else if (!data) {
+      // Only show the heavy loading state on first load
       setLoading(true);
+    } else {
+      // For filter changes, prefer the lighter loading indicator
+      setIsFilterLoading(true);
     }
     
     try {
-      const trendsData = await fetchTrends(selectedSource !== "all" ? selectedSource : undefined, selectedPeriod);
+      const trendsData = await fetchTrends(
+        selectedSource !== "all" ? selectedSource : undefined,
+        selectedPeriod,
+        { refresh: forceRefresh, ttlMs: 120_000 }
+      );
       setData(trendsData);
       setLastUpdated(new Date());
     } catch (error) {
@@ -171,20 +203,25 @@ export default function TrendsPage() {
 
   const handleSourceChange = (newSource: string) => {
     setIsFilterLoading(true);
-    setSelectedSource(newSource);
+    startTransition(() => {
+      setSelectedSource(newSource);
+    });
   };
 
   const handlePeriodChange = (newPeriod: string) => {
     setIsFilterLoading(true);
-    setSelectedPeriod(newPeriod);
+    startTransition(() => {
+      setSelectedPeriod(newPeriod);
+    });
   };
 
   const handleRefresh = () => {
-    loadData(true);
+    loadData(true, true);
   };
 
   useEffect(() => {
-    loadData();
+    // Do not force refresh on filter changes; allow cache to serve
+    loadData(false, false);
   }, [selectedSource, selectedPeriod]);
 
   // Auto-refresh every 5 minutes
@@ -430,9 +467,13 @@ export default function TrendsPage() {
                     stroke={COLORS.positive} 
                     strokeWidth={3}
                     name="Positive"
-                    dot={{ fill: COLORS.positive, strokeWidth: 2, r: 4 }}
-                    animationDuration={isFilterLoading ? 0 : 1000}
-                    animationEasing="ease-in-out"
+                    dot={{ fill: COLORS.positive, strokeWidth: 2, r: 3 }}
+                    activeDot={{ r: 4 }}
+                    isAnimationActive={!isFilterLoading}
+                    animationBegin={50}
+                    animationDuration={350}
+                    animationEasing="ease-out"
+                    connectNulls
                   />
                   <Line 
                     type="monotone" 
@@ -440,9 +481,13 @@ export default function TrendsPage() {
                     stroke={COLORS.negative} 
                     strokeWidth={3}
                     name="Negative"
-                    dot={{ fill: COLORS.negative, strokeWidth: 2, r: 4 }}
-                    animationDuration={isFilterLoading ? 0 : 1000}
-                    animationEasing="ease-in-out"
+                    dot={{ fill: COLORS.negative, strokeWidth: 2, r: 3 }}
+                    activeDot={{ r: 4 }}
+                    isAnimationActive={!isFilterLoading}
+                    animationBegin={80}
+                    animationDuration={350}
+                    animationEasing="ease-out"
+                    connectNulls
                   />
                   <Line 
                     type="monotone" 
@@ -450,9 +495,13 @@ export default function TrendsPage() {
                     stroke={COLORS.neutral} 
                     strokeWidth={3}
                     name="Neutral"
-                    dot={{ fill: COLORS.neutral, strokeWidth: 2, r: 4 }}
-                    animationDuration={isFilterLoading ? 0 : 1000}
-                    animationEasing="ease-in-out"
+                    dot={{ fill: COLORS.neutral, strokeWidth: 2, r: 3 }}
+                    activeDot={{ r: 4 }}
+                    isAnimationActive={!isFilterLoading}
+                    animationBegin={110}
+                    animationDuration={350}
+                    animationEasing="ease-out"
+                    connectNulls
                   />
                 </LineChart>
               </ResponsiveContainer>
@@ -478,66 +527,100 @@ export default function TrendsPage() {
                 timeline.map((day, index) => (
                   <div 
                     key={day.date} 
-                    className="border rounded-lg p-4 transition-all duration-500 hover:shadow-sm"
+                    className="border rounded-lg p-4 transition-all duration-500 hover:shadow-sm min-w-0"
                     style={{
-                      animationDelay: `${index * 100}ms`,
-                      animation: isFilterLoading ? 'none' : 'fadeInUp 0.8s ease-out forwards'
+                      animationDelay: '0ms',
+                      animation: 'none'
                     }}
                   >
                     <div className="flex items-center justify-between mb-2">
                       <div className="font-medium">{day.date}</div>
-                      <Badge variant="outline">{day.total} articles</Badge>
+                      {(() => {
+                        const analyzed = day.positive + day.neutral + day.negative;
+                        const coveragePct = day.total > 0 ? ((analyzed / day.total) * 100).toFixed(1) : '0.0';
+                        return (
+                          <div className="flex items-center gap-2">
+                            <Badge variant="outline">{day.total} articles</Badge>
+                            <Badge variant="secondary">Analyzed {analyzed}/{day.total} ({coveragePct}%)</Badge>
+                          </div>
+                        );
+                      })()}
                     </div>
                     
-                    {/* Sentiment Bar */}
-                    <div className="flex h-4 rounded overflow-hidden mb-2">
-                      {day.positive > 0 && (
-                        <div 
-                          className="bg-green-500 transition-all duration-1000 ease-out" 
-                          style={{ 
-                            width: `${day.positive_pct}%`,
-                            animationDelay: isFilterLoading ? '0ms' : `${index * 100 + 300}ms`
-                          }}
-                          title={`${day.positive} positive (${day.positive_pct}%)`}
-                        />
-                      )}
-                      {day.neutral > 0 && (
-                        <div 
-                          className="bg-gray-400 transition-all duration-1000 ease-out" 
-                          style={{ 
-                            width: `${day.neutral_pct}%`,
-                            animationDelay: isFilterLoading ? '0ms' : `${index * 100 + 400}ms`
-                          }}
-                          title={`${day.neutral} neutral (${day.neutral_pct}%)`}
-                        />
-                      )}
-                      {day.negative > 0 && (
-                        <div 
-                          className="bg-red-500 transition-all duration-1000 ease-out" 
-                          style={{ 
-                            width: `${day.negative_pct}%`,
-                            animationDelay: isFilterLoading ? '0ms' : `${index * 100 + 500}ms`
-                          }}
-                          title={`${day.negative} negative (${day.negative_pct}%)`}
-                        />
-                      )}
-                    </div>
+                    {/* Sentiment Bar (CSS-based) */}
+                    {(() => {
+                      const total = Math.max(1, day.total);
+                      const analyzed = day.positive + day.neutral + day.negative;
+                      const remainderCount = Math.max(0, total - analyzed);
+                      
+                      const positiveWidth = (day.positive / total) * 100;
+                      const neutralWidth = (day.neutral / total) * 100;
+                      const negativeWidth = (day.negative / total) * 100;
+                      const unscoredWidth = (remainderCount / total) * 100;
+                      
+                      return (
+                        <div className="w-full h-3 mb-3 min-w-0 relative group" data-date={day.date}>
+                          <div className="flex h-full rounded-full overflow-hidden shadow-sm">
+                            {day.positive > 0 && (
+                              <div 
+                                className="bg-green-500 h-full transition-all duration-200 hover:bg-green-600 hover:scale-y-110"
+                                style={{ width: `${positiveWidth}%` }}
+                                title={`Positive: ${day.positive} (${positiveWidth.toFixed(1)}% of total, ${analyzed > 0 ? ((day.positive / analyzed) * 100).toFixed(1) : '0.0'}% of analyzed)`}
+                              />
+                            )}
+                            {day.neutral > 0 && (
+                              <div 
+                                className="bg-gray-500 h-full transition-all duration-200 hover:bg-gray-600 hover:scale-y-110"
+                                style={{ width: `${neutralWidth}%` }}
+                                title={`Neutral: ${day.neutral} (${neutralWidth.toFixed(1)}% of total, ${analyzed > 0 ? ((day.neutral / analyzed) * 100).toFixed(1) : '0.0'}% of analyzed)`}
+                              />
+                            )}
+                            {day.negative > 0 && (
+                              <div 
+                                className="bg-red-500 h-full transition-all duration-200 hover:bg-red-600 hover:scale-y-110"
+                                style={{ width: `${negativeWidth}%` }}
+                                title={`Negative: ${day.negative} (${negativeWidth.toFixed(1)}% of total, ${analyzed > 0 ? ((day.negative / analyzed) * 100).toFixed(1) : '0.0'}% of analyzed)`}
+                              />
+                            )}
+                            {remainderCount > 0 && (
+                              <div 
+                                className="bg-gray-300 h-full transition-all duration-200 hover:bg-gray-400 hover:scale-y-110"
+                                style={{ width: `${unscoredWidth}%` }}
+                                title={`Unscored: ${remainderCount} (${unscoredWidth.toFixed(1)}% of total)`}
+                              />
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })()}
                     
                     {/* Sentiment Stats */}
-                    <div className="flex gap-4 text-sm text-muted-foreground">
-                      <span className="text-green-600">
-                        Positive: {day.positive} ({day.positive_pct}%)
-                      </span>
-                      <span className="text-gray-600">
-                        Neutral: {day.neutral} ({day.neutral_pct}%)
-                      </span>
-                      <span className="text-red-600">
-                        Negative: {day.negative} ({day.negative_pct}%)
-                      </span>
-                      <span>
-                        Avg Score: {day.avg_sentiment}
-                      </span>
-                    </div>
+                    {(() => {
+                      const analyzed = day.positive + day.neutral + day.negative;
+                      const remainderCount = Math.max(0, day.total - analyzed);
+                      const remainderPct = day.total > 0 ? ((remainderCount / day.total) * 100).toFixed(1) : '0.0';
+                      return (
+                        <div className="flex gap-4 text-sm text-muted-foreground">
+                          <span className="text-green-600">
+                            Positive: {day.positive} ({day.positive_pct}%)
+                          </span>
+                          <span className="text-gray-600">
+                            Neutral: {day.neutral} ({day.neutral_pct}%)
+                          </span>
+                          <span className="text-red-600">
+                            Negative: {day.negative} ({day.negative_pct}%)
+                          </span>
+                          {remainderCount > 0 && (
+                            <span className="text-gray-500">
+                              Unscored: {remainderCount} ({remainderPct}%)
+                            </span>
+                          )}
+                          <span>
+                            Avg Score: {day.avg_sentiment.toFixed ? day.avg_sentiment.toFixed(3) : day.avg_sentiment}
+                          </span>
+                        </div>
+                      );
+                    })()}
                   </div>
                 ))
               )}

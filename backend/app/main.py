@@ -325,35 +325,44 @@ async def get_analysis(ids: str):
         return {"error": str(e)}
 
 @app.get("/ml/trends")
-async def get_trends(period: str = "7d", source: Optional[str] = None):
-    # Generate cache key
-    cache_key = f"trends:{period}:{source or 'all'}"
-    
-    # Check cache first
-    cached_result = get_cached(cache_key)
-    if cached_result:
-        return cached_result
+async def get_trends(period: str = "7d", source: Optional[str] = None, include_today: bool = True, refresh: bool = False):
     
     sb = get_supabase()
     
-    # Calculate date range (SIMPLE VERSION)
+    # Calculate date range: use COMPLETE calendar days to avoid partial first/last-day truncation
     from datetime import datetime, timedelta
     now = datetime.now()
-    
-    if period == "1d":
-        start_date = now - timedelta(days=1)
-    elif period == "7d":
-        start_date = now - timedelta(days=7)
+    # Default to full, complete days ending yesterday to keep counts stable and avoid partials
+    # Allow opting into today's partial data via include_today=true
+    # Determine window size in days and compute exact inclusive bounds
+    if period == "7d":
+        window_days = 7
     elif period == "30d":
-        start_date = now - timedelta(days=30)
+        window_days = 30
     else:
-        start_date = now - timedelta(days=7)
-    
+        # default to 7 days if unknown
+        window_days = 7
+
+    if include_today:
+        # Include today → start = today - (window_days - 1)
+        end_date = now.replace(hour=23, minute=59, second=59, microsecond=999999)
+        start_date = (now - timedelta(days=window_days - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    else:
+        # Exclude today → end = yesterday, start = end - (window_days - 1)
+        end_date = (now - timedelta(days=1)).replace(hour=23, minute=59, second=59, microsecond=999999)
+        start_date = (end_date - timedelta(days=window_days - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
     start_date_str = start_date.isoformat()
+    end_date_str = end_date.isoformat()
+    # Compute cache key AFTER computing exact date bounds
+    cache_key = f"trends:{period}:{source or 'all'}:today:{'1' if include_today else '0'}:start:{start_date_str[:10]}:end:{end_date_str[:10]}"
+    # Check cache first (allow force refresh)
+    cached_result = None if refresh else get_cached(cache_key)
+    if cached_result:
+        return cached_result
     
     try:
-        # Get articles from the period (with pagination)
-        articles = get_all_articles_paginated(sb, start_date_str, source)
+        # Get articles from the period (with pagination) bounded by end_date
+        articles = get_all_articles_paginated(sb, start_date_str, source, end_date=end_date_str)
         
         if not articles:
             result = {
@@ -474,8 +483,8 @@ async def get_trends(period: str = "7d", source: Optional[str] = None):
             "timeline": timeline
         }
         
-        # Cache the result for 5 minutes
-        set_cached(cache_key, result, 1800)
+        # Cache the result (short TTL to keep UI fresh)
+        set_cached(cache_key, result, 300)
         return result
         
     except Exception as e:
