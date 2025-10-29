@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.ml.bias import get_political_keywords_and_weights
 import os, json, subprocess, sys
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from subprocess import Popen, PIPE
 
 
@@ -329,9 +330,10 @@ async def get_trends(period: str = "7d", source: Optional[str] = None, include_t
     
     sb = get_supabase()
     
-    # Calculate date range: use COMPLETE calendar days to avoid partial first/last-day truncation
-    from datetime import datetime, timedelta
-    now = datetime.now()
+    # Calculate date range using Asia/Manila local day boundaries, then convert to UTC for querying
+    from datetime import datetime, timedelta, timezone
+    tz_ph = ZoneInfo("Asia/Manila")
+    now_local = datetime.now(tz_ph)
     # Default to full, complete days ending yesterday to keep counts stable and avoid partials
     # Allow opting into today's partial data via include_today=true
     # Determine window size in days and compute exact inclusive bounds
@@ -345,12 +347,15 @@ async def get_trends(period: str = "7d", source: Optional[str] = None, include_t
 
     if include_today:
         # Include today → start = today - (window_days - 1)
-        end_date = now.replace(hour=23, minute=59, second=59, microsecond=999999)
-        start_date = (now - timedelta(days=window_days - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        end_local = now_local.replace(hour=23, minute=59, second=59, microsecond=999999)
+        start_local = (now_local - timedelta(days=window_days - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
     else:
         # Exclude today → end = yesterday, start = end - (window_days - 1)
-        end_date = (now - timedelta(days=1)).replace(hour=23, minute=59, second=59, microsecond=999999)
-        start_date = (end_date - timedelta(days=window_days - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        end_local = (now_local - timedelta(days=1)).replace(hour=23, minute=59, second=59, microsecond=999999)
+        start_local = (end_local - timedelta(days=window_days - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    # Convert to UTC for querying (Supabase timestamps are UTC)
+    end_date = end_local.astimezone(timezone.utc)
+    start_date = start_local.astimezone(timezone.utc)
     start_date_str = start_date.isoformat()
     end_date_str = end_date.isoformat()
     # Compute cache key AFTER computing exact date bounds
@@ -392,16 +397,25 @@ async def get_trends(period: str = "7d", source: Optional[str] = None, include_t
             analysis_result = sb.table("bias_analysis").select("*").in_("article_id", batch_ids).eq("model_type", "sentiment").execute()
             all_analysis.extend(analysis_result.data or [])
         
-        # Group by date - FIXED: Count ALL articles per date, not just those with sentiment analysis
+        # Group by date (Asia/Manila) - Count ALL articles per date, not just those with sentiment analysis
         from collections import defaultdict
         daily_data = defaultdict(lambda: {"positive": 0, "negative": 0, "neutral": 0, "total": 0, "sentiment_scores": []})
         
-        # First, count all articles by date
+        # Helper to convert published_at to Asia/Manila local date string (YYYY-MM-DD)
+        def to_ph_date_str(ts: str) -> str:
+            try:
+                # Handle potential 'Z' suffix for UTC
+                dt = datetime.fromisoformat((ts or "").replace('Z', '+00:00'))
+                return dt.astimezone(tz_ph).date().isoformat()
+            except Exception:
+                return (ts or "")[:10]
+        
+        # First, count all articles by local PH date
         for article in articles:
-            date_str = article["published_at"][:10]  # YYYY-MM-DD
+            date_str = to_ph_date_str(article.get("published_at", ""))
             daily_data[date_str]["total"] += 1
         
-        # Then, add sentiment analysis data
+        # Then, add sentiment analysis data using the same local date key
         for analysis in all_analysis:
             article_id = analysis["article_id"]
             sentiment_label = analysis.get("sentiment_label", "neutral")
@@ -410,7 +424,7 @@ async def get_trends(period: str = "7d", source: Optional[str] = None, include_t
             # Find the article to get its date
             article = next((a for a in articles if a["id"] == article_id), None)
             if article:
-                date_str = article["published_at"][:10]  # YYYY-MM-DD
+                date_str = to_ph_date_str(article.get("published_at", ""))
                 daily_data[date_str]["sentiment_scores"].append(sentiment_score)
                 
                 if sentiment_label == "positive":
@@ -437,7 +451,17 @@ async def get_trends(period: str = "7d", source: Optional[str] = None, include_t
             aggregated_daily_data[date_str]["neutral"] += data["neutral"]
             aggregated_daily_data[date_str]["sentiment_scores"].extend(data["sentiment_scores"])
         
+        # Restrict to the exact local date window to avoid off-by-one from timezone conversions
+        window_start_local = start_local.date()
+        window_end_local = end_local.date()
         for date_str in sorted(aggregated_daily_data.keys()):
+            try:
+                date_obj = datetime.fromisoformat(date_str).date()
+            except Exception:
+                # If parsing fails, include conservatively
+                date_obj = None
+            if date_obj and not (window_start_local <= date_obj <= window_end_local):
+                continue
             data = aggregated_daily_data[date_str]
             total = data["total"]
             positive = data["positive"]
@@ -483,8 +507,8 @@ async def get_trends(period: str = "7d", source: Optional[str] = None, include_t
             "timeline": timeline
         }
         
-        # Cache the result (short TTL to keep UI fresh)
-        set_cached(cache_key, result, 300)
+        # Cache the result (shorter TTL when including today)
+        set_cached(cache_key, result, 60 if include_today else 300)
         return result
         
     except Exception as e:

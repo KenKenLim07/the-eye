@@ -7,11 +7,7 @@ import logging
 from app.observability.logs import start_run, finalize_run
 from app.workers.ml_tasks import analyze_articles_task
 
-# Guarded import for ABS-CBN (may be removed)
-try:
-    from app.scrapers.abs_cbn import ABSCBNScraper
-except Exception:
-    ABSCBNScraper = None
+# ABS-CBN scraper removed
 # New import for GMA
 from app.scrapers.gma import GMAScraper
 # New import for Philstar
