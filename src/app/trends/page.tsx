@@ -37,6 +37,16 @@ interface TrendsData {
   }>;
 }
 
+interface CorrelationData {
+  ok: boolean;
+  period: string;
+  include_today: boolean;
+  sources: string[];
+  matrix: Array<Array<number | null>>;
+  p_values: Array<Array<number | null>>;
+  entities?: Array<{ text: string; type: string; mentions: number; avg_sentiment: number }>;
+}
+
 const SOURCES = [
   { value: "all", label: "All Sources" },
   { value: "GMA", label: "GMA" },
@@ -106,6 +116,39 @@ async function fetchTrends(source?: string, period: string = "7d", opts?: { refr
   }
 }
 
+async function fetchCorrelation(period: string = "7d", opts?: { refresh?: boolean, ttlMs?: number, sources?: string[] }): Promise<CorrelationData> {
+  const base = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
+  const params = new URLSearchParams({ period, include_today: 'true', with_entities: 'true' });
+  if (opts?.sources && opts.sources.length > 0) params.set('sources', opts.sources.join(','));
+  if (opts?.refresh) params.set('refresh', 'true');
+  const key = `corr:${period}:${(opts?.sources||['all']).join(',')}:today:1`;
+  const now = Date.now();
+  const ttl = opts?.ttlMs ?? 60_000;
+
+  if (!opts?.refresh) {
+    const cached = trendsCache.get(key) as any;
+    if (cached && cached.expires > now) return cached.data;
+    const inflight = inflightRequests.get(key) as any;
+    if (inflight) return inflight;
+  }
+
+  try {
+    const p = fetch(`${base}/ml/correlation?${params}`, { cache: 'no-store' })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const json = await res.json();
+        trendsCache.set(key, { expires: now + ttl, data: json } as any);
+        return json as CorrelationData;
+      })
+      .finally(() => inflightRequests.delete(key));
+    inflightRequests.set(key, p as any);
+    return await p as any;
+  } catch (e) {
+    console.error('Failed to fetch correlation:', e);
+    return { ok: false, period, include_today: true, sources: [], matrix: [], p_values: [] } as CorrelationData;
+  }
+}
+
 // Loading skeleton components
 const SummaryCardSkeleton = () => (
   <Card>
@@ -165,9 +208,11 @@ const TimelineSkeleton = () => (
 
 export default function TrendsPage() {
   const [data, setData] = useState<TrendsData | null>(null);
+  const [corr, setCorr] = useState<CorrelationData | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedSource, setSelectedSource] = useState("all");
   const [selectedPeriod, setSelectedPeriod] = useState("7d");
+  const [viewMode, setViewMode] = useState<'timeline'|'correlation'>("timeline");
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isFilterLoading, setIsFilterLoading] = useState(false);
@@ -216,13 +261,26 @@ export default function TrendsPage() {
   };
 
   const handleRefresh = () => {
-    loadData(true, true);
+    if (viewMode === 'timeline') {
+      loadData(true, true);
+    } else {
+      setIsRefreshing(true);
+      fetchCorrelation(selectedPeriod, { refresh: true, sources: selectedSource==='all'? undefined : [selectedSource] })
+        .then(setCorr)
+        .finally(() => setIsRefreshing(false));
+    }
   };
 
   useEffect(() => {
-    // Do not force refresh on filter changes; allow cache to serve
-    loadData(false, false);
-  }, [selectedSource, selectedPeriod]);
+    if (viewMode === 'timeline') {
+      loadData(false, false);
+    } else {
+      setIsFilterLoading(true);
+      fetchCorrelation(selectedPeriod, { sources: selectedSource==='all'? undefined : [selectedSource] })
+        .then(setCorr)
+        .finally(() => setIsFilterLoading(false));
+    }
+  }, [selectedSource, selectedPeriod, viewMode]);
 
   // Auto-refresh every 5 minutes
   useEffect(() => {
@@ -361,6 +419,10 @@ export default function TrendsPage() {
           </div>
           
           <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 mr-2">
+              <Button variant={viewMode==='timeline'? 'default':'outline'} size="sm" onClick={() => setViewMode('timeline')} disabled={isFilterLoading}>Timeline</Button>
+              <Button variant={viewMode==='correlation'? 'default':'outline'} size="sm" onClick={() => setViewMode('correlation')} disabled={isFilterLoading}>Correlation</Button>
+            </div>
             <Button 
               onClick={handleRefresh} 
               variant="outline" 
@@ -441,7 +503,10 @@ export default function TrendsPage() {
           </Card>
         </div>
 
-        {/* Sentiment Trends Chart - Visual feedback during loading */}
+        {/* Views */}
+        {viewMode === 'timeline' && (
+        <>
+        {/* Sentiment Trends Chart */}
         <Card className={`transition-all duration-500 ${isFilterLoading ? 'opacity-50' : 'opacity-100'}`}>
           <CardHeader>
             <CardTitle>Sentiment Trends Over Time</CardTitle>
@@ -509,7 +574,7 @@ export default function TrendsPage() {
           </CardContent>
         </Card>
 
-        {/* Timeline - Visual feedback during loading */}
+        {/* Timeline */}
         <Card className={`transition-all duration-500 ${isFilterLoading ? 'opacity-50' : 'opacity-100'}`}>
           <CardHeader>
             <CardTitle>Daily Sentiment Timeline</CardTitle>
@@ -627,6 +692,79 @@ export default function TrendsPage() {
             </div>
           </CardContent>
         </Card>
+        </>
+        )}
+
+        {viewMode === 'correlation' && (
+          <Card className={`transition-all duration-500 ${isFilterLoading ? 'opacity-50' : 'opacity-100'}`}>
+            <CardHeader>
+              <CardTitle>Source Correlation (Pearson r)</CardTitle>
+              <CardDescription>
+                Daily average sentiment correlation across sources (last {selectedPeriod})
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {!corr?.ok || (corr?.sources?.length ?? 0) === 0 ? (
+                <div className="text-sm text-muted-foreground py-6">No correlation data available.</div>
+              ) : (
+                <div className="overflow-auto">
+                  <table className="min-w-full text-sm">
+                    <thead>
+                      <tr>
+                        <th className="text-left p-2">Source</th>
+                        {corr.sources.map((s) => (
+                          <th key={s} className="text-left p-2">{s}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {corr.sources.map((rowSrc, i) => (
+                        <tr key={rowSrc} className="border-t">
+                          <td className="p-2 font-medium">{rowSrc}</td>
+                          {corr.sources.map((colSrc, j) => {
+                            const r = corr.matrix[i]?.[j];
+                            const p = corr.p_values[i]?.[j];
+                            const bg = r == null ? 'bg-gray-100' : r >= 0.5 ? 'bg-green-100' : r <= -0.5 ? 'bg-red-100' : 'bg-yellow-50';
+                            return (
+                              <td key={colSrc} className={`p-2 ${bg}`} title={`r=${r==null? 'n/a' : r.toFixed(3)}${p!=null? `, p=${p.toFixed(3)}`:''}`}>
+                                {r == null ? '—' : r.toFixed(3)}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {corr.entities && corr.entities.length > 0 && (
+                    <div className="mt-6">
+                      <div className="text-sm font-medium mb-2">Top Entities (NER + Sentiment)</div>
+                      <table className="min-w-full text-sm">
+                        <thead>
+                          <tr>
+                            <th className="text-left p-2">Entity</th>
+                            <th className="text-left p-2">Type</th>
+                            <th className="text-left p-2">Mentions</th>
+                            <th className="text-left p-2">Avg Sentiment</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {corr.entities.map((e) => (
+                            <tr key={`${e.text}:${e.type}`} className="border-t">
+                              <td className="p-2">{e.text}</td>
+                              <td className="p-2 text-muted-foreground">{e.type}</td>
+                              <td className="p-2">{e.mentions}</td>
+                              <td className="p-2">{e.avg_sentiment.toFixed(3)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
       </div>
 
       <style jsx>{`

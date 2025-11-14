@@ -120,6 +120,24 @@ class PhilStarScraper:
         if not ("philstar.com" in parsed.netloc):
             return False
         
+        # Exclude stock market/financial data pages
+        path_lower = (parsed.path or "").lower()
+        stock_market_patterns = [
+            "/business/stock-market",
+            "/business/market-close",
+            "/business/closing",
+            "/business/stocks",
+            "/markets",
+            "/stock-quotes",
+            "/currency",
+            "/exchange-rates",
+            "/other-sections/forex-stocks",  # Forex and stock closing prices
+            "/forex-stocks",
+        ]
+        if any(pattern in path_lower for pattern in stock_market_patterns):
+            logger.info(f"Excluding stock market URL: {url}")
+            return False
+        
         if USE_URL_FILTER and is_valid_news_url is not None:
             if not is_valid_news_url(url, "philstar.com"):
                 return False
@@ -359,8 +377,48 @@ class PhilStarScraper:
             if not title:
                 logger.warning(f"No title found for {url}")
                 return None
+            
+            # Filter out stock market/closing price data
+            title_lower = title.lower().strip()
+            stock_title_patterns = [
+                "closing as of",
+                "market closing",
+                "closing prices",
+                "stock market closing",
+                "exchange rate",
+                "currency closing",
+                "peso closing",
+                "dollar closing",
+            ]
+            # Check for currency exchange format like "1$:58.690" or "$58.690" or "58.690"
+            if any(pattern in title_lower for pattern in stock_title_patterns):
+                logger.info(f"Excluding stock market data article: {title[:50]}...")
+                return None
+            
+            # Check for numeric exchange rate patterns in title (e.g., "1$:58.690", "$58.690", "58:58.690")
+            if re.match(r'^[\d\$:\.]+$', title.strip()) or re.match(r'^\$?\d+[:\.,]\d+$', title.strip()):
+                logger.info(f"Excluding numeric exchange rate title: {title[:50]}...")
+                return None
                 
             content = self._extract_content(soup)
+            
+            # Additional content validation: exclude if content is mostly numbers/currency
+            if content:
+                content_words = content.split()
+                if len(content_words) > 0:
+                    # Check if content looks like stock price data (lots of numbers, currency symbols)
+                    num_like_patterns = sum(1 for word in content_words[:20] if re.match(r'^[\d\$:.,-]+$', word))
+                    if num_like_patterns > 10:  # More than 10 number-like tokens in first 20 words
+                        logger.info(f"Excluding numeric/financial data article: {title[:50]}...")
+                        return None
+                    
+                    # Check for currency exchange patterns
+                    if re.search(r'\$\d+[:\.,]\d+', content[:500]) or re.search(r'\d+[:\.,]\d+\s*(peso|dollar|usd|php)', content[:500], re.IGNORECASE):
+                        currency_matches = len(re.findall(r'\$\d+|\d+\s*(peso|dollar|usd|php)', content[:500], re.IGNORECASE))
+                        if currency_matches > 5:  # Multiple currency references
+                            logger.info(f"Excluding currency exchange data article: {title[:50]}...")
+                            return None
+            
             published_date = self._extract_with_fallbacks(soup, self.SELECTORS["published_date"])
             
             # Build normalized article

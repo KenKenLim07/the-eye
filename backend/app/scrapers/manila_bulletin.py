@@ -56,20 +56,27 @@ class ManilaBulletinScraper:
     """Stealth scraper for Manila Bulletin with conservative crawling and sanitization."""
 
     BASE_URL = "https://mb.com.ph"
+    # Updated category structure (observed live)
     START_PATHS = [
-        "/latest",
-        "/news",
-        "/nation",
-        "/business",
-        "/sports",
-        "/entertainment",
-        "/technology",
+        "/category/philippines",
+        "/category/world",
+        "/category/business",
+        "/category/opinion",
+        "/category/lifestyle",
+        "/category/entertainment",
+        "/category/sports",
     ]
-    FEED_PATHS: List[str] = []
+    FEED_PATHS: List[str] = [
+        "/feed",
+        "/latest/feed",
+    ]
     SITEMAP_PATHS = [
         "/sitemap_index.xml",
         "/sitemap.xml",
         "/news-sitemap.xml",
+        "/sitemap-news.xml",
+        "/post-sitemap.xml",
+        "/sitemap_posts.xml",
     ]
     GOOGLE_NEWS_RSS = "https://news.google.com/rss/search?q=site:mb.com.ph&hl=en-PH&gl=PH&ceid=PH:en"
 
@@ -83,6 +90,8 @@ class ManilaBulletinScraper:
 
     MIN_DELAY = 8.0
     MAX_DELAY = 28.0
+    # Safety cap for candidates per run
+    MAX_CANDIDATES = 30
 
     # Robots.txt disallow-derived patterns (must NOT fetch)
     DISALLOW_PATTERNS = [
@@ -106,15 +115,28 @@ class ManilaBulletinScraper:
 
     SELECTORS = {
         "article_links": [
+            # Generic article titles
+            "article h1 a",
             "article h2 a",
+            "h1 a",
             "h2 a",
-            "a[href*='/news/']",
-            "a[href*='/latest/']",
+            # Listing layouts
             ".post-title a",
-            ".jeg_post_title a",
-            ".jeg_inner_content a",
-            ".jeg_list_post a",
-            ".jeg_heroblock a",
+            ".post-item a",
+            ".card a",
+            ".archive-list a",
+            ".entry-title a",
+            # Date-based direct URLs
+            "a[href*='/2025/']",
+            "a[href*='/2024/']",
+            # Category-based URLs
+            "a[href*='/category/philippines/']",
+            "a[href*='/category/world/']",
+            "a[href*='/category/business/']",
+            "a[href*='/category/opinion/']",
+            "a[href*='/category/lifestyle/']",
+            "a[href*='/category/entertainment/']",
+            "a[href*='/category/sports/']",
         ],
         "title": [
             "h1.entry-title",
@@ -367,8 +389,19 @@ class ManilaBulletinScraper:
     def _fetch_url(self, url: str, timeout: int = 15) -> Optional[bytes]:
         try:
             req = urllib.request.Request(url, headers={"User-Agent": self.USER_AGENT, "Accept": "*/*", "Referer": self.BASE_URL})
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                return resp.read()
+            # Try normally first
+            try:
+                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                    return resp.read()
+            except Exception:
+                # Retry with relaxed SSL if TLS handshake issues occur
+                try:
+                    import ssl
+                    ctx = ssl._create_unverified_context()
+                    with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:  # type: ignore
+                        return resp.read()
+                except Exception as e2:
+                    raise e2
         except Exception as e:
             logger.warning(f"fetch failed {url}: {e}")
             return None
@@ -376,12 +409,54 @@ class ManilaBulletinScraper:
     def _fetch_url_with_status(self, url: str, timeout: int = 15) -> Tuple[Optional[bytes], Optional[int]]:
         try:
             req = urllib.request.Request(url, headers={"User-Agent": self.USER_AGENT, "Accept": "*/*", "Referer": self.BASE_URL})
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                return resp.read(), getattr(resp, 'status', 200)
+            try:
+                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                    return resp.read(), getattr(resp, 'status', 200)
+            except Exception:
+                # Retry with relaxed SSL
+                try:
+                    import ssl
+                    ctx = ssl._create_unverified_context()
+                    with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:  # type: ignore
+                        return resp.read(), getattr(resp, 'status', 200)
+                except urllib.error.HTTPError as he:  # type: ignore
+                    return None, he.code
+                except Exception:
+                    return None, None
         except urllib.error.HTTPError as he:  # type: ignore
             return None, he.code
         except Exception:
             return None, None
+
+    def _discover_links_from_rss(self, max_links: int = 50) -> List[str]:
+        links: List[str] = []
+        for path in self.FEED_PATHS:
+            url = urljoin(self.BASE_URL, path)
+            data = self._fetch_url(url)
+            if not data:
+                continue
+            try:
+                soup = BeautifulSoup(data, "xml")
+                for item in soup.find_all("item"):
+                    link_el = item.find("link")
+                    href = (link_el.get_text() if link_el else "") or ""
+                    href = href.strip()
+                    if href and self._validate_url(href):
+                        links.append(href)
+                        if len(links) >= max_links:
+                            break
+                if len(links) >= max_links:
+                    break
+            except Exception:
+                continue
+        # unique preserve order
+        seen = set()
+        uniq: List[str] = []
+        for u in links:
+            if u not in seen:
+                seen.add(u)
+                uniq.append(u)
+        return uniq
 
     def _discover_links_from_google_news(self, max_links: int = 50) -> List[str]:
         data = self._fetch_url(self.GOOGLE_NEWS_RSS)
@@ -475,17 +550,20 @@ class ManilaBulletinScraper:
     def _discover_links_from_html(self, html: str) -> List[str]:
         soup = BeautifulSoup(html, "html.parser")
         links: List[str] = []
+        # Primary: CSS selectors
         for sel in self.SELECTORS["article_links"]:
-            for a in soup.select(sel):
-                href = a.get("href")
-                if not href:
-                    continue
-                full = urljoin(self.BASE_URL, href)
-                if self._validate_url(full):
-                    links.append(full)
-        # Fallback: scan all anchors and pick likely article URLs (year in path)
-        if not links:
-            # FIXED: Only iterate over Tag elements, not Doctype or other non-Tag objects
+            try:
+                for a in soup.select(sel):
+                    href = a.get("href")
+                    if not href:
+                        continue
+                    full = urljoin(self.BASE_URL, href)
+                    if self._validate_url(full):
+                        links.append(full)
+            except Exception:
+                continue
+        # Secondary: broad anchor scan with heuristics
+        if len(links) < 10:
             for a in soup.find_all('a'):
                 href = a.get("href")
                 if not href:
@@ -494,8 +572,15 @@ class ManilaBulletinScraper:
                 if not self._validate_url(full):
                     continue
                 path = urlparse(full).path or ""
-                if re.search(r"/20\d{2}/", path) or re.search(r"/(news|nation|business|sports|entertainment|technology)/", path):
+                # Prefer date-based article URLs or deep slugs under categories
+                if re.search(r"/20\d{2}/", path):
                     links.append(full)
+                elif re.search(r"^/category/(philippines|world|business|opinion|lifestyle|entertainment|sports)/", path):
+                    # take deep links that look like article slugs (hyphenated, > 20 chars)
+                    last = (path.rstrip('/').split('/')[-1] or '')
+                    if '-' in last and len(last) > 20:
+                        links.append(full)
+        # Dedup preserve order
         seen = set()
         unique = []
         for u in links:
@@ -503,6 +588,29 @@ class ManilaBulletinScraper:
                 seen.add(u)
                 unique.append(u)
         return unique
+
+    def _discover_links_from_sections_http(self, max_links_per_section: int = 10) -> List[str]:
+        """Fetch section pages with urllib and extract links without Playwright (more resilient, faster)."""
+        discovered: List[str] = []
+        for path in self.START_PATHS:
+            try:
+                url = urljoin(self.BASE_URL, path)
+                data = self._fetch_url(url)
+                if not data:
+                    continue
+                html = data.decode('utf-8', errors='ignore')
+                links = self._discover_links_from_html(html)[:max_links_per_section]
+                discovered.extend(links)
+            except Exception:
+                continue
+        # unique
+        seen = set()
+        uniq: List[str] = []
+        for u in discovered:
+            if u not in seen:
+                seen.add(u)
+                uniq.append(u)
+        return uniq
 
     def _extract_json_ld(self, soup: BeautifulSoup) -> Dict[str, Any]:
         data: Dict[str, Any] = {}
@@ -530,7 +638,8 @@ class ManilaBulletinScraper:
                 attempts += 1
                 context = browser.new_context(
                     user_agent=self.USER_AGENT,
-                    extra_http_headers={"Referer": self.BASE_URL}
+                    extra_http_headers={"Referer": self.BASE_URL},
+                    ignore_https_errors=True,
                 )
                 page = context.new_page()
                 # Block heavy/static resources and third-party requests to reduce timeouts
@@ -624,27 +733,42 @@ class ManilaBulletinScraper:
             errors.append(f'homepage:{e}')
             logger.error(f'Homepage discovery failed: {e}')
 
-        # 2) Then try section HTML discovery if still low
+        # 2) Prefer HTTP section discovery (fast, avoids Playwright timeouts)
         html_links_found = 0
+        if len(discovered) < max_articles * 4:
+            try:
+                http_links = self._discover_links_from_sections_http(max_links_per_section=8)
+                html_links_found += len(http_links)
+                discovered.extend(http_links)
+            except Exception as e:
+                errors.append(f'sections_http:{e}')
+
+        # 2b) If still low, fallback to Playwright-based section discovery (more expensive)
         if len(discovered) < max_articles * 2:
             try:
                 with launch_browser() as browser:
-                    for path in self.START_PATHS[:2]:  # only first 2 sections
+                    for path in self.START_PATHS[:3]:
                         try:
                             self._human_delay()
                             context = browser.new_context(
                                 user_agent=self.USER_AGENT,
-                                extra_http_headers={'Referer': self.BASE_URL}
+                                extra_http_headers={'Referer': self.BASE_URL},
+                                ignore_https_errors=True,
                             )
                             page = context.new_page()
-                            page.set_default_navigation_timeout(20_000)
-                            page.set_default_timeout(20_000)
+                            page.set_default_navigation_timeout(30_000)
+                            page.set_default_timeout(30_000)
                             url = urljoin(self.BASE_URL, path)
                             try:
-                                page.goto(url, wait_until='networkidle')
-                            except Exception:
                                 page.goto(url, wait_until='domcontentloaded')
-                            new_links = self._discover_links_from_html(page.content())[:5]  # cap per section
+                            except Exception:
+                                page.goto(url)
+                                page.wait_for_load_state('domcontentloaded', timeout=15_000)
+                            try:
+                                page.wait_for_selector('article, a[href*="/202"], a[href*="/news/"]', timeout=5_000)
+                            except Exception:
+                                pass
+                            new_links = self._discover_links_from_html(page.content())[:6]
                             html_links_found += len(new_links)
                             discovered.extend(new_links)
                             context.close()
@@ -655,9 +779,27 @@ class ManilaBulletinScraper:
                             except Exception:
                                 pass
             except Exception as e:
-                errors.append(f'sections:{e}')
+                errors.append(f'sections_pw:{e}')
 
-        # 3) Finally sitemaps if not cooled down
+        # 3) Try RSS feeds
+        rss_links = []
+        if len(discovered) < max_articles * 2:
+            try:
+                rss_links = self._discover_links_from_rss(max_links=max_articles * 5)
+                discovered.extend(rss_links)
+            except Exception as e:
+                errors.append(f'rss:{e}')
+
+        # 4) Google News fallback
+        gnews_links = []
+        if len(discovered) < max_articles * 2:
+            try:
+                gnews_links = self._discover_links_from_google_news(max_links=max_articles * 5)
+                discovered.extend(gnews_links)
+            except Exception as e:
+                errors.append(f'gnews:{e}')
+
+        # 5) Finally sitemaps if not cooled down
         sitemap_links = []
         if len(discovered) < max_articles * 2:
             try:
@@ -674,9 +816,24 @@ class ManilaBulletinScraper:
                 seen.add(u)
                 candidates.append(u)
 
-        logger.info(
-            f'MB discovery: homepage={len(homepage_links)}, html={html_links_found}, sitemaps={len(sitemap_links)}, candidates={len(candidates)}'
-        )
+        # Safety cap to avoid over-scraping
+        if len(candidates) > self.MAX_CANDIDATES:
+            candidates = candidates[:self.MAX_CANDIDATES]
+
+        # Compact JSON-style summary for easier searching/alerting
+        discovery_summary = {
+            "source": "ManilaBulletin",
+            "homepage": len(homepage_links),
+            "sections_html": html_links_found,
+            "rss": len(rss_links),
+            "gnews": len(gnews_links),
+            "sitemaps": len(sitemap_links),
+            "candidates": len(candidates),
+            "cap": self.MAX_CANDIDATES,
+        }
+        logger.info(f"MB discovery summary: {discovery_summary}")
+        if discovery_summary["candidates"] == 0:
+            logger.warning("MB discovery yielded 0 candidates; check selectors/structure or upstream availability")
 
         # Scrape articles
         try:
@@ -692,5 +849,12 @@ class ManilaBulletinScraper:
         
         duration = time.time() - start
         perf = {'duration_s': round(duration, 2), 'count': len(articles)}
-        meta = {'domain': 'mb.com.ph', 'candidates': len(discovered)}
+        meta = {
+            'domain': 'mb.com.ph',
+            'discovered_total': len(discovered),
+            'candidates_used': len(candidates),
+            'max_candidates': self.MAX_CANDIDATES,
+        }
+        if len(articles) == 0:
+            logger.warning("MB scrape produced 0 articles; verify selectors and content extraction")
         return ScrapingResult(articles=articles, errors=errors, performance=perf, metadata=meta) 

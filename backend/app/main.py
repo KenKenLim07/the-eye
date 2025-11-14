@@ -271,6 +271,318 @@ async def get_article(article_id: int):
     except Exception as e:
         return {"error": str(e)}
 
+@app.get("/ml/correlation")
+async def get_sentiment_correlation(
+    period: str = "7d",
+    sources: Optional[str] = None,
+    include_today: bool = True,
+    refresh: bool = False,
+    with_entities: bool = False,
+    ner_exclude_sources: Optional[str] = None,
+):
+    """Compute Pearson correlation between sources' daily average sentiment.
+
+    - period: 7d|30d
+    - sources: comma-separated list of source names; defaults to all in window
+    - include_today: include partial data for the current local PH day
+    - with_entities: reserved for future entity+sentiment fusion payload
+    """
+    import numpy as _np
+    from collections import defaultdict as _dd
+    from zoneinfo import ZoneInfo as _ZoneInfo
+
+    tz_ph = _ZoneInfo("Asia/Manila")
+    now_local = datetime.now(tz_ph)
+    if period == "7d":
+        window_days = 7
+    elif period == "30d":
+        window_days = 30
+    else:
+        window_days = 7
+
+    if include_today:
+        end_local = now_local.replace(hour=23, minute=59, second=59, microsecond=999999)
+        start_local = (now_local - timedelta(days=window_days - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    else:
+        end_local = (now_local - timedelta(days=1)).replace(hour=23, minute=59, second=59, microsecond=999999)
+        start_local = (end_local - timedelta(days=window_days - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
+
+    end_date = end_local.astimezone(ZoneInfo("UTC"))
+    start_date = start_local.astimezone(ZoneInfo("UTC"))
+    start_date_str = start_date.isoformat()
+    end_date_str = end_date.isoformat()
+
+    cache_key = f"corr:{period}:{sources or 'all'}:today:{'1' if include_today else '0'}:entities:{'1' if with_entities else '0'}:nerX:{(ner_exclude_sources or 'none')}::start:{start_date_str[:10]}:end:{end_date_str[:10]}"
+    if not refresh:
+        cached = get_cached(cache_key)
+        if cached:
+            return cached
+
+    sb = get_supabase()
+
+    all_articles = get_all_articles_paginated(sb, start_date_str, None, end_date=end_date_str)
+    if sources:
+        filter_set = {s.strip() for s in sources.split(',') if s.strip()}
+        articles = [a for a in all_articles if (a.get("source") or "").strip() in filter_set]
+    else:
+        articles = all_articles
+
+    if not articles:
+        result = {"ok": True, "sources": [], "matrix": [], "p_values": [], "dates": []}
+        set_cached(cache_key, result, 120)
+        return result
+
+    article_ids = [a["id"] for a in articles]
+    all_analysis = []
+    batch_size = 500
+    for i in range(0, len(article_ids), batch_size):
+        batch_ids = article_ids[i:i + batch_size]
+        res = sb.table("bias_analysis").select("article_id,sentiment_score,model_type").in_("article_id", batch_ids).eq("model_type", "sentiment").execute()
+        all_analysis.extend(res.data or [])
+
+    def to_ph_date_str(ts: str) -> str:
+        try:
+            dt = datetime.fromisoformat((ts or "").replace('Z', '+00:00'))
+            return dt.astimezone(tz_ph).date().isoformat()
+        except Exception:
+            return (ts or "")[:10]
+
+    id_to_meta = {}
+    for a in articles:
+        id_to_meta[a["id"]] = (
+            (a.get("source") or "unknown"),
+            to_ph_date_str(a.get("published_at", "")),
+        )
+
+    per_source_date_scores = _dd(lambda: _dd(list))
+    for row in all_analysis:
+        aid = row.get("article_id")
+        score = row.get("sentiment_score")
+        if aid not in id_to_meta or score is None:
+            continue
+        src, d = id_to_meta[aid]
+        if not d:
+            continue
+        per_source_date_scores[src][d].append(float(score))
+
+    per_source_series = {}
+    for src, by_date in per_source_date_scores.items():
+        series = {}
+        for d, scores in by_date.items():
+            if scores:
+                series[d] = sum(scores) / len(scores)
+        if series:
+            per_source_series[src] = series
+
+    src_names = sorted(per_source_series.keys())
+    n = len(src_names)
+    if n == 0:
+        result = {"ok": True, "sources": [], "matrix": [], "p_values": [], "dates": []}
+        set_cached(cache_key, result, 120)
+        return result
+
+    matrix = [[None for _ in range(n)] for _ in range(n)]
+    pvals = [[None for _ in range(n)] for _ in range(n)]
+
+    _scipy_stats = None
+    try:
+        from scipy import stats as _stats  # type: ignore
+        _scipy_stats = _stats
+    except Exception:
+        _scipy_stats = None
+
+    for i, sa in enumerate(src_names):
+        matrix[i][i] = 1.0
+        pvals[i][i] = 0.0
+        for j in range(i + 1, n):
+            sb_name = src_names[j]
+            dates_intersection = sorted(set(per_source_series[sa].keys()) & set(per_source_series[sb_name].keys()))
+            if len(dates_intersection) < 3:
+                r = None
+                p = None
+            else:
+                a_vals = [_np.float64(per_source_series[sa][d]) for d in dates_intersection]
+                b_vals = [_np.float64(per_source_series[sb_name][d]) for d in dates_intersection]
+                try:
+                    r = float(_np.corrcoef(a_vals, b_vals)[0, 1])
+                    if _scipy_stats is not None:
+                        try:
+                            r2, p2 = _scipy_stats.pearsonr(a_vals, b_vals)
+                            r = float(r2)
+                            p = float(p2)
+                        except Exception:
+                            p = None
+                    else:
+                        p = None
+                except Exception:
+                    r = None
+                    p = None
+            matrix[i][j] = r
+            matrix[j][i] = r
+            pvals[i][j] = p
+            pvals[j][i] = p
+
+    result = {
+        "ok": True,
+        "period": period,
+        "include_today": include_today,
+        "sources": src_names,
+        "matrix": matrix,
+        "p_values": pvals,
+    }
+    # Optional: basic entity + sentiment aggregation (spaCy-based), behind flag
+    if with_entities:
+        try:
+            from app.nlp.spacy_nlp import extract_entities as _extract_entities
+            entity_stats = {}
+            # Build quick lookup for excluded sources
+            exclude_set = {s.strip() for s in (ner_exclude_sources or "").split(',') if s.strip()}
+            for row in all_analysis:
+                aid = row.get("article_id")
+                meta = id_to_meta.get(aid)
+                if not meta:
+                    continue
+                score = row.get("sentiment_score")
+                if score is None:
+                    continue
+                # Fetch article text for NER
+                try:
+                    a = next((x for x in articles if x.get("id") == aid), None)
+                    text = f"{a.get('title','')} {a.get('content','')}" if a else ""
+                    # Skip entity aggregation for excluded sources
+                    if a and exclude_set and (a.get("source") or "").strip() in exclude_set:
+                        continue
+                    ents = _extract_entities(text)
+                except Exception:
+                    ents = []
+                for ent in ents:
+                    label = ent.get("label", "")
+                    # Filter to meaningful labels
+                    if label not in {"PERSON", "ORG", "GPE", "NORP"}:
+                        continue
+                    key = (ent.get("text",""), label)
+                    if not key[0]:
+                        continue
+                    stats = entity_stats.get(key) or {"mentions": 0, "sum_sent": 0.0}
+                    stats["mentions"] += 1
+                    stats["sum_sent"] += float(score)
+                    entity_stats[key] = stats
+            # Prepare top entities by mentions
+            top = sorted(
+                [
+                    {
+                        "text": k[0],
+                        "type": k[1],
+                        "mentions": v["mentions"],
+                        "avg_sentiment": (v["sum_sent"] / v["mentions"]) if v["mentions"] else 0.0,
+                    }
+                    for k, v in entity_stats.items()
+                ],
+                key=lambda x: (-x["mentions"], -abs(x["avg_sentiment"]))
+            )[:20]
+            result["entities"] = top
+        except Exception:
+            result["entities"] = []
+
+    set_cached(cache_key, result, 120 if include_today else 600)
+    return result
+
+@app.get("/ml/ner/sample")
+async def ner_sample(
+    days_back: int = 7,
+    limit: int = 20,
+    source: Optional[str] = None,
+    ner_exclude_sources: Optional[str] = None,
+):
+    """Run spaCy NER on a recent sample of articles to verify entity extraction.
+    Returns top entities and per-article examples with extracted entities.
+    """
+    try:
+        sb = get_supabase()
+        from datetime import datetime, timedelta
+        end_dt = datetime.now()
+        start_dt = end_dt - timedelta(days=days_back)
+        q = (
+            sb.table("articles")
+            .select("id,title,content,source,published_at")
+            .gte("published_at", start_dt.isoformat())
+            .lte("published_at", end_dt.isoformat())
+            .order("published_at", desc=True)
+            .limit(limit)
+        )
+        if source:
+            q = q.eq("source", source)
+        res = q.execute()
+        articles = res.data or []
+
+        if not articles:
+            return {"ok": True, "articles": [], "top_entities": [], "note": "No recent articles found"}
+
+        from app.nlp.spacy_nlp import extract_entities as _extract_entities
+        from collections import Counter
+        entity_counter = Counter()
+        # Only keep meaningful labels; exclude generic/structural labels
+        allowed_labels = {"PERSON", "ORG", "GPE", "NORP"}
+        # Stoplist for frequent Filipino/Cebuano particles and generic tokens
+        stop_terms = {
+            # Filipino
+            "sa", "ang", "ng", "mga", "kay", "si", "ni", "nasa", "mula", "para", "dahil", "kung",
+            # Cebuano/Visayan
+            "gikan", "uban", "alang", "tungod", "ug", "akong", "ako", "samtang",
+            # English ordinals/cardinals and years
+            "first", "second", "third", "one", "two", "three", "four", "2024", "2025"
+        }
+        # Excluded sources set
+        exclude_set = {s.strip() for s in (ner_exclude_sources or "").split(',') if s.strip()}
+        examples = []
+
+        for a in articles:
+            # Skip excluded sources entirely
+            if exclude_set and (a.get("source") or "").strip() in exclude_set:
+                continue
+            text = f"{a.get('title','')}\n{a.get('content','')}"
+            ents = _extract_entities(text)
+            # Filter entities for the example output too
+            filtered_ents = [e for e in ents if e.get("label") in allowed_labels and (e.get("text") or "").strip().lower() not in stop_terms]
+            examples.append({
+                "id": a.get("id"),
+                "source": a.get("source"),
+                "published_at": a.get("published_at"),
+                "entities": filtered_ents[:25],  # cap per-article listing
+            })
+            for e in filtered_ents:
+                raw_text = (e.get("text", "").strip())
+                label = e.get("label", "")
+                if not raw_text:
+                    continue
+                # Normalize for counting (case-insensitive)
+                key = (raw_text.lower(), label)
+                if key[0] in stop_terms:
+                    continue
+                entity_counter[key] += 1
+
+        # Present entities with simple casing normalization for display
+        def _display_text(t: str) -> str:
+            if not t:
+                return t
+            # Title-case only if it's all lower or all upper; else leave as is
+            if t.islower() or t.isupper():
+                return t.title()
+            return t
+
+        top_entities = []
+        for (t_norm, k), c in entity_counter.most_common(50):
+            top_entities.append({"text": _display_text(t_norm), "type": k, "mentions": c})
+
+        return {
+            "ok": True,
+            "sampled": len(articles),
+            "top_entities": top_entities,
+            "articles": examples,
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
 @app.get("/articles/{article_id}/analysis")
 async def get_article_analysis(article_id: int):
     sb = get_supabase()
