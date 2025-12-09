@@ -29,7 +29,7 @@ def get_nlp():
                 finally:
                     _attempted_download = True
             else:
-                _nlp = spacy.blank("en")
+            _nlp = spacy.blank("en")
     else:
         # If we previously loaded a blank pipeline, but the small model is now installed, upgrade live
         try:
@@ -116,7 +116,7 @@ def get_nlp():
             _nlp.add_pipe(ruler, name="entity_ruler", before="ner" if "ner" in _nlp.pipe_names else None)
     except Exception:
         # Non-fatal if patterns cannot be added
-        pass
+            pass
     return _nlp
 
 

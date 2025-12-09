@@ -116,9 +116,11 @@ async function fetchTrends(source?: string, period: string = "7d", opts?: { refr
   }
 }
 
-async function fetchCorrelation(period: string = "7d", opts?: { refresh?: boolean, ttlMs?: number, sources?: string[] }): Promise<CorrelationData> {
+async function fetchCorrelation(period: string = "7d", opts?: { refresh?: boolean, ttlMs?: number, sources?: string[], with_entities?: boolean }): Promise<CorrelationData> {
   const base = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
-  const params = new URLSearchParams({ period, include_today: 'true', with_entities: 'true' });
+  const params = new URLSearchParams({ period, include_today: 'true' });
+  // PERFORMANCE FIX: Only fetch entities if explicitly requested (NER is expensive!)
+  if (opts?.with_entities) params.set('with_entities', 'true');
   if (opts?.sources && opts.sources.length > 0) params.set('sources', opts.sources.join(','));
   if (opts?.refresh) params.set('refresh', 'true');
   const key = `corr:${period}:${(opts?.sources||['all']).join(',')}:today:1`;

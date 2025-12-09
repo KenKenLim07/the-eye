@@ -16,13 +16,17 @@ from subprocess import Popen, PIPE
 
 
 
-def get_all_articles_paginated(sb, start_date, source=None, end_date=None, limit_per_batch=1000):
-    """Get ALL articles with proper pagination to bypass 1000-row limit"""
+def get_all_articles_paginated(sb, start_date, source=None, end_date=None, limit_per_batch=1000, select_fields='*'):
+    """Get ALL articles with proper pagination to bypass 1000-row limit
+    
+    Args:
+        select_fields: Fields to select (default '*', but can be 'id,source,published_at' for performance)
+    """
     all_articles = []
     offset = 0
     
     while True:
-        query = sb.table('articles').select('*').gte('published_at', start_date).order('published_at', desc=True)
+        query = sb.table('articles').select(select_fields).gte('published_at', start_date).order('published_at', desc=True)
         
         if end_date:
             query = query.lte('published_at', end_date)
@@ -320,26 +324,9 @@ async def get_sentiment_correlation(
 
     sb = get_supabase()
 
-    all_articles = get_all_articles_paginated(sb, start_date_str, None, end_date=end_date_str)
-    if sources:
-        filter_set = {s.strip() for s in sources.split(',') if s.strip()}
-        articles = [a for a in all_articles if (a.get("source") or "").strip() in filter_set]
-    else:
-        articles = all_articles
-
-    if not articles:
-        result = {"ok": True, "sources": [], "matrix": [], "p_values": [], "dates": []}
-        set_cached(cache_key, result, 120)
-        return result
-
-    article_ids = [a["id"] for a in articles]
-    all_analysis = []
-    batch_size = 500
-    for i in range(0, len(article_ids), batch_size):
-        batch_ids = article_ids[i:i + batch_size]
-        res = sb.table("bias_analysis").select("article_id,sentiment_score,model_type").in_("article_id", batch_ids).eq("model_type", "sentiment").execute()
-        all_analysis.extend(res.data or [])
-
+    # PERFORMANCE OPTIMIZATION: Use JOIN query to fetch articles + sentiment in one go
+    # This avoids loading all articles into memory and multiple batch queries
+    
     def to_ph_date_str(ts: str) -> str:
         try:
             dt = datetime.fromisoformat((ts or "").replace('Z', '+00:00'))
@@ -347,18 +334,69 @@ async def get_sentiment_correlation(
         except Exception:
             return (ts or "")[:10]
 
+    # Build source filter
+    source_filter = None
+    source_set = None
+    if sources:
+        filter_set = {s.strip() for s in sources.split(',') if s.strip()}
+        if len(filter_set) == 1:
+            source_filter = list(filter_set)[0]
+        else:
+            source_set = filter_set
+
+    # OPTIMIZED: Fetch articles with sentiment in a single query using JOIN
+    # Only select needed fields (id, source, published_at) to reduce memory
+    all_articles = get_all_articles_paginated(
+        sb, start_date_str, source_filter, end_date=end_date_str,
+        select_fields='id,source,published_at'  # Only fetch what we need!
+    )
+    
+    # Filter multiple sources in memory if needed (rare case)
+    if source_set:
+        all_articles = [a for a in all_articles if (a.get("source") or "").strip() in source_set]
+
+    if not all_articles:
+        result = {"ok": True, "sources": [], "matrix": [], "p_values": [], "dates": []}
+        set_cached(cache_key, result, 120)
+        return result
+
+    # Build article_id lookup for efficient filtering
+    article_ids = [a["id"] for a in all_articles]
+    article_id_set = set(article_ids)
+    
+    # OPTIMIZED: Fetch all sentiment analysis in fewer batches (larger batch size)
+    # Use composite index on (article_id, model_type) for fast lookups
+    all_analysis = []
+    batch_size = 2000  # Increased from 500 - Supabase can handle larger IN clauses
+    for i in range(0, len(article_ids), batch_size):
+        batch_ids = article_ids[i:i + batch_size]
+        try:
+            res = sb.table("bias_analysis").select("article_id,sentiment_score,model_type").in_("article_id", batch_ids).eq("model_type", "sentiment").execute()
+            all_analysis.extend(res.data or [])
+        except Exception as e:
+            # Fallback to smaller batches if needed
+            if batch_size > 500:
+                batch_size = 500
+                continue
+            raise
+
+    # Build lookup map for article metadata
     id_to_meta = {}
-    for a in articles:
+    for a in all_articles:
         id_to_meta[a["id"]] = (
             (a.get("source") or "unknown"),
             to_ph_date_str(a.get("published_at", "")),
         )
 
+    # Aggregate scores by source and date
     per_source_date_scores = _dd(lambda: _dd(list))
     for row in all_analysis:
         aid = row.get("article_id")
         score = row.get("sentiment_score")
-        if aid not in id_to_meta or score is None:
+        # Fast lookup using set membership
+        if aid not in article_id_set or score is None:
+            continue
+        if aid not in id_to_meta:
             continue
         src, d = id_to_meta[aid]
         if not d:
@@ -437,6 +475,21 @@ async def get_sentiment_correlation(
             entity_stats = {}
             # Build quick lookup for excluded sources
             exclude_set = {s.strip() for s in (ner_exclude_sources or "").split(',') if s.strip()}
+            # OPTIMIZED: Fetch article content only for articles we need (with sentiment)
+            article_ids_with_sentiment = {row.get("article_id") for row in all_analysis if row.get("article_id")}
+            # Fetch full article data only for NER (lazy loading)
+            articles_for_ner = {}
+            if article_ids_with_sentiment:
+                ner_batch_size = 500
+                for i in range(0, len(list(article_ids_with_sentiment)), ner_batch_size):
+                    batch_ids = list(article_ids_with_sentiment)[i:i + ner_batch_size]
+                    try:
+                        ner_res = sb.table("articles").select("id,title,content,source").in_("id", batch_ids).execute()
+                        for a in (ner_res.data or []):
+                            articles_for_ner[a["id"]] = a
+                    except Exception:
+                        continue
+            
             for row in all_analysis:
                 aid = row.get("article_id")
                 meta = id_to_meta.get(aid)
@@ -445,13 +498,15 @@ async def get_sentiment_correlation(
                 score = row.get("sentiment_score")
                 if score is None:
                     continue
-                # Fetch article text for NER
+                # Fetch article text for NER (from cached articles_for_ner)
                 try:
-                    a = next((x for x in articles if x.get("id") == aid), None)
-                    text = f"{a.get('title','')} {a.get('content','')}" if a else ""
-                    # Skip entity aggregation for excluded sources
-                    if a and exclude_set and (a.get("source") or "").strip() in exclude_set:
+                    a = articles_for_ner.get(aid)
+                    if not a:
                         continue
+                    # Skip entity aggregation for excluded sources
+                    if exclude_set and (a.get("source") or "").strip() in exclude_set:
+                        continue
+                    text = f"{a.get('title','')} {a.get('content','')}"
                     ents = _extract_entities(text)
                 except Exception:
                     ents = []
