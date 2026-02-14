@@ -10,36 +10,40 @@ services:
 
   api:
     build:
-      context: /Users/mac/ph-eye
+      context: .
       dockerfile: backend/Dockerfile
     container_name: ph-eye-api
     restart: unless-stopped
     working_dir: /app/backend
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-    env_file: .env
+    env_file: backend/.env
     environment:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/1
       - USE_SPACY_FUNDS=true
       - USE_SPACY_ANALYTICS=false
     volumes:
-      - /Users/mac/ph-eye:/app
+      - ./backend:/app/backend
+      - ./:/app
     ports:
       - "8000:8000"
     depends_on:
       - redis
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
     sysctls:
       - "net.ipv6.conf.all.disable_ipv6=1"
 
   worker:
     build:
-      context: /Users/mac/ph-eye
+      context: .
       dockerfile: backend/Dockerfile
     container_name: ph-eye-worker
     restart: unless-stopped
     working_dir: /app/backend
     command: celery -A app.workers.celery_app:celery worker -l info -n worker1@%h -c 4 -Ofair
-    env_file: .env
+    env_file: backend/.env
     environment:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/1
@@ -49,31 +53,39 @@ services:
       - USE_HUMAN_DELAY=true
       - USE_URL_FILTER=true
     volumes:
-      - /Users/mac/ph-eye:/app
+      - ./backend:/app/backend
+      - ./:/app
     depends_on:
       - redis
     shm_size: "1gb"
     ipc: host
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
     sysctls:
       - "net.ipv6.conf.all.disable_ipv6=1"
 
   beat:
     build:
-      context: /Users/mac/ph-eye
+      context: .
       dockerfile: backend/Dockerfile
     container_name: ph-eye-beat
     restart: unless-stopped
     working_dir: /app/backend
     command: ./start_beat.sh
-    env_file: .env
+    env_file: backend/.env
     environment:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/1
     volumes:
-      - /Users/mac/ph-eye:/app
+      - ./backend:/app/backend
+      - ./:/app
     depends_on:
       - redis
     shm_size: "1gb"
     ipc: host
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
     sysctls:
       - "net.ipv6.conf.all.disable_ipv6=1"
