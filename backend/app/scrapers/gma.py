@@ -50,7 +50,11 @@ class GMAScraper:
     BASE_URL = "https://www.gmanetwork.com"
     START_PATHS = [
         "/news/",
-        "/news/latest/",
+        "/news/topstories/",
+        "/news/money/",
+        "/news/sports/",
+        "/news/lifestyle/",
+        "/news/scitech/",
     ]
 
     USER_AGENT = (
@@ -127,7 +131,7 @@ class GMAScraper:
                 return True
             # Legacy checks (fallback)
             segments = [seg for seg in path.split('/') if seg]
-            blacklist = {"photo", "photos", "video", "videos", "balitambayan", "cbb", "lotto"}
+            blacklist = {"photo", "photos", "video", "videos", "balitambayan", "cbb", "lotto", "opinion", "editorial"}
             if any(seg in blacklist for seg in segments):
                 return False
             return len(segments) >= 3
@@ -491,12 +495,30 @@ class GMAScraper:
                 page.set_default_navigation_timeout(30000)
 
                 resp = None
-                for path in self.START_PATHS:
+                urls: List[str] = []
+                seen_urls: set[str] = set()
+                try:
+                    max_paths = int(os.getenv("GMA_MAX_START_PATHS", str(len(self.START_PATHS))))
+                except Exception:
+                    max_paths = len(self.START_PATHS)
+                paths_scanned = 0
+                for path in self.START_PATHS[:max_paths]:
                     try:
                         ok = self._goto_with_retry(page, urljoin(self.BASE_URL, path), wait_until='domcontentloaded')
                         if ok:
                             resp = type('obj', (), {'status': 200})()
-                            break
+                            paths_scanned += 1
+                            soup = BeautifulSoup(page.content(), 'html.parser')
+                            seeded_urls = self._extract_article_links(soup)
+                            new_count = 0
+                            for u in seeded_urls:
+                                if u not in seen_urls:
+                                    seen_urls.add(u)
+                                    urls.append(u)
+                                    new_count += 1
+                            logger.info(f"GMA v1: seeded {new_count} new URLs from {path}")
+                            if len(urls) >= max_articles * 4:
+                                break
                         logger.warning(f"GMA v1: error loading {path}")
                     except Exception as e:
                         logger.warning(f"GMA v1: error loading {path}: {e}")
@@ -505,8 +527,6 @@ class GMAScraper:
                 if not resp:
                     raise RuntimeError("GMA v1: landing failed")
 
-                soup = BeautifulSoup(page.content(), 'html.parser')
-                urls = self._extract_article_links(soup)
                 logger.info(f"GMA v1: found {len(urls)} URLs")
 
                 for i, url in enumerate(urls[:max_articles]):
@@ -534,7 +554,12 @@ class GMAScraper:
             "source": "GMA News Online",
             "scraped_at": time.strftime("%Y-%m-%d %H:%M:%S"),
             "total_articles_found": len(articles),
-            "total_errors": len(errors)
+            "total_errors": len(errors),
+            "discovery": {
+                "paths_configured": min(max_paths, len(self.START_PATHS)) if "max_paths" in locals() else len(self.START_PATHS),
+                "paths_scanned": paths_scanned if "paths_scanned" in locals() else 0,
+                "urls_discovered": len(urls) if "urls" in locals() else 0,
+            }
         }
         logger.info(f"GMA v1: completed {len(articles)} articles, {len(errors)} errors in {total:.2f}s")
         return ScrapingResult(articles=articles, errors=errors, performance=performance, metadata=metadata)

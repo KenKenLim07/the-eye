@@ -55,6 +55,8 @@ class PhilStarScraper:
         "/business",
         "/sports",
         "/entertainment",
+        "/world",
+        "/lifestyle",
     ]
 
     USER_AGENT = (
@@ -122,6 +124,8 @@ class PhilStarScraper:
         
         # Exclude stock market/financial data pages
         path_lower = (parsed.path or "").lower()
+        if "/opinion" in path_lower or "/editorial" in path_lower or "/column" in path_lower:
+            return False
         stock_market_patterns = [
             "/business/stock-market",
             "/business/market-close",
@@ -211,6 +215,72 @@ class PhilStarScraper:
         ))
         
         return context
+
+    def _goto_with_retry(self, page, url: str, timeout_ms: int = 30000) -> bool:
+        """Navigate with one retry to reduce transient timeout failures."""
+        for attempt in range(2):
+            try:
+                page.goto(url, wait_until='domcontentloaded', timeout=timeout_ms)
+                return True
+            except Exception as e:
+                if attempt == 0:
+                    logger.warning(f"PhilStar: attempt {attempt + 1} failed for {url}: {e}, retrying...")
+                    time.sleep(2)
+                else:
+                    logger.warning(f"PhilStar: navigation failed for {url}: {e}")
+        return False
+
+    def _discover_candidate_urls(self, browser: Browser, max_articles: int) -> Tuple[List[str], Dict[str, Any]]:
+        """Discover links from homepage and important sections."""
+        candidates: List[str] = []
+        seen: set[str] = set()
+        context = self._new_context(browser)
+        page = context.new_page()
+        page.set_extra_http_headers({'User-Agent': self.USER_AGENT})
+        page.set_default_timeout(30000)
+        page.set_default_navigation_timeout(30000)
+
+        section_urls = [self.BASE_URL] + [urljoin(self.BASE_URL, p) for p in self.START_PATHS]
+        # Limit how deep to crawl via env while keeping broad section coverage by default.
+        try:
+            max_sections = int(os.getenv("PHILSTAR_MAX_SECTIONS", str(len(section_urls))))
+        except Exception:
+            max_sections = len(section_urls)
+
+        sections_scanned = 0
+        for section_url in section_urls[:max_sections]:
+            ok = self._goto_with_retry(page, section_url, timeout_ms=30000)
+            if not ok:
+                continue
+            sections_scanned += 1
+            soup = BeautifulSoup(page.content(), 'html.parser')
+            for sel in self.SELECTORS["article_links"]:
+                try:
+                    for a in soup.select(sel):
+                        href = a.get('href')
+                        if not href:
+                            continue
+                        full_url = urljoin(self.BASE_URL, href)
+                        if full_url in seen:
+                            continue
+                        if self._validate_url(full_url):
+                            seen.add(full_url)
+                            candidates.append(full_url)
+                except Exception:
+                    continue
+
+            # Early stop once we have enough buffer URLs.
+            if len(candidates) >= max_articles * 4:
+                break
+
+            self._human_delay()
+
+        context.close()
+        return candidates, {
+            "sections_planned": min(max_sections, len(section_urls)),
+            "sections_scanned": sections_scanned,
+            "candidates_found": len(candidates),
+        }
 
     def _extract_philstar_category(self, url: str, soup: BeautifulSoup) -> Tuple[str, Optional[str]]:
         """Extract category specifically for PhilStar's structure."""
@@ -450,63 +520,33 @@ class PhilStarScraper:
         
         try:
             with launch_browser() as browser:
-                # Scrape homepage for article links
-                context = self._new_context(browser)
-                page = context.new_page()
-                page.set_extra_http_headers({'User-Agent': self.USER_AGENT})
-                
-                try:
-                    response = page.goto(self.BASE_URL, wait_until='domcontentloaded')
-                    if not response or response.status >= 400:
-                        raise Exception(f"Homepage returned {response.status if response else 'unknown'}")
-                        
-                    # Extract article links
-                    soup = BeautifulSoup(page.content(), 'html.parser')
-                    article_urls = []
-                    
-                    for sel in self.SELECTORS["article_links"]:
-                        try:
-                            for a in soup.select(sel):
-                                href = a.get('href')
-                                if href and self._validate_url(href):
-                                    full_url = urljoin(self.BASE_URL, href)
-                                    article_urls.append(full_url)
-                        except Exception:
-                            continue
-                    
-                    # Remove duplicates
-                    article_urls = list(dict.fromkeys(article_urls))
-                    
-                    logger.info(f"Found {len(article_urls)} article URLs")
-                    
-                    # Scrape each article
-                    for i, url in enumerate(article_urls[:max_articles]):
-                        try:
-                            logger.info(f"Scraping article {i+1}/{len(article_urls[:max_articles])}: {url}")
-                            
-                            article = self._scrape_article(url, browser)
-                            if article:
-                                articles.append(article)
-                                logger.info(f"Successfully scraped: {article.title}")
-                            else:
-                                errors.append(f"Failed to extract article from {url}")
-                            
-                            # Stealthy rate limiting between article requests
-                            if i < len(article_urls[:max_articles]) - 1:
-                                self._human_delay()
-                                
-                        except Exception as e:
-                            error_msg = f"Error scraping {url}: {str(e)}"
-                            errors.append(error_msg)
-                            logger.error(error_msg)
-                            continue
-                            
-                    context.close()
-                    
-                except Exception as e:
-                    error_msg = f"Failed to scrape homepage: {str(e)}"
-                    errors.append(error_msg)
-                    logger.error(error_msg)
+                article_urls, discover_meta = self._discover_candidate_urls(browser, max_articles=max_articles)
+                logger.info(f"Found {len(article_urls)} candidate article URLs across homepage+sections")
+
+                if not article_urls:
+                    raise Exception("No candidate URLs discovered from homepage/sections")
+
+                # Scrape each article
+                for i, url in enumerate(article_urls[:max_articles]):
+                    try:
+                        logger.info(f"Scraping article {i+1}/{len(article_urls[:max_articles])}: {url}")
+
+                        article = self._scrape_article(url, browser)
+                        if article:
+                            articles.append(article)
+                            logger.info(f"Successfully scraped: {article.title}")
+                        else:
+                            errors.append(f"Failed to extract article from {url}")
+
+                        # Stealthy rate limiting between article requests
+                        if i < len(article_urls[:max_articles]) - 1:
+                            self._human_delay()
+
+                    except Exception as e:
+                        error_msg = f"Error scraping {url}: {str(e)}"
+                        errors.append(error_msg)
+                        logger.error(error_msg)
+                        continue
                     
         except Exception as e:
             error_msg = f"Critical scraping error: {str(e)}"
@@ -525,7 +565,8 @@ class PhilStarScraper:
             "source": "Philippine Star",
             "scraped_at": time.strftime("%Y-%m-%d %H:%M:%S"),
             "total_articles_found": len(articles),
-            "total_errors": len(errors)
+            "total_errors": len(errors),
+            "discovery": discover_meta if "discover_meta" in locals() else {},
         }
         
         logger.info(f"Scraping completed: {len(articles)} articles, {len(errors)} errors in {total_time:.2f}s")

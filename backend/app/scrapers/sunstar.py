@@ -458,6 +458,8 @@ class SunstarScraper:
             '/contact/',
             '/about/',
             '/advertisement/',
+            '/opinion/',
+            '/editorial/',
             '.jpg', '.png', '.gif', '.pdf'
         ]
         
@@ -479,11 +481,17 @@ class SunstarScraper:
         all_articles.extend(rss_articles)
         
         # If RSS doesn't give enough articles, supplement with section scraping
+        sections_used = 0
         if len(all_articles) < max_articles:
             logger.info("📰 Supplementing with section scraping...")
-            for section in self.SECTIONS[:2]:  # Limit to first 2 sections for stealth
+            try:
+                max_sections = int(os.getenv("SUNSTAR_MAX_SECTIONS", "4"))
+            except Exception:
+                max_sections = 4
+            for section in self.SECTIONS[:max_sections]:
                 section_articles = self.scrape_section(section)
                 all_articles.extend(section_articles)
+                sections_used += 1
                 
                 if len(all_articles) >= max_articles:
                     break
@@ -519,7 +527,7 @@ class SunstarScraper:
             "total_articles_found": len(all_articles),
             "unique_articles": len(final_articles),
             "rss_articles": len(rss_articles),
-            "sections_scraped": min(2, len(self.SECTIONS))
+            "sections_scraped": sections_used
         }
 
         logger.info(f"✅ Sunstar scraping completed: {len(final_articles)} unique articles")

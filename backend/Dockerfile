@@ -13,6 +13,12 @@ RUN pip install --no-cache-dir -r /app/backend/requirements.txt && \
     python -c "print('✅ Advanced sentiment analytics ready')" && \
     python -c "import spacy, pkgutil; print('✅ spaCy installed:', bool(pkgutil.find_loader('spacy')))"
 
+# Fix line endings for shell scripts (Windows compatibility)
+RUN if [ -f /app/backend/start_beat.sh ]; then \
+    sed -i 's/\r$//' /app/backend/start_beat.sh && \
+    chmod +x /app/backend/start_beat.sh; \
+    fi
+
 ENV PYTHONUNBUFFERED=1
 
 # Default command will be overridden by docker-compose for worker/beat

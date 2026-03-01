@@ -65,10 +65,6 @@ class RapplerScraper:
         "/world/",
         "/entertainment/",
         "/philippines/",
-        "/politics/",
-        "/economy/",
-        "/lifestyle/",
-        "/opinion/",
         "/multimedia/",
         "/investigative/",
         "/data/",
@@ -258,6 +254,8 @@ class RapplerScraper:
         for pattern in blacklist_patterns:
             if re.search(pattern, url, re.IGNORECASE):
                 return False
+        if re.search(r"/opinion(/|$)|/editorial(/|$)", parsed.path or "", re.IGNORECASE):
+            return False
 
         # Block exact-known section landing endpoints
         try:
@@ -868,8 +866,16 @@ class RapplerScraper:
         links = []
         try:
             logger.info("Discovering from section pages")
+            try:
+                max_sections = int(os.getenv("RAPPLER_MAX_SECTION_PAGES", "6"))
+            except Exception:
+                max_sections = 6
+            try:
+                section_timeout = int(os.getenv("RAPPLER_SECTION_TIMEOUT_MS", "15000"))
+            except Exception:
+                section_timeout = 15000
             with launch_browser() as browser:
-                for section in self.SECTIONS[:10]:  # Expand to first 10 sections
+                for section in self.SECTIONS[:max_sections]:
                     try:
                         if USE_ADV_HEADERS and get_advanced_stealth_headers is not None:
                             headers = get_advanced_stealth_headers()
@@ -894,11 +900,11 @@ class RapplerScraper:
                         ))
                         
                         url = urljoin(self.BASE_URL, section)
-                        page.goto(url, wait_until="domcontentloaded", timeout=20000)
+                        page.goto(url, wait_until="domcontentloaded", timeout=section_timeout)
                         
                         # Wait for content to load
                         try:
-                            page.wait_for_selector(".archive-article, .post-card", timeout=15000)
+                            page.wait_for_selector(".archive-article, .post-card", timeout=section_timeout)
                         except Exception:
                             pass
                         

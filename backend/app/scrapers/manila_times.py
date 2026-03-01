@@ -2,16 +2,16 @@ import time
 import logging
 import random
 import json
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Set
 from urllib.parse import urljoin, urlparse, parse_qs
 from dataclasses import dataclass
 from bs4 import BeautifulSoup
 from app.pipeline.normalize import build_article, NormalizedArticle
 import httpx
-import brotli
 from app.scrapers.utils import resolve_category_pair
 from datetime import datetime, timezone
 import re
+from app.core.supabase import get_supabase
 # Feature flags (env-driven) for gradual rollout
 import os
 
@@ -47,18 +47,6 @@ class ScrapingResult:
     metadata: Dict[str, Any]
 
 class ManilaTimesScraper:
-    # Add enhanced retry mixin
-    def __init__(self):
-        super().__init__()
-        # Import enhanced retry functionality
-        from .manila_times_enhanced import EnhancedRetryMixin
-        self.retry_mixin = EnhancedRetryMixin()
-        self.name = "manila_times"
-        logger.info(f"{self.name}: Initialized with enhanced retry logic")
-
-    def _fetch_with_enhanced_retry(self, url: str, max_retries: int = 5) -> Optional[str]:
-        """Use enhanced retry logic."""
-        return self.retry_mixin.fetch_with_enhanced_retry(url, max_retries)
     """BLACKHAT Manila Times Scraper - Ultra-Conservative Stealth Approach with 502 handling"""
 
     BASE_URL = "https://www.manilatimes.net"
@@ -75,14 +63,15 @@ class ManilaTimesScraper:
     # Discovery entry points for latest news
     DISCOVERY_PATHS = [
         "/news/",
-        "/news/latest/",
-        "/politics/",
         "/business/",
         "/sports/",
-        "/opinion/",
         "/world/",
         "/lifestyle/",
         "/entertainment/"
+    ]
+
+    FEED_PATHS = [
+        "/news/feed/",
     ]
     
     # Rotating User-Agents for stealth
@@ -95,8 +84,9 @@ class ManilaTimesScraper:
     ]
     
     # Ultra-conservative delays
-    MIN_DELAY = 30.0
-    MAX_DELAY = 60.0
+    MIN_DELAY = float(os.getenv("MANILA_TIMES_MIN_DELAY", "8.0"))
+    MAX_DELAY = float(os.getenv("MANILA_TIMES_MAX_DELAY", "20.0"))
+    CANDIDATE_WINDOW = int(os.getenv("MANILA_TIMES_CANDIDATE_WINDOW", "20"))
 
     def __init__(self):
         self.name = "manila_times"
@@ -189,15 +179,7 @@ class ManilaTimesScraper:
                     
                     response.raise_for_status()
                     
-                    # Handle Brotli decompression manually
-                    if response.headers.get("content-encoding") == "br":
-                        try:
-                            decompressed_content = brotli.decompress(response.content)
-                            return decompressed_content.decode("utf-8")
-                        except Exception as e:
-                            logger.warning(f"Brotli decompression failed for {url}: {e}")
-                            return response.text
-                    
+                    # Let httpx handle response decoding; manual brotli inflate is brittle.
                     return response.text
                     
             except httpx.HTTPStatusError as e:
@@ -239,9 +221,9 @@ class ManilaTimesScraper:
         try:
             parsed = urlparse(url)
             path = parsed.path or ""
-            if not path.startswith("/2025/") and "/news/" not in path:
+            if not re.search(r"/20\d{2}/", path) and not any(seg in path for seg in ["/news/", "/business/", "/sports/", "/world/", "/lifestyle/", "/entertainment/", "/politics/"]):
                 return False
-            bad_segments = {"video", "videos", "photo", "photos", "gallery", "opinion", "regions"}
+            bad_segments = {"video", "videos", "photo", "photos", "gallery", "opinion", "editorial", "columns"}
             segments = [seg for seg in path.split('/') if seg]
             if any(seg in bad_segments for seg in segments):
                 return False
@@ -265,7 +247,7 @@ class ManilaTimesScraper:
                     ".td-module-thumb a",
                     ".tdb_module_loop a",
                     "a.td-image-wrap",
-                    "a[href*='/2025/']",
+                    "a[href*='/20']",
                     "a[href*='/news/']",
                 ]
                 for sel in link_selectors:
@@ -288,6 +270,55 @@ class ManilaTimesScraper:
         except Exception as e:
             logger.warning(f"{self.name}: discovery failed: {e}")
         return urls
+
+    def _discover_feed_urls(self, limit: int = 20) -> List[str]:
+        """Discover newest links from official news feed."""
+        urls: List[str] = []
+        seen = set()
+        try:
+            for path in self.FEED_PATHS:
+                xml = self._fetch_with_enhanced_retry(urljoin(self.BASE_URL, path))
+                if not xml:
+                    continue
+                soup = BeautifulSoup(xml, "xml")
+                for item in soup.find_all("item"):
+                    link_el = item.find("link")
+                    href = (link_el.get_text(strip=True) if link_el else "")
+                    if not href:
+                        continue
+                    full = urljoin(self.BASE_URL, href)
+                    if full in seen:
+                        continue
+                    if self._validate_url(full) and self._is_probable_article(full):
+                        urls.append(full)
+                        seen.add(full)
+                    if len(urls) >= limit:
+                        break
+                if len(urls) >= limit:
+                    break
+        except Exception as e:
+            logger.warning(f"{self.name}: feed discovery failed: {e}")
+        return urls
+
+    def _existing_urls(self, urls: List[str]) -> Set[str]:
+        """Fetch existing URLs from DB to avoid scraping obvious duplicates."""
+        existing: Set[str] = set()
+        if not urls:
+            return existing
+        try:
+            sb = get_supabase()
+            batch_size = 100
+            for i in range(0, len(urls), batch_size):
+                chunk = urls[i:i + batch_size]
+                res = sb.table("articles").select("url").in_("url", chunk).execute()
+                for row in (res.data or []):
+                    u = row.get("url")
+                    if u:
+                        existing.add(u)
+        except Exception as e:
+            # If DB prefilter fails, continue scraping rather than failing the whole run.
+            logger.warning(f"{self.name}: prefilter existing URL lookup failed: {e}")
+        return existing
 
     def _extract_title(self, soup: BeautifulSoup) -> Optional[str]:
         """Extract article title."""
@@ -580,10 +611,41 @@ class ManilaTimesScraper:
         articles = []
         errors = []
         
-        # Try discovery first
-        discovered = self._discover_latest_urls(limit=max_articles * 3)
-        candidate_urls = discovered[:max_articles] if discovered else self.STATIC_ARTICLE_URLS[:max_articles]
-        logger.info(f"{self.name}: Using {len(candidate_urls)} candidate articles (discovered={len(discovered)})")
+        # Prefer feed discovery (freshest), then enrich with section discovery.
+        discovered_feed = self._discover_feed_urls(limit=max_articles * 4)
+        discovered_sections = self._discover_latest_urls(limit=max_articles * 4)
+        discovered = []
+        seen = set()
+        for u in (discovered_feed + discovered_sections):
+            if u in seen:
+                continue
+            seen.add(u)
+            discovered.append(u)
+        if not discovered:
+            candidate_urls = self.STATIC_ARTICLE_URLS[:max_articles]
+            existing_prefiltered = 0
+        else:
+            window = max(self.CANDIDATE_WINDOW, max_articles * 2)
+            pool = discovered[:window]
+            existing = self._existing_urls(pool)
+            non_existing = [u for u in pool if u not in existing]
+
+            # Duplicate saturation fallback: widen scan if early pool is mostly already ingested.
+            if len(non_existing) < max(1, max_articles // 3) and len(discovered) > window:
+                wider = discovered[: min(len(discovered), window * 3)]
+                existing_wider = self._existing_urls(wider)
+                non_existing = [u for u in wider if u not in existing_wider]
+                existing = existing_wider
+
+            # Prioritize unseen URLs first, then fill with known ones if needed.
+            candidate_urls = (non_existing + [u for u in pool if u in existing])[:max_articles]
+            existing_prefiltered = len(existing)
+
+        logger.info(
+            f"{self.name}: Using {len(candidate_urls)} candidate articles "
+            f"(feed={len(discovered_feed)}, sections={len(discovered_sections)}, combined={len(discovered)}, "
+            f"prefilter_existing={existing_prefiltered})"
+        )
         
         for i, url in enumerate(candidate_urls, 1):
             try:
@@ -637,6 +699,9 @@ class ManilaTimesScraper:
                 "scraper": self.name,
                 "urls_processed": len(candidate_urls),
                 "stealth_mode": True,
-                "502_handling": True
+                "502_handling": True,
+                "feed_candidates": len(discovered_feed) if "discovered_feed" in locals() else 0,
+                "section_candidates": len(discovered_sections) if "discovered_sections" in locals() else 0,
+                "prefilter_existing": existing_prefiltered if "existing_prefiltered" in locals() else 0,
             }
         )

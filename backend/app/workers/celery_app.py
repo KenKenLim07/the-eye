@@ -15,6 +15,7 @@ celery.conf.update(
     accept_content=["json"],
     timezone="Asia/Manila",
     enable_utc=True,
+    broker_connection_retry_on_startup=True,  # 🔥 CRITICAL: Fix Docker startup retry
     # Beat configuration - using default scheduler for reliability
     beat_max_loop_interval=60,  # Check every minute
     beat_sync_every=1,  # Sync every task

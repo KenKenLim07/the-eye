@@ -24,6 +24,50 @@ from app.scrapers.rappler import RapplerScraper
 
 logger = logging.getLogger(__name__)
 
+
+def _is_transient_storage_error(err: str | Exception | None) -> bool:
+    if err is None:
+        return False
+    msg = str(err).lower()
+    transient_markers = [
+        "temporary failure in name resolution",
+        "err_name_not_resolved",
+        "name or service not known",
+        "connect timeout",
+        "read timeout",
+        "connection reset",
+        "connection refused",
+        "service unavailable",
+        "502",
+        "503",
+        "504",
+    ]
+    return any(marker in msg for marker in transient_markers)
+
+
+def _handle_storage_result(self, task_id: str, source_name: str, log: dict, articles_found: int, store_result: dict) -> bool:
+    """Return True when storage is healthy; False/Retry otherwise."""
+    storage_error = (store_result or {}).get("error")
+    if not storage_error:
+        return True
+
+    logger.error("Task %s - %s storage failed: %s", task_id, source_name, storage_error)
+    finalize_run(
+        log["id"],
+        status="error",
+        articles_scraped=articles_found,
+        error_message=f"storage_error: {storage_error}",
+    )
+
+    if self.request.retries < self.max_retries and _is_transient_storage_error(storage_error):
+        logger.warning(
+            "Task %s - %s transient storage error, retrying (%s/%s)",
+            task_id, source_name, self.request.retries + 1, self.max_retries,
+        )
+        raise self.retry(countdown=60 * (2 ** self.request.retries))
+
+    return False
+
 @shared_task
 def scrape_sample(source: str = "Inquirer"):
     sb = get_supabase()
@@ -74,6 +118,17 @@ def scrape_inquirer_task(self):
         if result.articles:
             store_result = insert_articles(result.articles)
             logger.info(f"Task {task_id} - Storage result: {store_result}")
+            if not _handle_storage_result(self, task_id, "Inquirer", log, len(result.articles), store_result):
+                return {
+                    "ok": False,
+                    "task_id": task_id,
+                    "error": f"storage_failed: {store_result.get('error')}",
+                    "scraping": {
+                        "articles_found": len(result.articles),
+                        "errors": result.errors,
+                    },
+                    "storage": store_result,
+                }
             # Enqueue ML analysis for newly inserted articles
             inserted_ids = store_result.get("inserted_ids") or []
             if inserted_ids:
@@ -139,6 +194,8 @@ def scrape_abs_cbn_task(self):
         if result.articles:
             store_result = insert_articles(result.articles)
             logger.info(f"Task {task_id} - ABS-CBN storage result: {store_result}")
+            if not _handle_storage_result(self, task_id, "ABS-CBN", log, len(result.articles), store_result):
+                return {"ok": False, "task_id": task_id, "error": f"storage_failed: {store_result.get('error')}", "storage": store_result}
             inserted_ids = store_result.get("inserted_ids") or []
             if inserted_ids:
                 analyze_articles_task.delay(inserted_ids)
@@ -160,7 +217,7 @@ def scrape_abs_cbn_task(self):
             return {"ok": True, "task_id": task_id, "scraping": {"articles_found": 0, "errors": result.errors}}
     except Exception as e:
         logger.error(f"Task {task_id} - ABS-CBN critical error: {e}")
-        finalize_run(log["id"], status="failure", error=str(e))
+        finalize_run(log["id"], status="error", error_message=str(e))
         raise self.retry(exc=e)
 
 # New GMA task
@@ -177,6 +234,8 @@ def scrape_gma_task(self):
         if result.articles:
             store_result = insert_articles(result.articles)
             logger.info(f"Task {task_id} - GMA storage result: {store_result}")
+            if not _handle_storage_result(self, task_id, "GMA", log, len(result.articles), store_result):
+                return {"ok": False, "task_id": task_id, "error": f"storage_failed: {store_result.get('error')}", "storage": store_result}
             inserted_ids = store_result.get("inserted_ids") or []
             if inserted_ids:
                 analyze_articles_task.delay(inserted_ids)
@@ -228,6 +287,8 @@ def scrape_philstar_task(self):
         if result.articles:
             store_result = insert_articles(result.articles)
             logger.info(f"Task {task_id} - Philstar storage result: {store_result}")
+            if not _handle_storage_result(self, task_id, "Philstar", log, len(result.articles), store_result):
+                return {"ok": False, "task_id": task_id, "error": f"storage_failed: {store_result.get('error')}", "storage": store_result}
             inserted_ids = store_result.get("inserted_ids") or []
             if inserted_ids:
                 analyze_articles_task.delay(inserted_ids)
@@ -280,6 +341,8 @@ def scrape_manila_bulletin_task(self):
         if result.articles:
             store_result = insert_articles(result.articles)
             logger.info(f"Task {task_id} - Manila Bulletin storage result: {store_result}")
+            if not _handle_storage_result(self, task_id, "Manila Bulletin", log, len(result.articles), store_result):
+                return {"ok": False, "task_id": task_id, "error": f"storage_failed: {store_result.get('error')}", "storage": store_result}
             inserted_ids = store_result.get("inserted_ids") or []
             if inserted_ids:
                 analyze_articles_task.delay(inserted_ids)
@@ -335,6 +398,8 @@ def scrape_rappler_task(self):
         if result.articles:
             store_result = insert_articles(result.articles)
             logger.info(f"Task {task_id} - Rappler storage result: {store_result}")
+            if not _handle_storage_result(self, task_id, "Rappler", log, len(result.articles), store_result):
+                return {"ok": False, "task_id": task_id, "error": f"storage_failed: {store_result.get('error')}", "storage": store_result}
             inserted_ids = store_result.get("inserted_ids") or []
             if inserted_ids:
                 analyze_articles_task.delay(inserted_ids)
@@ -407,6 +472,8 @@ def scrape_sunstar_task(self):
         if result.articles:
             # Store articles in database
             storage_result = insert_articles(result.articles)
+            if not _handle_storage_result(self, task_id, "Sunstar", log, len(result.articles), storage_result):
+                return {"ok": False, "task_id": task_id, "error": f"storage_failed: {storage_result.get('error')}", "storage": storage_result}
             inserted_ids = storage_result.get("inserted_ids") or []
             if inserted_ids:
                 analyze_articles_task.delay(inserted_ids)
@@ -469,6 +536,8 @@ def scrape_manila_times_task(self):
         if result.articles:
             store_result = insert_articles(result.articles)
             logger.info(f"Task {task_id} - Manila Times storage result: {store_result}")
+            if not _handle_storage_result(self, task_id, "Manila Times", log, len(result.articles), store_result):
+                return {"ok": False, "task_id": task_id, "error": f"storage_failed: {store_result.get('error')}", "storage": store_result}
             inserted_ids = store_result.get("inserted_ids") or []
             if inserted_ids:
                 analyze_articles_task.delay(inserted_ids)

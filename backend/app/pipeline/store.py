@@ -1,6 +1,8 @@
-from typing import List
+from typing import Callable, List, TypeVar
 import re
 import os
+import time
+import random
 from app.core.supabase import get_supabase
 from .normalize import NormalizedArticle
 from app.scrapers.utils import normalize_source, normalize_category
@@ -8,6 +10,7 @@ import logging
 from urllib.parse import urlparse, urlunparse
 
 logger = logging.getLogger(__name__)
+T = TypeVar("T")
 
 # spaCy integration for enhanced funds detection
 _nlp = None
@@ -177,7 +180,7 @@ def classify_is_funds(title: str | None, content: str | None) -> bool:
         disaster_money_pattern = re.compile(rf"(?:{DISASTERS}).*{MONEY}|{MONEY}.*{DISASTERS}", re.IGNORECASE)
         if disaster_money_pattern.search(text_lower):
             # Only classify as funds if it also mentions government/corruption
-            gov_corruption_pattern = re.compile(rf"(?:{PUBLIC_SECTOR}|{CORRUPTION})", re.IGNORECASE)
+            gov_corruption_pattern = re.compile(rf"(?:{PH_GOVERNMENT}|{CORRUPTION})", re.IGNORECASE)
             if not gov_corruption_pattern.search(text_lower):
                 return False
     
@@ -202,6 +205,47 @@ def _canonicalize_url(raw_url: str) -> str:
         return raw_url
 
 
+def _is_transient_network_error(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    transient_markers = [
+        "temporary failure in name resolution",
+        "name or service not known",
+        "err_name_not_resolved",
+        "connect timeout",
+        "read timeout",
+        "connection reset",
+        "connection refused",
+        "service unavailable",
+        "502",
+        "503",
+        "504",
+    ]
+    return any(marker in msg for marker in transient_markers)
+
+
+def _with_retries(fn: Callable[[], T], op_name: str, retries: int = 3, base_delay_s: float = 0.7) -> T:
+    last_exc: Exception | None = None
+    for attempt in range(1, retries + 1):
+        try:
+            return fn()
+        except Exception as exc:
+            last_exc = exc
+            is_transient = _is_transient_network_error(exc)
+            if (not is_transient) or attempt == retries:
+                logger.error("%s failed (attempt %s/%s): %s", op_name, attempt, retries, exc)
+                raise
+            sleep_s = base_delay_s * (2 ** (attempt - 1)) + random.uniform(0.0, 0.25)
+            logger.warning(
+                "%s transient failure (attempt %s/%s): %s. Retrying in %.2fs",
+                op_name, attempt, retries, exc, sleep_s
+            )
+            time.sleep(sleep_s)
+    # Unreachable in normal control flow; keeps type-checkers happy.
+    if last_exc is not None:
+        raise last_exc
+    raise RuntimeError(f"{op_name} failed unexpectedly")
+
+
 def insert_articles(articles: List[NormalizedArticle]) -> dict:
     sb = get_supabase()
     # Canonicalize URLs up-front
@@ -213,14 +257,22 @@ def insert_articles(articles: List[NormalizedArticle]) -> dict:
     existing_urls: set[str] = set()
     
     # FIXED: Re-enable duplicate check with proper error handling
+    duplicate_check_failed = False
     if to_check:
         try:
-            res = sb.table('articles').select('url').in_('url', to_check).execute()
+            res = _with_retries(
+                lambda: sb.table('articles').select('url').in_('url', to_check).execute(),
+                op_name="duplicate_check",
+                retries=3,
+            )
             existing_urls = set((row.get('url') for row in (res.data or []) if row.get('url')))
             logger.info(f'Duplicate check: {len(existing_urls)} existing URLs found out of {len(to_check)} checked')
         except Exception as e:
-            logger.error(f'Error checking existing URLs: {e}')
-            return {'checked': 0, 'skipped': 0, 'inserted': 0, 'error': str(e), 'inserted_ids': []}
+            duplicate_check_failed = True
+            logger.warning(
+                "Duplicate check unavailable (%s). Continuing with best-effort insert/upsert path.",
+                e,
+            )
 
     # Build rows and log skip reasons
     rows = []
@@ -234,6 +286,12 @@ def insert_articles(articles: List[NormalizedArticle]) -> dict:
             logger.info(f"Skip reason: duplicate_url | url={a.url}")
             skipped += 1
             continue
+        try:
+            is_funds = classify_is_funds(a.title, a.content)
+        except Exception as classify_exc:
+            logger.error("Funds classifier failed for url=%s title=%s: %s", a.url, a.title, classify_exc)
+            is_funds = False
+
         rows.append({
             'source': normalize_source(a.source) or a.source,
             'category': normalize_category(a.category) if a.category else None,
@@ -242,7 +300,7 @@ def insert_articles(articles: List[NormalizedArticle]) -> dict:
             'url': a.url,
             'content': a.content,
             'published_at': a.published_at,
-            'is_funds': classify_is_funds(a.title, a.content),
+            'is_funds': is_funds,
         })
 
     inserted = 0
@@ -251,7 +309,20 @@ def insert_articles(articles: List[NormalizedArticle]) -> dict:
     
     if rows:
         try:
-            ins = sb.table('articles').insert(rows).execute()
+            if duplicate_check_failed:
+                # Best-effort fallback path when duplicate pre-check is unavailable.
+                # If a unique constraint exists on url, this avoids hard-failing the whole batch.
+                ins = _with_retries(
+                    lambda: sb.table('articles').upsert(rows, on_conflict='url', ignore_duplicates=True).execute(),
+                    op_name="insert_articles_upsert_fallback",
+                    retries=3,
+                )
+            else:
+                ins = _with_retries(
+                    lambda: sb.table('articles').insert(rows).execute(),
+                    op_name="insert_articles",
+                    retries=3,
+                )
             data = ins.data or []
             inserted = len(data)
             inserted_ids = [int(r.get('id')) for r in data if r.get('id') is not None]

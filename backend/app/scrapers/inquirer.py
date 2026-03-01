@@ -146,7 +146,6 @@ class InquirerScraper:
             'sports.inquirer.net',
             'entertainment.inquirer.net',
             'lifestyle.inquirer.net',
-            'opinion.inquirer.net',
             'technology.inquirer.net',
         )
         if parsed.netloc in allowed_news_subdomains:
