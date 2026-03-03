@@ -9,7 +9,7 @@ from app.cache import get_cached, set_cached
 from app.workers.ml_tasks import analyze_articles_task
 from fastapi.middleware.cors import CORSMiddleware
 from app.ml.bias import get_political_keywords_and_weights
-import os, json, subprocess, sys
+import os, json, subprocess, sys, re
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from subprocess import Popen, PIPE
@@ -71,6 +71,138 @@ def get_all_bias_analysis_paginated(sb, start_date, model_type="political_bias",
             
     return all_analysis
     return all_articles
+
+
+# Shared entity cleaning/canonicalization for both ranking and trends-correlation views.
+ALLOWED_ENTITY_LABELS = {"PERSON", "ORG", "GPE", "NORP"}
+ENTITY_STOP_TERMS = {
+    # Filipino
+    "sa", "ang", "ng", "mga", "kay", "si", "ni", "nasa", "mula", "para", "dahil", "kung",
+    # Cebuano/Visayan
+    "gikan", "uban", "alang", "tungod", "ug", "akong", "ako", "samtang",
+    # Generic
+    "first", "second", "third", "one", "two", "three", "four", "2024", "2025", "2026",
+}
+ENTITY_NOISY_TERMS = {
+    "read", "related", "city", "ii", "iii", "iv", "vi", "vii", "viii", "ix", "x",
+    "there", "at", "of", "and", "to", "from", "with", "day", "year", "check", "fact",
+    "manila loading", "loading", "content", "view all", "newswire", "worldnews",
+    "publication", "distribution", "contacts", "investors", "analysts", "press",
+    "information", "contained", "herein", "release",
+}
+SHORT_ORG_WHITELIST = {
+    "afp", "bir", "bsp", "coa", "dfa", "dilg", "doh", "doj", "dotr", "dpwh", "dti",
+    "denr", "deped", "nbi", "pnp", "pdea", "comelec", "senate", "congress", "nba", "pba",
+    "uaap", "fiba", "ofw", "owwa", "dmw",
+}
+GENERIC_ORG_TERMS = {
+    "group", "information", "publication", "distribution", "contacts", "investors",
+    "analysts", "press", "contained", "release", "newswire",
+}
+ENTITY_CANONICAL_ALIASES = {
+    # Geography
+    "us": ("United States", "GPE"),
+    "u.s.": ("United States", "GPE"),
+    "u.s": ("United States", "GPE"),
+    "usa": ("United States", "GPE"),
+    "united states": ("United States", "GPE"),
+    "the united states": ("United States", "GPE"),
+    "united states of america": ("United States", "GPE"),
+    "philippines": ("Philippines", "GPE"),
+    "ph": ("Philippines", "GPE"),
+    "republic of the philippines": ("Philippines", "GPE"),
+    "the philippines": ("Philippines", "GPE"),
+    "philippine": ("Philippines", "GPE"),
+    "manila city": ("Manila", "GPE"),
+    "city of manila": ("Manila", "GPE"),
+    "hong kong": ("Hong Kong", "GPE"),
+    "southeast asia": ("Southeast Asia", "GPE"),
+    "central visayas": ("Central Visayas", "GPE"),
+    "ilocos sur": ("Ilocos Sur", "GPE"),
+    # Organizations
+    "deped": ("Department of Education", "ORG"),
+    "department of education": ("Department of Education", "ORG"),
+    "doh": ("Department of Health", "ORG"),
+    "department of health": ("Department of Health", "ORG"),
+    "doj": ("Department of Justice", "ORG"),
+    "department of justice": ("Department of Justice", "ORG"),
+    "dotr": ("Department of Transportation", "ORG"),
+    "department of transportation": ("Department of Transportation", "ORG"),
+    "dilg": ("Department of the Interior and Local Government", "ORG"),
+    "department of the interior and local government": ("Department of the Interior and Local Government", "ORG"),
+    "dpwh": ("Department of Public Works and Highways", "ORG"),
+    "department of public works and highways": ("Department of Public Works and Highways", "ORG"),
+    "pnp": ("Philippine National Police", "ORG"),
+    "philippine national police": ("Philippine National Police", "ORG"),
+    "afp": ("Armed Forces of the Philippines", "ORG"),
+    "armed forces of the philippines": ("Armed Forces of the Philippines", "ORG"),
+    "nbi": ("National Bureau of Investigation", "ORG"),
+    "national bureau of investigation": ("National Bureau of Investigation", "ORG"),
+    "malacaÃ±ang": ("Malacanang Palace", "ORG"),
+    "malacaÃ£Â±ang": ("Malacanang Palace", "ORG"),
+    "malacaaÂ±ang": ("Malacanang Palace", "ORG"),
+    "malacanang": ("Malacanang Palace", "ORG"),
+    "palace": ("Malacanang Palace", "ORG"),
+}
+
+
+def _normalize_entity_text(text: str) -> str:
+    return " ".join((text or "").strip().lower().split())
+
+
+def _title_display(text: str) -> str:
+    if not text:
+        return text
+    if text.islower() or text.isupper():
+        return text.title()
+    return text
+
+
+def _canonical_entity(text: str, label: str) -> tuple[str, str]:
+    norm = _normalize_entity_text(text).replace("\u2019", "'")
+    norm = norm.strip(".,;:!?()[]{}\"'")
+    mapped = ENTITY_CANONICAL_ALIASES.get(norm)
+    if mapped:
+        canonical_text, forced_label = mapped
+        return canonical_text, (forced_label or label)
+    # Catch malformed encodings/variants of Malacanyang-like tokens.
+    if norm.startswith("malaca") and norm.endswith("ang"):
+        return "Malacanang Palace", "ORG"
+    # Rule: labels like "Pasay City" should be geography, not org/person.
+    if norm.endswith(" city"):
+        return text.strip(), "GPE"
+    return text.strip(), label
+
+
+def clean_entity_for_counting(raw_text: str, label: str) -> tuple[str, str, str] | None:
+    if label not in ALLOWED_ENTITY_LABELS:
+        return None
+    if not raw_text:
+        return None
+    canon_text, canon_label = _canonical_entity(raw_text, label)
+    norm_text = _normalize_entity_text(canon_text)
+    if not norm_text:
+        return None
+    if norm_text in ENTITY_STOP_TERMS or norm_text in ENTITY_NOISY_TERMS:
+        return None
+    # Phrase-level obvious noise for PERSON mislabels
+    if canon_label == "PERSON":
+        if norm_text.startswith("on ") or norm_text.startswith("the "):
+            return None
+        if any(tok in norm_text for tok in ("related", "read more", "loading")):
+            return None
+    # Drop short noisy ORG acronyms unless whitelisted.
+    if canon_label == "ORG":
+        bare = re.sub(r"[^A-Za-z0-9]", "", norm_text)
+        if len(bare) <= 2:
+            return None
+        if len(bare) <= 3 and bare not in SHORT_ORG_WHITELIST:
+            return None
+        if norm_text in GENERIC_ORG_TERMS:
+            return None
+    mapped = ENTITY_CANONICAL_ALIASES.get(norm_text)
+    display = mapped[0] if mapped else _title_display(norm_text)
+    return norm_text, canon_label, display
 
 app = FastAPI(title="PH Eye Backend", version="0.1.0")
 
@@ -473,6 +605,7 @@ async def get_sentiment_correlation(
         try:
             from app.nlp.spacy_nlp import extract_entities as _extract_entities
             entity_stats = {}
+            entity_display = {}
             # Build quick lookup for excluded sources
             exclude_set = {s.strip() for s in (ner_exclude_sources or "").split(',') if s.strip()}
             # OPTIMIZED: Fetch article content only for articles we need (with sentiment)
@@ -511,13 +644,12 @@ async def get_sentiment_correlation(
                 except Exception:
                     ents = []
                 for ent in ents:
-                    label = ent.get("label", "")
-                    # Filter to meaningful labels
-                    if label not in {"PERSON", "ORG", "GPE", "NORP"}:
+                    cleaned = clean_entity_for_counting(ent.get("text", ""), ent.get("label", ""))
+                    if not cleaned:
                         continue
-                    key = (ent.get("text",""), label)
-                    if not key[0]:
-                        continue
+                    norm_text, clean_label, display_text = cleaned
+                    key = (norm_text, clean_label)
+                    entity_display[key] = display_text
                     stats = entity_stats.get(key) or {"mentions": 0, "sum_sent": 0.0}
                     stats["mentions"] += 1
                     stats["sum_sent"] += float(score)
@@ -526,7 +658,7 @@ async def get_sentiment_correlation(
             top = sorted(
                 [
                     {
-                        "text": k[0],
+                        "text": entity_display.get(k, _title_display(k[0])),
                         "type": k[1],
                         "mentions": v["mentions"],
                         "avg_sentiment": (v["sum_sent"] / v["mentions"]) if v["mentions"] else 0.0,
@@ -575,59 +707,48 @@ async def ner_sample(
 
         from app.nlp.spacy_nlp import extract_entities as _extract_entities
         from collections import Counter
+
         entity_counter = Counter()
-        # Only keep meaningful labels; exclude generic/structural labels
-        allowed_labels = {"PERSON", "ORG", "GPE", "NORP"}
-        # Stoplist for frequent Filipino/Cebuano particles and generic tokens
-        stop_terms = {
-            # Filipino
-            "sa", "ang", "ng", "mga", "kay", "si", "ni", "nasa", "mula", "para", "dahil", "kung",
-            # Cebuano/Visayan
-            "gikan", "uban", "alang", "tungod", "ug", "akong", "ako", "samtang",
-            # English ordinals/cardinals and years
-            "first", "second", "third", "one", "two", "three", "four", "2024", "2025"
-        }
-        # Excluded sources set
+        entity_display = {}
         exclude_set = {s.strip() for s in (ner_exclude_sources or "").split(',') if s.strip()}
         examples = []
 
         for a in articles:
-            # Skip excluded sources entirely
             if exclude_set and (a.get("source") or "").strip() in exclude_set:
                 continue
+
             text = f"{a.get('title','')}\n{a.get('content','')}"
             ents = _extract_entities(text)
-            # Filter entities for the example output too
-            filtered_ents = [e for e in ents if e.get("label") in allowed_labels and (e.get("text") or "").strip().lower() not in stop_terms]
+
+            filtered_ents = []
+            for e in ents:
+                cleaned = clean_entity_for_counting(e.get("text", ""), e.get("label", ""))
+                if not cleaned:
+                    continue
+                norm_text, clean_label, display_text = cleaned
+                filtered_ents.append({
+                    "text": display_text,
+                    "label": clean_label,
+                    "start": e.get("start"),
+                    "end": e.get("end"),
+                })
+                entity_display[(norm_text, clean_label)] = display_text
+
             examples.append({
                 "id": a.get("id"),
                 "source": a.get("source"),
                 "published_at": a.get("published_at"),
-                "entities": filtered_ents[:25],  # cap per-article listing
+                "entities": filtered_ents[:25],
             })
-            for e in filtered_ents:
-                raw_text = (e.get("text", "").strip())
-                label = e.get("label", "")
-                if not raw_text:
-                    continue
-                # Normalize for counting (case-insensitive)
-                key = (raw_text.lower(), label)
-                if key[0] in stop_terms:
-                    continue
-                entity_counter[key] += 1
 
-        # Present entities with simple casing normalization for display
-        def _display_text(t: str) -> str:
-            if not t:
-                return t
-            # Title-case only if it's all lower or all upper; else leave as is
-            if t.islower() or t.isupper():
-                return t.title()
-            return t
+            for e in filtered_ents:
+                key = (_normalize_entity_text(e.get("text", "")), e.get("label", ""))
+                entity_counter[key] += 1
 
         top_entities = []
         for (t_norm, k), c in entity_counter.most_common(50):
-            top_entities.append({"text": _display_text(t_norm), "type": k, "mentions": c})
+            display = entity_display.get((t_norm, k), _title_display(t_norm))
+            top_entities.append({"text": display, "type": k, "mentions": c})
 
         return {
             "ok": True,
@@ -637,7 +758,6 @@ async def ner_sample(
         }
     except Exception as e:
         return {"ok": False, "error": str(e)}
-
 @app.get("/articles/{article_id}/analysis")
 async def get_article_analysis(article_id: int):
     sb = get_supabase()
@@ -713,11 +833,11 @@ async def get_trends(period: str = "7d", source: Optional[str] = None, include_t
         window_days = 7
 
     if include_today:
-        # Include today → start = today - (window_days - 1)
+        # Include today â†’ start = today - (window_days - 1)
         end_local = now_local.replace(hour=23, minute=59, second=59, microsecond=999999)
         start_local = (now_local - timedelta(days=window_days - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
     else:
-        # Exclude today → end = yesterday, start = end - (window_days - 1)
+        # Exclude today â†’ end = yesterday, start = end - (window_days - 1)
         end_local = (now_local - timedelta(days=1)).replace(hour=23, minute=59, second=59, microsecond=999999)
         start_local = (end_local - timedelta(days=window_days - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
     # Convert to UTC for querying (Supabase timestamps are UTC)
@@ -1561,12 +1681,12 @@ async def eval_funds_classifier(
             # If only_candidates is set, skip items that are unlikely funds to focus evaluation
             if only_candidates:
                 has_money_token = any(tok in text.lower() for tok in [
-                    "budget","allocation","appropriation","disbursement","fund","funds","billion","million","trillion","peso","pesos","php","₱","php "
+                    "budget","allocation","appropriation","disbursement","fund","funds","billion","million","trillion","peso","pesos","php","â‚±","php "
                 ])
                 ents = spacy_info.get("entities") or {}
                 has_spacy_money = bool((ents.get("money") or []))
                 # Consider gov org cues from NER
-                gov_org_cues = {"dpwh","dbm","coa","comelec","dilg","doh","deped","dotr","senate","house","congress","lgu","barangay","province","city","municipality","malacañang","palace","ombudsman","commission on audit","department of budget and management","department of public works and highways","department of health","department of education","department of transportation"}
+                gov_org_cues = {"dpwh","dbm","coa","comelec","dilg","doh","deped","dotr","senate","house","congress","lgu","barangay","province","city","municipality","malacaÃ±ang","palace","ombudsman","commission on audit","department of budget and management","department of public works and highways","department of health","department of education","department of transportation"}
                 orgs_lower = {o.lower() for o in (ents.get("orgs") or [])}
                 has_gov_org = any(term in orgs_lower for term in gov_org_cues)
                 spacy_raw_bool_tmp = None if spacy_info.get("is_funds") is None else bool(spacy_info.get("is_funds"))
@@ -1654,3 +1774,4 @@ async def bias_articles(direction: Optional[str] = Query(default=None), limit: i
         
     except Exception as e:
         return {"ok": False, "error": str(e), "items": [], "total": 0}
+

@@ -6,12 +6,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { RefreshCw, Loader2, TrendingUp, TrendingDown, Minus } from "lucide-react";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, BarChart, Bar } from "recharts";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import { Skeleton } from "@/components/ui/skeleton";
-
-// Simple in-memory cache and inflight dedupe for trends fetches
-const trendsCache = new Map<string, { expires: number; data: TrendsData }>();
-const inflightRequests = new Map<string, Promise<TrendsData>>();
+import Link from "next/link";
 
 interface TrendsData {
   ok: boolean;
@@ -47,6 +44,8 @@ interface CorrelationData {
   entities?: Array<{ text: string; type: string; mentions: number; avg_sentiment: number }>;
 }
 
+type CachePayload = TrendsData | CorrelationData;
+
 const SOURCES = [
   { value: "all", label: "All Sources" },
   { value: "GMA", label: "GMA" },
@@ -68,6 +67,10 @@ const COLORS = {
   negative: "#ef4444", 
   neutral: "#6b7280"
 };
+
+// Simple in-memory cache and inflight dedupe for trends fetches
+const trendsCache = new Map<string, { expires: number; data: CachePayload }>();
+const inflightRequests = new Map<string, Promise<CachePayload>>();
 
 async function fetchTrends(source?: string, period: string = "7d", opts?: { refresh?: boolean, ttlMs?: number }): Promise<TrendsData> {
   const base = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
@@ -123,15 +126,15 @@ async function fetchCorrelation(period: string = "7d", opts?: { refresh?: boolea
   if (opts?.with_entities) params.set('with_entities', 'true');
   if (opts?.sources && opts.sources.length > 0) params.set('sources', opts.sources.join(','));
   if (opts?.refresh) params.set('refresh', 'true');
-  const key = `corr:${period}:${(opts?.sources||['all']).join(',')}:today:1`;
+  const key = `corr:${period}:${(opts?.sources||['all']).join(',')}:today:1:entities:${opts?.with_entities ? '1' : '0'}`;
   const now = Date.now();
   const ttl = opts?.ttlMs ?? 60_000;
 
   if (!opts?.refresh) {
-    const cached = trendsCache.get(key) as any;
-    if (cached && cached.expires > now) return cached.data;
-    const inflight = inflightRequests.get(key) as any;
-    if (inflight) return inflight;
+    const cached = trendsCache.get(key);
+    if (cached && cached.expires > now) return cached.data as CorrelationData;
+    const inflight = inflightRequests.get(key);
+    if (inflight) return inflight as Promise<CorrelationData>;
   }
 
   try {
@@ -139,12 +142,12 @@ async function fetchCorrelation(period: string = "7d", opts?: { refresh?: boolea
       .then(async (res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json = await res.json();
-        trendsCache.set(key, { expires: now + ttl, data: json } as any);
+        trendsCache.set(key, { expires: now + ttl, data: json });
         return json as CorrelationData;
       })
       .finally(() => inflightRequests.delete(key));
-    inflightRequests.set(key, p as any);
-    return await p as any;
+    inflightRequests.set(key, p);
+    return await (p as Promise<CorrelationData>);
   } catch (e) {
     console.error('Failed to fetch correlation:', e);
     return { ok: false, period, include_today: true, sources: [], matrix: [], p_values: [] } as CorrelationData;
@@ -267,7 +270,7 @@ export default function TrendsPage() {
       loadData(true, true);
     } else {
       setIsRefreshing(true);
-      fetchCorrelation(selectedPeriod, { refresh: true, sources: selectedSource==='all'? undefined : [selectedSource] })
+      fetchCorrelation(selectedPeriod, { refresh: true, sources: selectedSource==='all'? undefined : [selectedSource], with_entities: true })
         .then(setCorr)
         .finally(() => setIsRefreshing(false));
     }
@@ -278,7 +281,7 @@ export default function TrendsPage() {
       loadData(false, false);
     } else {
       setIsFilterLoading(true);
-      fetchCorrelation(selectedPeriod, { sources: selectedSource==='all'? undefined : [selectedSource] })
+      fetchCorrelation(selectedPeriod, { sources: selectedSource==='all'? undefined : [selectedSource], with_entities: true })
         .then(setCorr)
         .finally(() => setIsFilterLoading(false));
     }
@@ -424,6 +427,9 @@ export default function TrendsPage() {
             <div className="flex items-center gap-2 mr-2">
               <Button variant={viewMode==='timeline'? 'default':'outline'} size="sm" onClick={() => setViewMode('timeline')} disabled={isFilterLoading}>Timeline</Button>
               <Button variant={viewMode==='correlation'? 'default':'outline'} size="sm" onClick={() => setViewMode('correlation')} disabled={isFilterLoading}>Correlation</Button>
+              <Button asChild variant="outline" size="sm">
+                <Link href="/entities">Entity Ranking</Link>
+              </Button>
             </div>
             <Button 
               onClick={handleRefresh} 
@@ -694,6 +700,7 @@ export default function TrendsPage() {
             </div>
           </CardContent>
         </Card>
+
         </>
         )}
 

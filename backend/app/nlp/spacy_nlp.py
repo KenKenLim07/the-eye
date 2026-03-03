@@ -7,28 +7,16 @@ import spacy
 from spacy.util import is_package
 
 _nlp = None
-_attempted_download = False
 
 
 def get_nlp():
     global _nlp
     if _nlp is None:
-        # Lazy-load; fall back to blank model if en_core_web_sm is unavailable
+        # Lazy-load; never attempt runtime downloads in API path.
+        # If en_core_web_sm is unavailable, fall back to blank English model.
         try:
             _nlp = spacy.load("en_core_web_sm")
         except Exception:
-            # Try one-time auto-download to self-heal if internet is available
-            global _attempted_download
-            if not _attempted_download:
-                try:
-                    from spacy.cli import download as _spacy_download
-                    _spacy_download("en_core_web_sm")
-                    _nlp = spacy.load("en_core_web_sm")
-                except Exception:
-                    _nlp = spacy.blank("en")
-                finally:
-                    _attempted_download = True
-            else:
             _nlp = spacy.blank("en")
     else:
         # If we previously loaded a blank pipeline, but the small model is now installed, upgrade live
@@ -51,8 +39,9 @@ def get_nlp():
     # Add PH-specific EntityRuler patterns to boost recall for local names/agencies
     try:
         if _nlp and "entity_ruler" not in _nlp.pipe_names:
-            from spacy.pipeline import EntityRuler
-            ruler = EntityRuler(_nlp, overwrite_ents=False)
+            # Create ruler via add_pipe so it is properly registered in spaCy v3.
+            insert_pos = {"before": "ner"} if "ner" in _nlp.pipe_names else {}
+            ruler = _nlp.add_pipe("entity_ruler", config={"overwrite_ents": False}, **insert_pos)
             patterns = []
             # Key Philippine persons (recent and historical figures)
             persons = [
@@ -111,12 +100,11 @@ def get_nlp():
             for n in norps:
                 patterns.append({"label": "NORP", "pattern": n})
 
-            # Add patterns and insert before ner if available
+            # Add patterns to active ruler
             ruler.add_patterns(patterns)
-            _nlp.add_pipe(ruler, name="entity_ruler", before="ner" if "ner" in _nlp.pipe_names else None)
     except Exception:
         # Non-fatal if patterns cannot be added
-            pass
+        pass
     return _nlp
 
 
@@ -133,7 +121,58 @@ def extract_entities(text: str) -> List[Dict[str, str]]:
             "start": ent.start_char,
             "end": ent.end_char,
         })
-    return entities
+    if entities:
+        return entities
+
+    # Heuristic fallback when only blank model is available or no entities are produced.
+    # Keeps trends entity analytics usable for operational/thesis summaries.
+    fallback: List[Dict[str, str]] = []
+    seen = set()
+    org_tokens = {
+        "department", "bureau", "commission", "office", "university", "bank",
+        "ministry", "council", "agency", "court", "senate", "congress",
+        "inc", "corp", "corporation", "authority", "administration",
+    }
+    gpe_terms = {
+        "philippines", "manila", "cebu", "davao", "quezon", "makati", "pasig",
+        "taguig", "iloilo", "bacolod", "zamboanga", "mindanao", "luzon", "visayas",
+        "middle east", "metro manila", "quezon city", "united states", "the united states",
+        "united states of america", "america", "new zealand", "south korea",
+        "saudi arabia", "united arab emirates", "israel", "iran", "qatar", "jordan",
+    }
+    gpe_acronyms = {"US", "USA", "UAE", "UK", "PH"}
+    gpe_upper_words = {"MANILA", "CEBU", "DAVAO", "BAGUIO", "PASIG", "TAGUIG", "MAKATI"}
+
+    # Acronyms (ORG-like)
+    for m in re.finditer(r"\b[A-Z]{2,}(?:-[A-Z]{2,})?\b", text):
+        t = m.group(0).strip()
+        if t in {"THE", "AND", "FOR", "WITH"}:
+            continue
+        label = "GPE" if t in gpe_acronyms or t in gpe_upper_words else "ORG"
+        key = (t, label)
+        if key in seen:
+            continue
+        seen.add(key)
+        fallback.append({"text": t, "label": label, "start": m.start(), "end": m.end()})
+
+    # Title-cased multi-word phrases (PERSON/ORG/GPE guess)
+    for m in re.finditer(r"\b(?:[A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})\b", text):
+        t = m.group(0).strip()
+        low = t.lower()
+        label = "PERSON"
+        if any(tok in low.split() for tok in org_tokens):
+            label = "ORG"
+        elif low in gpe_terms or low.endswith(" city"):
+            label = "GPE"
+        key = (t, label)
+        if key in seen:
+            continue
+        seen.add(key)
+        fallback.append({"text": t, "label": label, "start": m.start(), "end": m.end()})
+        if len(fallback) >= 30:
+            break
+
+    return fallback
 
 
 def extract_keyphrases(text: str, top_k: int = 10) -> List[str]:
