@@ -78,15 +78,6 @@ export async function fetchLatestAnalysisByIds(articleIds: number[]): Promise<Re
           }
         }
       }
-      for (const analysis of data.analysis || []) {
-        if (analysis.model_type === "political_bias") {
-          const articleId = analysis.article_id;
-          if (!latestByArticle[articleId]) {
-            latestByArticle[articleId] = analysis;
-          }
-        }
-      }
-      
       // Merge batch results
       Object.assign(results, latestByArticle);
       
@@ -105,8 +96,10 @@ export async function fetchLatestAnalysisByIds(articleIds: number[]): Promise<Re
 
 export async function fetchAllArticles(limit: number = 10): Promise<Record<string, Article[]>> {
   try {
+    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
+
     // Use optimized single-query endpoint instead of 7 separate queries
-    const response = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/articles/home-optimized?limit_per_source=${limit}`, { 
+    const response = await fetch(`${backendUrl}/articles/home-optimized?limit_per_source=${limit}`, {
       cache: 'no-store' 
     });
     
@@ -116,7 +109,23 @@ export async function fetchAllArticles(limit: number = 10): Promise<Record<strin
     }
     
     const data = await response.json();
-    return data.articles_by_source || {};
+    const initial = data.articles_by_source || {};
+
+    // Self-heal once if all sources are empty due to a transient stale cache snapshot.
+    const totalInitial = Object.values(initial).reduce((sum: number, arr: unknown) => {
+      return sum + (Array.isArray(arr) ? arr.length : 0);
+    }, 0);
+    if (totalInitial === 0) {
+      const retry = await fetch(`${backendUrl}/articles/home-optimized?limit_per_source=${limit}&refresh=true`, {
+        cache: 'no-store'
+      });
+      if (retry.ok) {
+        const retryData = await retry.json();
+        return retryData.articles_by_source || initial;
+      }
+    }
+
+    return initial;
   } catch (error) {
     console.error('Error fetching articles:', error);
     return {};
@@ -160,51 +169,6 @@ export async function fetchTrendsData(period: string = '7d', source?: string): P
     return await response.json();
   } catch (error) {
     console.error('Failed to fetch trends data:', error);
-    return null;
-  }
-}
-
-export async function fetchBiasSummary(days: number = 30): Promise<any> {
-  try {
-    const response = await fetch(
-      `${process.env.NEXT_PUBLIC_BACKEND_URL}/bias/summary?days=${days}`,
-      { cache: 'no-store' }
-    );
-    
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-    
-    return await response.json();
-  } catch (error) {
-    console.error('Failed to fetch bias summary:', error);
-    return null;
-  }
-}
-
-export async function fetchBiasArticles(direction?: string, limit: number = 50, offset: number = 0): Promise<any> {
-  try {
-    const params = new URLSearchParams({
-      limit: limit.toString(),
-      offset: offset.toString(),
-    });
-    
-    if (direction) {
-      params.append('direction', direction);
-    }
-    
-    const response = await fetch(
-      `${process.env.NEXT_PUBLIC_BACKEND_URL}/bias/articles?${params.toString()}`,
-      { cache: 'no-store' }
-    );
-    
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-    
-    return await response.json();
-  } catch (error) {
-    console.error('Failed to fetch bias articles:', error);
     return null;
   }
 }

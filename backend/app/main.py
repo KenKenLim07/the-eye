@@ -417,15 +417,17 @@ async def get_articles(limit: int = 50, offset: int = 0, source: Optional[str] =
         return {"error": str(e), "articles": []}
 
 @app.get("/articles/home-optimized")
-async def get_home_articles(limit_per_source: int = 10):
+async def get_home_articles(limit_per_source: int = 10, refresh: bool = False):
     """Optimized endpoint for home page - up to N articles per canonical source with caching."""
     # Generate cache key
     cache_key = f"home_articles:{limit_per_source}"
+    last_good_key = f"home_articles:last_good:{limit_per_source}"
 
     # Check cache first
-    cached_result = get_cached(cache_key)
-    if cached_result:
-        return cached_result
+    if not refresh:
+        cached_result = get_cached(cache_key)
+        if cached_result:
+            return cached_result
 
     sb = get_supabase()
 
@@ -442,6 +444,7 @@ async def get_home_articles(limit_per_source: int = 10):
         ]
 
         articles_by_source = {}
+        source_errors = {}
 
         # Query per source with ordered limit for predictable results
         for src in sources:
@@ -458,11 +461,29 @@ async def get_home_articles(limit_per_source: int = 10):
             except Exception as inner_e:
                 # On per-source failure, continue with empty list
                 articles_by_source[src] = []
+                source_errors[src] = str(inner_e)
+
+        total_found = sum(len(v or []) for v in articles_by_source.values())
+        all_empty = total_found == 0
 
         result_data = {"articles_by_source": articles_by_source}
 
-        # Cache the result (e.g., 10 minutes)
+        # If every source failed/empty, prefer returning a known good snapshot.
+        if all_empty:
+            last_good = get_cached(last_good_key)
+            if last_good:
+                # Keep short-lived cache to avoid hammering backend during transient failures.
+                set_cached(cache_key, last_good, 60)
+                return last_good
+            # Don't cache all-empty results for long; they may be transient connectivity issues.
+            set_cached(cache_key, result_data, 30)
+            if source_errors:
+                print(f"home-optimized all-empty with source errors: {source_errors}")
+            return result_data
+
+        # Cache the result (e.g., 10 minutes) and save as last known good snapshot.
         set_cached(cache_key, result_data, 600)
+        set_cached(last_good_key, result_data, 3600)
         return result_data
 
     except Exception as e:

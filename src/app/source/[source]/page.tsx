@@ -1,14 +1,12 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { formatDate } from "@/lib/utils/date";
 import { supabaseServer } from "@/lib/supabase/server";
 import { ArticleCardsInteractive } from "@/components/articles/article-cards-interactive";
 
 interface PageProps {
-  params: { source: string };
-  searchParams: { page?: string; q?: string };
+  params: Promise<{ source: string }>;
+  searchParams: Promise<{ page?: string; q?: string }>;
 }
 
 const PAGE_SIZE = 20;
@@ -16,11 +14,13 @@ const PAGE_SIZE = 20;
 export const dynamic = "force-dynamic";
 
 export default async function SourcePage({ params, searchParams }: PageProps) {
-  const sourceParam = decodeURIComponent(params.source || "");
+  const resolvedParams = await params;
+  const resolvedSearchParams = await searchParams;
+  const sourceParam = decodeURIComponent(resolvedParams.source || "");
   if (!sourceParam) return notFound();
 
-  const page = Math.max(1, Number(searchParams.page || 1));
-  const query = (searchParams.q || "").trim();
+  const page = Math.max(1, Number(resolvedSearchParams.page || 1));
+  const query = (resolvedSearchParams.q || "").trim();
 
   const from = (page - 1) * PAGE_SIZE;
   const to = from + PAGE_SIZE - 1;

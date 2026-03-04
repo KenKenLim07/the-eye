@@ -12,8 +12,7 @@ export default function Navigation() {
     { href: "/", label: "Home" },
     { href: "/trends", label: "Sentiment Trends" },
     { href: "/correlation", label: "Correlation" },
-    { href: "/entities", label: "Entity Ranking" },
-    { href: "/bias", label: "Bias Analysis" }
+    { href: "/entities", label: "Entity Ranking" }
   ];
 
   const toggleMobileMenu = () => {

@@ -289,10 +289,7 @@ def build_bias_row_for_philippine_political(article_id: int, text: str) -> Dict[
 
 def build_comprehensive_bias_analysis(article_id: int, text: str) -> list[Dict[str, Any]]:
     """
-    Build both VADER sentiment and Philippine political bias analysis.
-    Returns a list of bias analysis rows.
+    Build sentiment analysis rows only.
+    Political-bias generation is retired to reduce storage and noise.
     """
-    rows = []
-    rows.append(build_bias_row_for_vader(article_id, text))
-    rows.append(build_bias_row_for_philippine_political(article_id, text))
-    return rows
+    return [build_bias_row_for_vader(article_id, text)]
