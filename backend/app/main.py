@@ -204,6 +204,79 @@ def clean_entity_for_counting(raw_text: str, label: str) -> tuple[str, str, str]
     display = mapped[0] if mapped else _title_display(norm_text)
     return norm_text, canon_label, display
 
+
+def _window_bounds(period: str, include_today: bool = True):
+    tz_ph = ZoneInfo("Asia/Manila")
+    now_local = datetime.now(tz_ph)
+    if period == "30d":
+        window_days = 30
+    else:
+        window_days = 7
+    if include_today:
+        end_local = now_local.replace(hour=23, minute=59, second=59, microsecond=999999)
+        start_local = (now_local - timedelta(days=window_days - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    else:
+        end_local = (now_local - timedelta(days=1)).replace(hour=23, minute=59, second=59, microsecond=999999)
+        start_local = (end_local - timedelta(days=window_days - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    start_utc = start_local.astimezone(ZoneInfo("UTC"))
+    end_utc = end_local.astimezone(ZoneInfo("UTC"))
+    return start_utc.isoformat(), end_utc.isoformat()
+
+
+def _aggregate_entities_with_sentiment(analysis_rows, articles_by_id, exclude_set=None, max_entities: int = 100):
+    from app.nlp.spacy_nlp import extract_entities as _extract_entities
+
+    exclude_set = exclude_set or set()
+    entity_stats = {}
+    entity_display = {}
+    seen_article_ids = set()
+
+    for row in analysis_rows:
+        aid = row.get("article_id")
+        if not aid:
+            continue
+        a = articles_by_id.get(aid)
+        if not a:
+            continue
+        if exclude_set and (a.get("source") or "").strip() in exclude_set:
+            continue
+        score = row.get("sentiment_score")
+        if score is None:
+            continue
+        text = f"{a.get('title','')} {a.get('content','')}"
+        try:
+            ents = _extract_entities(text)
+        except Exception:
+            ents = []
+        if ents:
+            seen_article_ids.add(aid)
+        for ent in ents:
+            cleaned = clean_entity_for_counting(ent.get("text", ""), ent.get("label", ""))
+            if not cleaned:
+                continue
+            norm_text, clean_label, display_text = cleaned
+            key = (norm_text, clean_label)
+            entity_display[key] = display_text
+            stats = entity_stats.get(key) or {"mentions": 0, "sum_sent": 0.0}
+            stats["mentions"] += 1
+            stats["sum_sent"] += float(score)
+            entity_stats[key] = stats
+
+    top = sorted(
+        [
+            {
+                "text": entity_display.get(k, _title_display(k[0])),
+                "type": k[1],
+                "mentions": v["mentions"],
+                "avg_sentiment": (v["sum_sent"] / v["mentions"]) if v["mentions"] else 0.0,
+            }
+            for k, v in entity_stats.items()
+        ],
+        key=lambda x: (-x["mentions"], -abs(x["avg_sentiment"]))
+    )[:max_entities]
+
+    return top, len(seen_article_ids)
+
 app = FastAPI(title="PH Eye Backend", version="0.1.0")
 
 # Add CORS middleware
@@ -603,9 +676,6 @@ async def get_sentiment_correlation(
     # Optional: basic entity + sentiment aggregation (spaCy-based), behind flag
     if with_entities:
         try:
-            from app.nlp.spacy_nlp import extract_entities as _extract_entities
-            entity_stats = {}
-            entity_display = {}
             # Build quick lookup for excluded sources
             exclude_set = {s.strip() for s in (ner_exclude_sources or "").split(',') if s.strip()}
             # OPTIMIZED: Fetch article content only for articles we need (with sentiment)
@@ -622,57 +692,125 @@ async def get_sentiment_correlation(
                             articles_for_ner[a["id"]] = a
                     except Exception:
                         continue
-            
-            for row in all_analysis:
-                aid = row.get("article_id")
-                meta = id_to_meta.get(aid)
-                if not meta:
-                    continue
-                score = row.get("sentiment_score")
-                if score is None:
-                    continue
-                # Fetch article text for NER (from cached articles_for_ner)
-                try:
-                    a = articles_for_ner.get(aid)
-                    if not a:
-                        continue
-                    # Skip entity aggregation for excluded sources
-                    if exclude_set and (a.get("source") or "").strip() in exclude_set:
-                        continue
-                    text = f"{a.get('title','')} {a.get('content','')}"
-                    ents = _extract_entities(text)
-                except Exception:
-                    ents = []
-                for ent in ents:
-                    cleaned = clean_entity_for_counting(ent.get("text", ""), ent.get("label", ""))
-                    if not cleaned:
-                        continue
-                    norm_text, clean_label, display_text = cleaned
-                    key = (norm_text, clean_label)
-                    entity_display[key] = display_text
-                    stats = entity_stats.get(key) or {"mentions": 0, "sum_sent": 0.0}
-                    stats["mentions"] += 1
-                    stats["sum_sent"] += float(score)
-                    entity_stats[key] = stats
-            # Prepare top entities by mentions
-            top = sorted(
-                [
-                    {
-                        "text": entity_display.get(k, _title_display(k[0])),
-                        "type": k[1],
-                        "mentions": v["mentions"],
-                        "avg_sentiment": (v["sum_sent"] / v["mentions"]) if v["mentions"] else 0.0,
-                    }
-                    for k, v in entity_stats.items()
-                ],
-                key=lambda x: (-x["mentions"], -abs(x["avg_sentiment"]))
-            )[:20]
+            top, _ = _aggregate_entities_with_sentiment(
+                analysis_rows=all_analysis,
+                articles_by_id=articles_for_ner,
+                exclude_set=exclude_set,
+                max_entities=20,
+            )
             result["entities"] = top
         except Exception:
             result["entities"] = []
 
     set_cached(cache_key, result, 120 if include_today else 600)
     return result
+
+
+@app.get("/ml/entities/top")
+async def get_top_entities(
+    period: str = "30d",
+    source: Optional[str] = None,
+    include_today: bool = True,
+    refresh: bool = False,
+    limit_articles: int = 500,
+    total_cap: int = 1000,
+    max_entities: int = 100,
+    scan_mode: str = "fast",
+    ner_exclude_sources: Optional[str] = None,
+):
+    sb = get_supabase()
+    start_date_str, end_date_str = _window_bounds(period, include_today=include_today)
+
+    cache_key = (
+        f"entities_top:{period}:{source or 'all'}:today:{'1' if include_today else '0'}:"
+        f"limit:{limit_articles}:cap:{total_cap}:max:{max_entities}:scan:{scan_mode}:"
+        f"nerX:{(ner_exclude_sources or 'none')}:start:{start_date_str[:10]}:end:{end_date_str[:10]}"
+    )
+    if not refresh:
+        cached = get_cached(cache_key)
+        if cached:
+            return cached
+
+    try:
+        all_articles = get_all_articles_paginated(
+            sb,
+            start_date_str,
+            source=source,
+            end_date=end_date_str,
+            select_fields="id,source,published_at,title,content",
+        )
+        total_available = len(all_articles)
+        total_capped = min(total_available, max(1, total_cap))
+        capped_articles = all_articles[:total_capped]
+
+        if scan_mode == "full":
+            sampled_articles = capped_articles
+            sample_cap = total_capped
+        else:
+            sample_cap = max(1, min(limit_articles, total_capped))
+            sampled_articles = capped_articles[:sample_cap]
+
+        if not sampled_articles:
+            result = {
+                "ok": True,
+                "sampled": 0,
+                "sample_cap": sample_cap,
+                "total_cap": total_cap,
+                "total_available": total_available,
+                "total_capped": total_capped,
+                "scan_mode": scan_mode,
+                "top_entities": [],
+            }
+            set_cached(cache_key, result, 120)
+            return result
+
+        articles_by_id = {a["id"]: a for a in sampled_articles if a.get("id")}
+        article_ids = list(articles_by_id.keys())
+
+        all_analysis = []
+        batch_size = 2000
+        for i in range(0, len(article_ids), batch_size):
+            batch_ids = article_ids[i:i + batch_size]
+            res = (
+                sb.table("bias_analysis")
+                .select("article_id,sentiment_score,model_type,created_at")
+                .in_("article_id", batch_ids)
+                .eq("model_type", "sentiment")
+                .order("created_at", desc=True)
+                .execute()
+            )
+            all_analysis.extend(res.data or [])
+
+        # Deduplicate to latest sentiment per article.
+        latest_by_article = {}
+        for row in all_analysis:
+            aid = row.get("article_id")
+            if aid and aid not in latest_by_article:
+                latest_by_article[aid] = row
+        analysis_rows = list(latest_by_article.values())
+
+        exclude_set = {s.strip() for s in (ner_exclude_sources or "").split(',') if s.strip()}
+        top_entities, analyzed_articles = _aggregate_entities_with_sentiment(
+            analysis_rows=analysis_rows,
+            articles_by_id=articles_by_id,
+            exclude_set=exclude_set,
+            max_entities=max_entities,
+        )
+
+        result = {
+            "ok": True,
+            "sampled": analyzed_articles,
+            "sample_cap": sample_cap,
+            "total_cap": total_cap,
+            "total_available": total_available,
+            "total_capped": total_capped,
+            "scan_mode": scan_mode,
+            "top_entities": top_entities,
+        }
+        set_cached(cache_key, result, 120 if include_today else 600)
+        return result
+    except Exception as e:
+        return {"ok": False, "error": str(e), "top_entities": []}
 
 @app.get("/ml/ner/sample")
 async def ner_sample(

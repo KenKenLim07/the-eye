@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useTransition } from "react";
+import { useState, useEffect, useTransition, useCallback } from "react";
+import Link from "next/link";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -8,7 +9,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { RefreshCw, Loader2, TrendingUp, TrendingDown, Minus } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import { Skeleton } from "@/components/ui/skeleton";
-import Link from "next/link";
 
 interface TrendsData {
   ok: boolean;
@@ -34,18 +34,6 @@ interface TrendsData {
   }>;
 }
 
-interface CorrelationData {
-  ok: boolean;
-  period: string;
-  include_today: boolean;
-  sources: string[];
-  matrix: Array<Array<number | null>>;
-  p_values: Array<Array<number | null>>;
-  entities?: Array<{ text: string; type: string; mentions: number; avg_sentiment: number }>;
-}
-
-type CachePayload = TrendsData | CorrelationData;
-
 const SOURCES = [
   { value: "all", label: "All Sources" },
   { value: "GMA", label: "GMA" },
@@ -64,45 +52,43 @@ const PERIODS = [
 
 const COLORS = {
   positive: "#22c55e",
-  negative: "#ef4444", 
+  negative: "#ef4444",
   neutral: "#6b7280"
 };
 
-// Simple in-memory cache and inflight dedupe for trends fetches
-const trendsCache = new Map<string, { expires: number; data: CachePayload }>();
-const inflightRequests = new Map<string, Promise<CachePayload>>();
+const trendsCache = new Map<string, { expires: number; data: TrendsData }>();
+const inflightRequests = new Map<string, Promise<TrendsData>>();
 
-async function fetchTrends(source?: string, period: string = "7d", opts?: { refresh?: boolean, ttlMs?: number }): Promise<TrendsData> {
-  const base = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
-  const params = new URLSearchParams({ period, include_today: 'true' });
-  if (source && source !== "all") params.set('source', source);
-  if (opts?.refresh) params.set('refresh', 'true');
-  const key = `trends:${period}:${source || 'all'}:today:1`;
+async function fetchTrends(source?: string, period: string = "7d", opts?: { refresh?: boolean; ttlMs?: number }): Promise<TrendsData> {
+  const base = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
+  const params = new URLSearchParams({ period, include_today: "true" });
+  if (source && source !== "all") params.set("source", source);
+  if (opts?.refresh) params.set("refresh", "true");
+  const key = `trends:${period}:${source || "all"}:today:1`;
   const now = Date.now();
   const ttl = opts?.ttlMs ?? 60_000;
 
   if (!opts?.refresh) {
     const cached = trendsCache.get(key);
-    if (cached && cached.expires > now) {
-      return cached.data;
-    }
+    if (cached && cached.expires > now) return cached.data;
     const inflight = inflightRequests.get(key);
     if (inflight) return inflight;
   }
-  
+
   try {
-    const p = fetch(`${base}/ml/trends?${params}`, { cache: 'no-store' })
+    const req = fetch(`${base}/ml/trends?${params}`, { cache: "no-store" })
       .then(async (res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json = await res.json();
         trendsCache.set(key, { expires: now + ttl, data: json });
-        return json;
+        return json as TrendsData;
       })
       .finally(() => inflightRequests.delete(key));
-    inflightRequests.set(key, p);
-    return await p;
+
+    inflightRequests.set(key, req);
+    return await req;
   } catch (error) {
-    console.error('Failed to fetch trends:', error);
+    console.error("Failed to fetch trends:", error);
     return {
       ok: false,
       summary: {
@@ -119,42 +105,6 @@ async function fetchTrends(source?: string, period: string = "7d", opts?: { refr
   }
 }
 
-async function fetchCorrelation(period: string = "7d", opts?: { refresh?: boolean, ttlMs?: number, sources?: string[], with_entities?: boolean }): Promise<CorrelationData> {
-  const base = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
-  const params = new URLSearchParams({ period, include_today: 'true' });
-  // PERFORMANCE FIX: Only fetch entities if explicitly requested (NER is expensive!)
-  if (opts?.with_entities) params.set('with_entities', 'true');
-  if (opts?.sources && opts.sources.length > 0) params.set('sources', opts.sources.join(','));
-  if (opts?.refresh) params.set('refresh', 'true');
-  const key = `corr:${period}:${(opts?.sources||['all']).join(',')}:today:1:entities:${opts?.with_entities ? '1' : '0'}`;
-  const now = Date.now();
-  const ttl = opts?.ttlMs ?? 60_000;
-
-  if (!opts?.refresh) {
-    const cached = trendsCache.get(key);
-    if (cached && cached.expires > now) return cached.data as CorrelationData;
-    const inflight = inflightRequests.get(key);
-    if (inflight) return inflight as Promise<CorrelationData>;
-  }
-
-  try {
-    const p = fetch(`${base}/ml/correlation?${params}`, { cache: 'no-store' })
-      .then(async (res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const json = await res.json();
-        trendsCache.set(key, { expires: now + ttl, data: json });
-        return json as CorrelationData;
-      })
-      .finally(() => inflightRequests.delete(key));
-    inflightRequests.set(key, p);
-    return await (p as Promise<CorrelationData>);
-  } catch (e) {
-    console.error('Failed to fetch correlation:', e);
-    return { ok: false, period, include_today: true, sources: [], matrix: [], p_values: [] } as CorrelationData;
-  }
-}
-
-// Loading skeleton components
 const SummaryCardSkeleton = () => (
   <Card>
     <CardHeader className="pb-2">
@@ -213,27 +163,23 @@ const TimelineSkeleton = () => (
 
 export default function TrendsPage() {
   const [data, setData] = useState<TrendsData | null>(null);
-  const [corr, setCorr] = useState<CorrelationData | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedSource, setSelectedSource] = useState("all");
   const [selectedPeriod, setSelectedPeriod] = useState("7d");
-  const [viewMode, setViewMode] = useState<'timeline'|'correlation'>("timeline");
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isFilterLoading, setIsFilterLoading] = useState(false);
-  const [isPending, startTransition] = useTransition();
+  const [, startTransition] = useTransition();
 
-  const loadData = async (showRefreshIndicator = false, forceRefresh = false) => {
+  const loadData = useCallback(async (showRefreshIndicator = false, forceRefresh = false) => {
     if (showRefreshIndicator) {
       setIsRefreshing(true);
     } else if (!data) {
-      // Only show the heavy loading state on first load
       setLoading(true);
     } else {
-      // For filter changes, prefer the lighter loading indicator
       setIsFilterLoading(true);
     }
-    
+
     try {
       const trendsData = await fetchTrends(
         selectedSource !== "all" ? selectedSource : undefined,
@@ -243,55 +189,36 @@ export default function TrendsPage() {
       setData(trendsData);
       setLastUpdated(new Date());
     } catch (error) {
-      console.error('Failed to load trends:', error);
+      console.error("Failed to load trends:", error);
     } finally {
       setLoading(false);
       setIsRefreshing(false);
       setIsFilterLoading(false);
     }
-  };
+  }, [data, selectedSource, selectedPeriod]);
 
   const handleSourceChange = (newSource: string) => {
     setIsFilterLoading(true);
-    startTransition(() => {
-      setSelectedSource(newSource);
-    });
+    startTransition(() => setSelectedSource(newSource));
   };
 
   const handlePeriodChange = (newPeriod: string) => {
     setIsFilterLoading(true);
-    startTransition(() => {
-      setSelectedPeriod(newPeriod);
-    });
+    startTransition(() => setSelectedPeriod(newPeriod));
   };
 
   const handleRefresh = () => {
-    if (viewMode === 'timeline') {
-      loadData(true, true);
-    } else {
-      setIsRefreshing(true);
-      fetchCorrelation(selectedPeriod, { refresh: true, sources: selectedSource==='all'? undefined : [selectedSource], with_entities: true })
-        .then(setCorr)
-        .finally(() => setIsRefreshing(false));
-    }
+    loadData(true, true);
   };
 
   useEffect(() => {
-    if (viewMode === 'timeline') {
-      loadData(false, false);
-    } else {
-      setIsFilterLoading(true);
-      fetchCorrelation(selectedPeriod, { sources: selectedSource==='all'? undefined : [selectedSource], with_entities: true })
-        .then(setCorr)
-        .finally(() => setIsFilterLoading(false));
-    }
-  }, [selectedSource, selectedPeriod, viewMode]);
+    loadData(false, false);
+  }, [loadData]);
 
-  // Auto-refresh every 5 minutes
   useEffect(() => {
     const interval = setInterval(() => loadData(true), 5 * 60 * 1000);
     return () => clearInterval(interval);
-  }, [selectedSource, selectedPeriod]);
+  }, [loadData]);
 
   if (loading && !data) {
     return (
@@ -301,7 +228,7 @@ export default function TrendsPage() {
             <Skeleton className="h-8 w-64 mb-2" />
             <Skeleton className="h-4 w-96" />
           </div>
-          
+
           <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
             <div className="flex gap-4">
               <div className="flex flex-col gap-2">
@@ -355,17 +282,19 @@ export default function TrendsPage() {
 
   const { summary, timeline } = data;
 
-  // Prepare data for charts
-  const chartData = timeline.map(day => ({
+  const chartData = timeline.map((day) => ({
     ...day,
-    date: new Date(day.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+    date: new Date(day.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })
   }));
 
-  const getSentimentIcon = (type: 'positive' | 'negative' | 'neutral') => {
+  const getSentimentIcon = (type: "positive" | "negative" | "neutral") => {
     switch (type) {
-      case 'positive': return <TrendingUp className="h-4 w-4" />;
-      case 'negative': return <TrendingDown className="h-4 w-4" />;
-      case 'neutral': return <Minus className="h-4 w-4" />;
+      case "positive":
+        return <TrendingUp className="h-4 w-4" />;
+      case "negative":
+        return <TrendingDown className="h-4 w-4" />;
+      case "neutral":
+        return <Minus className="h-4 w-4" />;
     }
   };
 
@@ -374,21 +303,14 @@ export default function TrendsPage() {
       <div className="space-y-6">
         <div>
           <h1 className="text-3xl font-bold">News Sentiment Trends</h1>
-          <p className="text-muted-foreground">
-            Analyzing sentiment patterns across Philippine news sources
-          </p>
+          <p className="text-muted-foreground">Analyzing sentiment patterns across Philippine news sources</p>
         </div>
 
-        {/* Filter Controls */}
         <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
           <div className="flex gap-4">
             <div className="flex flex-col gap-2">
               <label className="text-sm font-medium">Source</label>
-              <Select 
-                value={selectedSource} 
-                onValueChange={handleSourceChange}
-                disabled={isFilterLoading}
-              >
+              <Select value={selectedSource} onValueChange={handleSourceChange} disabled={isFilterLoading}>
                 <SelectTrigger className="w-[180px]">
                   <SelectValue placeholder="Select source" />
                 </SelectTrigger>
@@ -401,14 +323,10 @@ export default function TrendsPage() {
                 </SelectContent>
               </Select>
             </div>
-            
+
             <div className="flex flex-col gap-2">
               <label className="text-sm font-medium">Period</label>
-              <Select 
-                value={selectedPeriod} 
-                onValueChange={handlePeriodChange}
-                disabled={isFilterLoading}
-              >
+              <Select value={selectedPeriod} onValueChange={handlePeriodChange} disabled={isFilterLoading}>
                 <SelectTrigger className="w-[180px]">
                   <SelectValue placeholder="Select period" />
                 </SelectTrigger>
@@ -422,21 +340,15 @@ export default function TrendsPage() {
               </Select>
             </div>
           </div>
-          
+
           <div className="flex items-center gap-2">
-            <div className="flex items-center gap-2 mr-2">
-              <Button variant={viewMode==='timeline'? 'default':'outline'} size="sm" onClick={() => setViewMode('timeline')} disabled={isFilterLoading}>Timeline</Button>
-              <Button variant={viewMode==='correlation'? 'default':'outline'} size="sm" onClick={() => setViewMode('correlation')} disabled={isFilterLoading}>Correlation</Button>
-              <Button asChild variant="outline" size="sm">
-                <Link href="/entities">Entity Ranking</Link>
-              </Button>
-            </div>
-            <Button 
-              onClick={handleRefresh} 
-              variant="outline" 
-              size="sm"
-              disabled={isRefreshing || isFilterLoading}
-            >
+            <Button asChild variant="outline" size="sm">
+              <Link href="/correlation">Correlation</Link>
+            </Button>
+            <Button asChild variant="outline" size="sm">
+              <Link href="/entities">Entity Ranking</Link>
+            </Button>
+            <Button onClick={handleRefresh} variant="outline" size="sm" disabled={isRefreshing || isFilterLoading}>
               {(isRefreshing || isFilterLoading) ? (
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
               ) : (
@@ -445,65 +357,38 @@ export default function TrendsPage() {
               Refresh
             </Button>
             {lastUpdated && (
-              <span className="text-xs text-muted-foreground">
-                Last updated: {lastUpdated.toLocaleTimeString()}
-              </span>
+              <span className="text-xs text-muted-foreground">Last updated: {lastUpdated.toLocaleTimeString()}</span>
             )}
           </div>
         </div>
 
-        {/* Summary Cards - Visual feedback during loading */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          <Card className={`transition-all duration-500 ${isFilterLoading ? 'opacity-50 scale-98' : 'opacity-100 scale-100'}`}>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium flex items-center gap-2">
-                Total Articles
-              </CardTitle>
-            </CardHeader>
+          <Card className={`transition-all duration-500 ${isFilterLoading ? "opacity-50 scale-98" : "opacity-100 scale-100"}`}>
+            <CardHeader className="pb-2"><CardTitle className="text-sm font-medium">Total Articles</CardTitle></CardHeader>
             <CardContent>
               <div className="text-2xl font-bold transition-all duration-700 ease-out">{summary.total_articles}</div>
-              <p className="text-xs text-muted-foreground">
-                Last {summary.period}
-              </p>
+              <p className="text-xs text-muted-foreground">Last {summary.period}</p>
             </CardContent>
           </Card>
 
-          <Card className={`transition-all duration-500 ${isFilterLoading ? 'opacity-50 scale-98' : 'opacity-100 scale-100'}`}>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium flex items-center gap-2">
-                {getSentimentIcon('positive')}
-                Positive
-              </CardTitle>
-            </CardHeader>
+          <Card className={`transition-all duration-500 ${isFilterLoading ? "opacity-50 scale-98" : "opacity-100 scale-100"}`}>
+            <CardHeader className="pb-2"><CardTitle className="text-sm font-medium flex items-center gap-2">{getSentimentIcon("positive")}Positive</CardTitle></CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-green-600 transition-all duration-700 ease-out">
-                {summary.positive_pct}%
-              </div>
+              <div className="text-2xl font-bold text-green-600 transition-all duration-700 ease-out">{summary.positive_pct}%</div>
               <p className="text-xs text-muted-foreground">Positive sentiment</p>
             </CardContent>
           </Card>
 
-          <Card className={`transition-all duration-500 ${isFilterLoading ? 'opacity-50 scale-98' : 'opacity-100 scale-100'}`}>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium flex items-center gap-2">
-                {getSentimentIcon('negative')}
-                Negative
-              </CardTitle>
-            </CardHeader>
+          <Card className={`transition-all duration-500 ${isFilterLoading ? "opacity-50 scale-98" : "opacity-100 scale-100"}`}>
+            <CardHeader className="pb-2"><CardTitle className="text-sm font-medium flex items-center gap-2">{getSentimentIcon("negative")}Negative</CardTitle></CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-red-600 transition-all duration-700 ease-out">
-                {summary.negative_pct}%
-              </div>
+              <div className="text-2xl font-bold text-red-600 transition-all duration-700 ease-out">{summary.negative_pct}%</div>
               <p className="text-xs text-muted-foreground">Negative sentiment</p>
             </CardContent>
           </Card>
 
-          <Card className={`transition-all duration-500 ${isFilterLoading ? 'opacity-50 scale-98' : 'opacity-100 scale-100'}`}>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium flex items-center gap-2">
-                Daily Average
-              </CardTitle>
-            </CardHeader>
+          <Card className={`transition-all duration-500 ${isFilterLoading ? "opacity-50 scale-98" : "opacity-100 scale-100"}`}>
+            <CardHeader className="pb-2"><CardTitle className="text-sm font-medium">Daily Average</CardTitle></CardHeader>
             <CardContent>
               <div className="text-2xl font-bold transition-all duration-700 ease-out">{summary.avg_daily_articles}</div>
               <p className="text-xs text-muted-foreground">Articles per day</p>
@@ -511,283 +396,84 @@ export default function TrendsPage() {
           </Card>
         </div>
 
-        {/* Views */}
-        {viewMode === 'timeline' && (
-        <>
-        {/* Sentiment Trends Chart */}
-        <Card className={`transition-all duration-500 ${isFilterLoading ? 'opacity-50' : 'opacity-100'}`}>
+        <Card className={`transition-all duration-500 ${isFilterLoading ? "opacity-50" : "opacity-100"}`}>
           <CardHeader>
             <CardTitle>Sentiment Trends Over Time</CardTitle>
-            <CardDescription>
-              Daily sentiment distribution showing trends and patterns
-            </CardDescription>
+            <CardDescription>Daily sentiment distribution showing trends and patterns</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="h-96">
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart 
-                  data={chartData}
-                  margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
-                >
+                <LineChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="date" />
                   <YAxis />
                   <Tooltip />
                   <Legend />
-                  <Line 
-                    type="monotone" 
-                    dataKey="positive" 
-                    stroke={COLORS.positive} 
-                    strokeWidth={3}
-                    name="Positive"
-                    dot={{ fill: COLORS.positive, strokeWidth: 2, r: 3 }}
-                    activeDot={{ r: 4 }}
-                    isAnimationActive={!isFilterLoading}
-                    animationBegin={50}
-                    animationDuration={350}
-                    animationEasing="ease-out"
-                    connectNulls
-                  />
-                  <Line 
-                    type="monotone" 
-                    dataKey="negative" 
-                    stroke={COLORS.negative} 
-                    strokeWidth={3}
-                    name="Negative"
-                    dot={{ fill: COLORS.negative, strokeWidth: 2, r: 3 }}
-                    activeDot={{ r: 4 }}
-                    isAnimationActive={!isFilterLoading}
-                    animationBegin={80}
-                    animationDuration={350}
-                    animationEasing="ease-out"
-                    connectNulls
-                  />
-                  <Line 
-                    type="monotone" 
-                    dataKey="neutral" 
-                    stroke={COLORS.neutral} 
-                    strokeWidth={3}
-                    name="Neutral"
-                    dot={{ fill: COLORS.neutral, strokeWidth: 2, r: 3 }}
-                    activeDot={{ r: 4 }}
-                    isAnimationActive={!isFilterLoading}
-                    animationBegin={110}
-                    animationDuration={350}
-                    animationEasing="ease-out"
-                    connectNulls
-                  />
+                  <Line type="monotone" dataKey="positive" stroke={COLORS.positive} strokeWidth={3} name="Positive" dot={{ fill: COLORS.positive, strokeWidth: 2, r: 3 }} activeDot={{ r: 4 }} connectNulls />
+                  <Line type="monotone" dataKey="negative" stroke={COLORS.negative} strokeWidth={3} name="Negative" dot={{ fill: COLORS.negative, strokeWidth: 2, r: 3 }} activeDot={{ r: 4 }} connectNulls />
+                  <Line type="monotone" dataKey="neutral" stroke={COLORS.neutral} strokeWidth={3} name="Neutral" dot={{ fill: COLORS.neutral, strokeWidth: 2, r: 3 }} activeDot={{ r: 4 }} connectNulls />
                 </LineChart>
               </ResponsiveContainer>
             </div>
           </CardContent>
         </Card>
 
-        {/* Timeline */}
-        <Card className={`transition-all duration-500 ${isFilterLoading ? 'opacity-50' : 'opacity-100'}`}>
+        <Card className={`transition-all duration-500 ${isFilterLoading ? "opacity-50" : "opacity-100"}`}>
           <CardHeader>
             <CardTitle>Daily Sentiment Timeline</CardTitle>
-            <CardDescription>
-              Sentiment distribution over the last {summary.period}
-            </CardDescription>
+            <CardDescription>Sentiment distribution over the last {summary.period}</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
               {timeline.length === 0 ? (
-                <p className="text-muted-foreground text-center py-8">
-                  No data available for the selected period and source.
-                </p>
+                <p className="text-muted-foreground text-center py-8">No data available for the selected period and source.</p>
               ) : (
-                timeline.map((day, index) => (
-                  <div 
-                    key={day.date} 
-                    className="border rounded-lg p-4 transition-all duration-500 hover:shadow-sm min-w-0"
-                    style={{
-                      animationDelay: '0ms',
-                      animation: 'none'
-                    }}
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="font-medium">{day.date}</div>
-                      {(() => {
-                        const analyzed = day.positive + day.neutral + day.negative;
-                        const coveragePct = day.total > 0 ? ((analyzed / day.total) * 100).toFixed(1) : '0.0';
-                        return (
-                          <div className="flex items-center gap-2">
-                            <Badge variant="outline">{day.total} articles</Badge>
-                            <Badge variant="secondary">Analyzed {analyzed}/{day.total} ({coveragePct}%)</Badge>
-                          </div>
-                        );
-                      })()}
+                timeline.map((day) => {
+                  const analyzed = day.positive + day.neutral + day.negative;
+                  const coveragePct = day.total > 0 ? ((analyzed / day.total) * 100).toFixed(1) : "0.0";
+                  const total = Math.max(1, day.total);
+                  const remainderCount = Math.max(0, total - analyzed);
+                  const positiveWidth = (day.positive / total) * 100;
+                  const neutralWidth = (day.neutral / total) * 100;
+                  const negativeWidth = (day.negative / total) * 100;
+                  const unscoredWidth = (remainderCount / total) * 100;
+                  const remainderPct = day.total > 0 ? ((remainderCount / day.total) * 100).toFixed(1) : "0.0";
+
+                  return (
+                    <div key={day.date} className="border rounded-lg p-4 transition-all duration-500 hover:shadow-sm min-w-0">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="font-medium">{day.date}</div>
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline">{day.total} articles</Badge>
+                          <Badge variant="secondary">Analyzed {analyzed}/{day.total} ({coveragePct}%)</Badge>
+                        </div>
+                      </div>
+
+                      <div className="w-full h-3 mb-3 min-w-0 relative group" data-date={day.date}>
+                        <div className="flex h-full rounded-full overflow-hidden shadow-sm">
+                          {day.positive > 0 && <div className="bg-green-500 h-full" style={{ width: `${positiveWidth}%` }} />}
+                          {day.neutral > 0 && <div className="bg-gray-500 h-full" style={{ width: `${neutralWidth}%` }} />}
+                          {day.negative > 0 && <div className="bg-red-500 h-full" style={{ width: `${negativeWidth}%` }} />}
+                          {remainderCount > 0 && <div className="bg-gray-300 h-full" style={{ width: `${unscoredWidth}%` }} />}
+                        </div>
+                      </div>
+
+                      <div className="flex gap-4 text-sm text-muted-foreground">
+                        <span className="text-green-600">Positive: {day.positive} ({day.positive_pct}%)</span>
+                        <span className="text-gray-600">Neutral: {day.neutral} ({day.neutral_pct}%)</span>
+                        <span className="text-red-600">Negative: {day.negative} ({day.negative_pct}%)</span>
+                        {remainderCount > 0 && <span className="text-gray-500">Unscored: {remainderCount} ({remainderPct}%)</span>}
+                        <span>Avg Score: {day.avg_sentiment.toFixed ? day.avg_sentiment.toFixed(3) : day.avg_sentiment}</span>
+                      </div>
                     </div>
-                    
-                    {/* Sentiment Bar (CSS-based) */}
-                    {(() => {
-                      const total = Math.max(1, day.total);
-                      const analyzed = day.positive + day.neutral + day.negative;
-                      const remainderCount = Math.max(0, total - analyzed);
-                      
-                      const positiveWidth = (day.positive / total) * 100;
-                      const neutralWidth = (day.neutral / total) * 100;
-                      const negativeWidth = (day.negative / total) * 100;
-                      const unscoredWidth = (remainderCount / total) * 100;
-                      
-                      return (
-                        <div className="w-full h-3 mb-3 min-w-0 relative group" data-date={day.date}>
-                          <div className="flex h-full rounded-full overflow-hidden shadow-sm">
-                            {day.positive > 0 && (
-                              <div 
-                                className="bg-green-500 h-full transition-all duration-200 hover:bg-green-600 hover:scale-y-110"
-                                style={{ width: `${positiveWidth}%` }}
-                                title={`Positive: ${day.positive} (${positiveWidth.toFixed(1)}% of total, ${analyzed > 0 ? ((day.positive / analyzed) * 100).toFixed(1) : '0.0'}% of analyzed)`}
-                              />
-                            )}
-                            {day.neutral > 0 && (
-                              <div 
-                                className="bg-gray-500 h-full transition-all duration-200 hover:bg-gray-600 hover:scale-y-110"
-                                style={{ width: `${neutralWidth}%` }}
-                                title={`Neutral: ${day.neutral} (${neutralWidth.toFixed(1)}% of total, ${analyzed > 0 ? ((day.neutral / analyzed) * 100).toFixed(1) : '0.0'}% of analyzed)`}
-                              />
-                            )}
-                            {day.negative > 0 && (
-                              <div 
-                                className="bg-red-500 h-full transition-all duration-200 hover:bg-red-600 hover:scale-y-110"
-                                style={{ width: `${negativeWidth}%` }}
-                                title={`Negative: ${day.negative} (${negativeWidth.toFixed(1)}% of total, ${analyzed > 0 ? ((day.negative / analyzed) * 100).toFixed(1) : '0.0'}% of analyzed)`}
-                              />
-                            )}
-                            {remainderCount > 0 && (
-                              <div 
-                                className="bg-gray-300 h-full transition-all duration-200 hover:bg-gray-400 hover:scale-y-110"
-                                style={{ width: `${unscoredWidth}%` }}
-                                title={`Unscored: ${remainderCount} (${unscoredWidth.toFixed(1)}% of total)`}
-                              />
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })()}
-                    
-                    {/* Sentiment Stats */}
-                    {(() => {
-                      const analyzed = day.positive + day.neutral + day.negative;
-                      const remainderCount = Math.max(0, day.total - analyzed);
-                      const remainderPct = day.total > 0 ? ((remainderCount / day.total) * 100).toFixed(1) : '0.0';
-                      return (
-                        <div className="flex gap-4 text-sm text-muted-foreground">
-                          <span className="text-green-600">
-                            Positive: {day.positive} ({day.positive_pct}%)
-                          </span>
-                          <span className="text-gray-600">
-                            Neutral: {day.neutral} ({day.neutral_pct}%)
-                          </span>
-                          <span className="text-red-600">
-                            Negative: {day.negative} ({day.negative_pct}%)
-                          </span>
-                          {remainderCount > 0 && (
-                            <span className="text-gray-500">
-                              Unscored: {remainderCount} ({remainderPct}%)
-                            </span>
-                          )}
-                          <span>
-                            Avg Score: {day.avg_sentiment.toFixed ? day.avg_sentiment.toFixed(3) : day.avg_sentiment}
-                          </span>
-                        </div>
-                      );
-                    })()}
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
           </CardContent>
         </Card>
-
-        </>
-        )}
-
-        {viewMode === 'correlation' && (
-          <Card className={`transition-all duration-500 ${isFilterLoading ? 'opacity-50' : 'opacity-100'}`}>
-            <CardHeader>
-              <CardTitle>Source Correlation (Pearson r)</CardTitle>
-              <CardDescription>
-                Daily average sentiment correlation across sources (last {selectedPeriod})
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {!corr?.ok || (corr?.sources?.length ?? 0) === 0 ? (
-                <div className="text-sm text-muted-foreground py-6">No correlation data available.</div>
-              ) : (
-                <div className="overflow-auto">
-                  <table className="min-w-full text-sm">
-                    <thead>
-                      <tr>
-                        <th className="text-left p-2">Source</th>
-                        {corr.sources.map((s) => (
-                          <th key={s} className="text-left p-2">{s}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {corr.sources.map((rowSrc, i) => (
-                        <tr key={rowSrc} className="border-t">
-                          <td className="p-2 font-medium">{rowSrc}</td>
-                          {corr.sources.map((colSrc, j) => {
-                            const r = corr.matrix[i]?.[j];
-                            const p = corr.p_values[i]?.[j];
-                            const bg = r == null ? 'bg-gray-100' : r >= 0.5 ? 'bg-green-100' : r <= -0.5 ? 'bg-red-100' : 'bg-yellow-50';
-                            return (
-                              <td key={colSrc} className={`p-2 ${bg}`} title={`r=${r==null? 'n/a' : r.toFixed(3)}${p!=null? `, p=${p.toFixed(3)}`:''}`}>
-                                {r == null ? '—' : r.toFixed(3)}
-                              </td>
-                            );
-                          })}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  {corr.entities && corr.entities.length > 0 && (
-                    <div className="mt-6">
-                      <div className="text-sm font-medium mb-2">Top Entities (NER + Sentiment)</div>
-                      <table className="min-w-full text-sm">
-                        <thead>
-                          <tr>
-                            <th className="text-left p-2">Entity</th>
-                            <th className="text-left p-2">Type</th>
-                            <th className="text-left p-2">Mentions</th>
-                            <th className="text-left p-2">Avg Sentiment</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {corr.entities.map((e) => (
-                            <tr key={`${e.text}:${e.type}`} className="border-t">
-                              <td className="p-2">{e.text}</td>
-                              <td className="p-2 text-muted-foreground">{e.type}</td>
-                              <td className="p-2">{e.mentions}</td>
-                              <td className="p-2">{e.avg_sentiment.toFixed(3)}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        )}
       </div>
-
-      <style jsx>{`
-        @keyframes fadeInUp {
-          from {
-            opacity: 0;
-            transform: translateY(20px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
-      `}</style>
     </div>
   );
 }
