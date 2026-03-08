@@ -1,6 +1,7 @@
 import MainLayout from "@/components/layout/main-layout";
 import ArticleRowServer from "../components/articles/article-row-server";
-import { fetchAllArticles, fetchLatestAnalysisByIds, fetchArticles } from "@/lib/articles";
+import { fetchAllArticles, fetchLatestAnalysisByIds } from "@/lib/articles";
+import type { AnalysisRow, Article } from "@/lib/types";
 
 // Cache the page for faster first load; refresh every 60s
 export const revalidate = 60;
@@ -45,11 +46,11 @@ export default async function Home() {
   } catch {}
 
   // Regroup by each article's own source field using robust normalization
-  const normalizedBySource: Record<string, any[]> = Object.fromEntries(
-    canonicalOrder.map((k) => [k, [] as any[]])
-  );
+  const normalizedBySource = Object.fromEntries(
+    canonicalOrder.map((k) => [k, [] as Article[]])
+  ) as Record<string, Article[]>;
 
-  const allArticlesFlat: any[] = Object.values(articlesBySource).flat() as any[];
+  const allArticlesFlat: Article[] = Object.values(articlesBySource).flat();
   for (const article of allArticlesFlat) {
     const src = normalizeName(String(article?.source || ""));
     let placed = false;
@@ -78,11 +79,11 @@ export default async function Home() {
   // Collect all article IDs for a single batched sentiment fetch
   const allArticleIds: number[] = Object.values(normalizedBySource)
     .flat()
-    .map((a: any) => Number(a.id))
+    .map((a) => Number(a.id))
     .filter(Boolean);
 
   // Fetch latest sentiment/bias analysis in one request (optional; non-fatal if fails)
-  let analysisById: Record<number, any> = {};
+  let analysisById: Record<number, AnalysisRow | null> = {};
   if (allArticleIds.length > 0) {
     try {
       analysisById = await fetchLatestAnalysisByIds(allArticleIds);
@@ -93,9 +94,9 @@ export default async function Home() {
   const tAfterAnalysis = Date.now();
 
   // Merge sentiment into articles before rendering
-  const enrichedBySource: Record<string, any[]> = {};
+  const enrichedBySource: Record<string, Article[]> = {};
   for (const [source, articles] of Object.entries(normalizedBySource)) {
-    enrichedBySource[source] = (articles || []).map((article: any) => {
+    enrichedBySource[source] = (articles || []).map((article) => {
       const analysis = analysisById[Number(article.id)];
       const sentiment = analysis?.sentiment_label || null;
       return { ...article, sentiment };

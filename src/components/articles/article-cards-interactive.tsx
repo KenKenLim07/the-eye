@@ -9,14 +9,14 @@ import { Eye, ExternalLink } from "lucide-react";
 import { formatDate } from "@/lib/utils/date";
 
 interface Article {
-  id: number;
+  id: number | string;
   title: string;
-  content?: string;
+  content: string | null;
   source: string;
-  category?: string;
-  published_at: string;
-  url?: string;
-  sentiment?: string; // Optional - may not be present
+  category: string | null;
+  published_at: string | null;
+  url: string | null;
+  sentiment?: string | null; // Optional - may not be present
 }
 
 interface ArticleCardsInteractiveProps {

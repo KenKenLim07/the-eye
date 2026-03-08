@@ -43,7 +43,7 @@ export default async function FundsPage({ searchParams }: { searchParams?: { pag
         <Card>
           <CardHeader>
             <CardTitle>No funds-related articles</CardTitle>
-            <CardDescription>We couldn't find any items marked as funds yet.</CardDescription>
+            <CardDescription>We couldn&apos;t find any items marked as funds yet.</CardDescription>
           </CardHeader>
         </Card>
       ) : (

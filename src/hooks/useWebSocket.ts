@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 
 interface WebSocketMessage {
   type: string;
-  data?: any;
+  data?: unknown;
   message?: string;
 }
 
@@ -10,7 +10,7 @@ export function useWebSocket(url: string) {
   const [socket, setSocket] = useState<WebSocket | null>(null);
   const [lastMessage, setLastMessage] = useState<WebSocketMessage | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<'Connecting' | 'Open' | 'Closing' | 'Closed'>('Closed');
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout>();
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectAttempts = useRef(0);
   const maxReconnectAttempts = 5;
 

@@ -132,7 +132,7 @@ export async function fetchAllArticles(limit: number = 10): Promise<Record<strin
   }
 }
 
-export async function fetchDashboardData(): Promise<any> {
+export async function fetchDashboardData(): Promise<unknown> {
   try {
     const response = await fetch(
       `${process.env.NEXT_PUBLIC_BACKEND_URL}/dashboard/comprehensive`,
@@ -150,7 +150,7 @@ export async function fetchDashboardData(): Promise<any> {
   }
 }
 
-export async function fetchTrendsData(period: string = '7d', source?: string): Promise<any> {
+export async function fetchTrendsData(period: string = '7d', source?: string): Promise<unknown> {
   try {
     const params = new URLSearchParams({ period });
     if (source) {
