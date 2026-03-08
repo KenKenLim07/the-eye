@@ -18,7 +18,8 @@ def analyze_articles_task(self, article_ids: list[int]):
         out_rows = []
         for r in rows:
             article_id = r.get("id")
-            text = " ".join([str(r.get("title") or ""), str(r.get("content") or "")] ).strip()
+            # Preserve title/body boundary for long-form sentiment weighting.
+            text = f"{str(r.get('title') or '').strip()}\n\n{str(r.get('content') or '').strip()}".strip()
             out_rows.extend(build_comprehensive_bias_analysis(int(article_id), text))
         
         inserted = 0

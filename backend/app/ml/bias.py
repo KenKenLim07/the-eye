@@ -2,6 +2,7 @@ import time
 from typing import Tuple, Dict, Any
 import json
 import os
+import re
 
 # Lazy NLTK/VADER import and resource bootstrap
 _vader = None
@@ -63,23 +64,133 @@ def get_political_keywords_and_weights() -> Tuple[Dict[str, Any], Dict[str, floa
 
 # Existing sentiment analysis
 
+def _label_from_compound(compound: float, pos_threshold: float = 0.05, neg_threshold: float = -0.05) -> str:
+    if compound >= pos_threshold:
+        return "positive"
+    if compound <= neg_threshold:
+        return "negative"
+    return "neutral"
+
+
+def _split_long_text_chunks(text: str, max_chunk_chars: int = 700) -> tuple[str, list[str]]:
+    """Split long news text into title + body chunks for weighted VADER aggregation."""
+    raw = (text or "").strip()
+    if not raw:
+        return "", []
+
+    # Prefer explicit title/body split when caller provides "\n\n" separator.
+    blocks = [b.strip() for b in re.split(r"\n{2,}", raw) if b and b.strip()]
+    if len(blocks) >= 2:
+        title = blocks[0]
+        body_text = "\n\n".join(blocks[1:])
+    else:
+        title = blocks[0] if blocks else ""
+        body_text = ""
+
+    # Sentence-level segmentation as base unit for chunking.
+    sentence_source = body_text if body_text else raw
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+|\n+", sentence_source) if s and s.strip()]
+    if not sentences:
+        return title, []
+
+    chunks: list[str] = []
+    current: list[str] = []
+    current_len = 0
+    for s in sentences:
+        slen = len(s)
+        if current and (current_len + slen + 1) > max_chunk_chars:
+            chunks.append(" ".join(current))
+            current = [s]
+            current_len = slen
+        else:
+            current.append(s)
+            current_len += slen + (1 if current else 0)
+    if current:
+        chunks.append(" ".join(current))
+    return title, chunks
+
+
+def analyze_sentiment_vader_detailed(text: str) -> Tuple[float, str, float, Dict[str, Any]]:
+    """
+    Long-form VADER scoring for news:
+    - score title, lead, and body chunks
+    - aggregate with fixed weights to reduce long-text dilution
+    """
+    start = time.time()
+    sia = _ensure_vader()
+
+    title, chunks = _split_long_text_chunks(text)
+    raw_text = (text or "").strip()
+
+    if not raw_text:
+        elapsed_ms = (time.time() - start) * 1000.0
+        return 0.0, "neutral", elapsed_ms, {
+            "library": "nltk-vader",
+            "mode": "longform_weighted",
+            "chunks_analyzed": 0,
+            "title_present": False,
+            "weights": {"title": 0.25, "lead": 0.35, "body": 0.40},
+            "threshold_pos": 0.05,
+            "threshold_neg": -0.05,
+        }
+
+    # Fallback for short content: standard VADER on full text.
+    if len(raw_text) < 350:
+        score = float(sia.polarity_scores(raw_text).get("compound", 0.0))
+        label = _label_from_compound(score)
+        elapsed_ms = (time.time() - start) * 1000.0
+        return score, label, elapsed_ms, {
+            "library": "nltk-vader",
+            "mode": "short_text",
+            "chunks_analyzed": 1,
+            "title_present": bool(title),
+            "weights": {"full_text": 1.0},
+            "threshold_pos": 0.05,
+            "threshold_neg": -0.05,
+        }
+
+    title_score = float(sia.polarity_scores(title).get("compound", 0.0)) if title else None
+    chunk_scores = [float(sia.polarity_scores(c).get("compound", 0.0)) for c in chunks] if chunks else []
+
+    if chunk_scores:
+        lead_scores = chunk_scores[:2]
+        body_scores = chunk_scores[2:] if len(chunk_scores) > 2 else chunk_scores
+        lead_avg = sum(lead_scores) / len(lead_scores)
+        body_avg = sum(body_scores) / len(body_scores)
+    else:
+        lead_avg = float(sia.polarity_scores(raw_text).get("compound", 0.0))
+        body_avg = lead_avg
+
+    w_title, w_lead, w_body = 0.25, 0.35, 0.40
+    if title_score is None:
+        # Rebalance when title is unavailable.
+        w_title, w_lead, w_body = 0.0, 0.45, 0.55
+
+    compound = (w_title * (title_score or 0.0)) + (w_lead * lead_avg) + (w_body * body_avg)
+    label = _label_from_compound(compound)
+    elapsed_ms = (time.time() - start) * 1000.0
+    metadata = {
+        "library": "nltk-vader",
+        "mode": "longform_weighted",
+        "chunks_analyzed": len(chunk_scores),
+        "title_present": title_score is not None,
+        "weights": {"title": w_title, "lead": w_lead, "body": w_body},
+        "title_score": title_score,
+        "lead_avg_score": lead_avg,
+        "body_avg_score": body_avg,
+        "threshold_pos": 0.05,
+        "threshold_neg": -0.05,
+    }
+    return compound, label, elapsed_ms, metadata
+
+
 def analyze_sentiment_vader(text: str) -> Tuple[float, str, float]:
     """
     Returns: (compound_score, label, elapsed_ms)
     compound_score in [-1, 1]
     label in {positive|neutral|negative}
     """
-    start = time.time()
-    sia = _ensure_vader()
-    scores = sia.polarity_scores(text or "")
-    compound = float(scores.get("compound", 0.0))
-    if compound >= 0.05:
-        label = "positive"
-    elif compound <= -0.05:
-        label = "negative"
-    else:
-        label = "neutral"
-    elapsed_ms = (time.time() - start) * 1000.0
+    compound, label, elapsed_ms, _ = analyze_sentiment_vader_detailed(text)
     return compound, label, elapsed_ms
 
 
@@ -253,7 +364,7 @@ def analyze_political_bias_philippine(text: str) -> Tuple[float, str, float, Dic
 
 
 def build_bias_row_for_vader(article_id: int, text: str) -> Dict[str, Any]:
-    compound, label, elapsed_ms = analyze_sentiment_vader(text)
+    compound, label, elapsed_ms, details = analyze_sentiment_vader_detailed(text)
     return {
         "article_id": article_id,
         "model_version": "vader_v1",
@@ -262,7 +373,7 @@ def build_bias_row_for_vader(article_id: int, text: str) -> Dict[str, Any]:
         "sentiment_label": label,
         "confidence_score": None,
         "processing_time_ms": int(elapsed_ms),
-        "model_metadata": {"library": "nltk-vader", "threshold_pos": 0.05, "threshold_neg": -0.05},
+        "model_metadata": details,
     }
 
 
