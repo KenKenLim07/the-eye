@@ -96,7 +96,13 @@ export async function fetchLatestAnalysisByIds(articleIds: number[]): Promise<Re
 
 export async function fetchAllArticles(limit: number = 10): Promise<Record<string, Article[]>> {
   try {
-    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
+    const backendUrl =
+      process.env.NEXT_PUBLIC_BACKEND_URL ||
+      (process.env.NODE_ENV === "development" ? "http://localhost:8000" : "");
+    if (!backendUrl) {
+      console.error("NEXT_PUBLIC_BACKEND_URL is not set; skipping article fetch in production build/runtime.");
+      return {};
+    }
 
     // Use optimized single-query endpoint instead of 7 separate queries
     const response = await fetch(`${backendUrl}/articles/home-optimized?limit_per_source=${limit}`, {
