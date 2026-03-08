@@ -465,6 +465,8 @@ async def get_home_articles(limit_per_source: int = 10, refresh: bool = False):
 
         total_found = sum(len(v or []) for v in articles_by_source.values())
         all_empty = total_found == 0
+        missing_sources = [src for src, rows in articles_by_source.items() if not (rows or [])]
+        partial_empty = 0 < len(missing_sources) < len(sources)
 
         result_data = {"articles_by_source": articles_by_source}
 
@@ -481,7 +483,17 @@ async def get_home_articles(limit_per_source: int = 10, refresh: bool = False):
                 print(f"home-optimized all-empty with source errors: {source_errors}")
             return result_data
 
-        # Cache the result (e.g., 10 minutes) and save as last known good snapshot.
+        # Partial-empty snapshots are often transient (one source lagging or timeout),
+        # so keep them short-lived and avoid replacing the last known good cache.
+        if partial_empty:
+            set_cached(cache_key, result_data, 60)
+            if source_errors:
+                print(f"home-optimized partial-empty ({missing_sources}) with source errors: {source_errors}")
+            else:
+                print(f"home-optimized partial-empty ({missing_sources})")
+            return result_data
+
+        # Cache fully healthy result (e.g., 10 minutes) and save as last known good snapshot.
         set_cached(cache_key, result_data, 600)
         set_cached(last_good_key, result_data, 3600)
         return result_data
