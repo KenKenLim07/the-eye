@@ -32,3 +32,10 @@ coverage/
 .idea/
 .vscode/
 backend/celerybeat-schedule.db
+
+# Playwright/Browser profiles
+.playwright_profile/
+test-results/
+playwright-report/
+blob-report/
+playwright/.local-browsers
