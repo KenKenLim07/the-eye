@@ -23,7 +23,6 @@ RUN python -m spacy download en_core_web_sm
 COPY . .
 
 # Set environment variables
-ENV USE_SPACY_FUNDS=true
 ENV PYTHONPATH=/app
 
 # Expose port

@@ -25,7 +25,7 @@ try:
     nlp = spacy.load('en_core_web_sm')
     print('✅ spaCy model loaded successfully')
     
-    # Test NER on funds-related text
+    # Test NER on sample text
     doc = nlp('DPWH allocates P5 billion for flood control projects')
     entities = [(ent.text, ent.label_) for ent in doc.ents]
     print(f'✅ NER test: {entities}')
@@ -45,14 +45,14 @@ if [ $? -eq 0 ]; then
     echo "✅ spaCy installation successful!"
     echo ""
     echo "🎯 Next Steps:"
-    echo "1. Add to your .env file: USE_SPACY_FUNDS=true"
+    echo "1. No .env feature flag is required (spaCy is used for NER)."
     echo "2. Restart your backend service"
     echo "3. Test accuracy improvements"
     echo ""
     echo "📊 Expected Improvements:"
     echo "- Filter out earthquake/typhoon disasters"
     echo "- Better government entity recognition"
-    echo "- Higher precision in funds detection"
+    echo "- Better entity extraction quality in analytics"
 else
     echo "❌ spaCy installation failed"
     exit 1

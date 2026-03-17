@@ -62,7 +62,7 @@ echo ""
 echo "🎉 spaCy installation complete!"
 echo "   You can now enable spaCy analytics with:"
 echo "   export USE_SPACY_ANALYTICS=true"
-echo "   export USE_SPACY_FUNDS=true"
+echo "   spaCy is used for NER; no feature flag is required."
 
 
 

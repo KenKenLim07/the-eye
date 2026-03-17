@@ -1,154 +1,45 @@
-# 🚀 Senior Dev: Production Deployment Guide
+# Production Deployment Notes
 
-## 📋 **Answer: Do You Need a New Table?**
+This project is a Next.js frontend plus a FastAPI backend with Celery workers/beat and Redis, using Supabase (PostgreSQL) for storage.
 
-**NO** - Your current implementation is production-ready without additional tables:
+## Services
 
-✅ **Current Setup (Perfect for Production):**
+- Frontend: Next.js (typically deployed to Vercel)
+- Backend API: FastAPI (Docker container)
+- Background jobs: Celery worker + Celery beat (Docker containers)
+- Broker/cache: Redis (Docker container)
+- Database: Supabase (hosted Postgres)
 
-- `articles.is_funds` column stores classification results
-- `bias_analysis` table handles ML results with versioning
-- Real-time analytics via API endpoints
-- Celery background processing for insights
+## Environment Variables
 
-✅ **Why This is the Right Approach:**
+Backend (FastAPI/Celery):
 
-- **KISS Principle**: Don't over-engineer until needed
-- **Existing Infrastructure**: Leverages your current ML pipeline
-- **Performance**: Fast enough for current scale (90+ articles/day)
-- **Flexibility**: Can add tables later if analytics grow
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `REDIS_URL` (example: `redis://redis:6379/0`)
+- `CELERY_BROKER_URL` (example: `redis://redis:6379/0`)
+- `CELERY_RESULT_BACKEND` (example: `redis://redis:6379/1`)
+- `CORS_ALLOW_ORIGINS` (comma-separated list; optional)
 
-## 🎯 **Senior Dev Deployment Strategy**
+Frontend (Next.js):
 
-### **Phase 1: Safe Deploy (Regex Only)**
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `NEXT_PUBLIC_BACKEND_URL`
 
-```bash
-# 1. Add to your .env file
-USE_SPACY_FUNDS=false
+## Recommended Smoke Checks
 
-# 2. Restart your backend
-# (Your current setup already works perfectly)
+- Backend: `GET /health`
+- Backend data: `GET /articles/home-optimized?limit_per_source=2&refresh=true`
+- Analytics:
+  - `GET /ml/trends?period=7d&refresh=true`
+  - `GET /ml/correlation?period=7d&refresh=true`
+  - `GET /ml/entities/top?period=7d&refresh=true`
 
-# 3. Test the deployment
-./scripts/test_funds_production.sh
-```
+## Notes
 
-### **Phase 2: spaCy Integration (When Ready)**
+- Scrapers can fail or produce partial days when sources change layout or when the system is offline; treat missing days as expected operational behavior and rely on `scraping_logs` for traceability.
+- Avoid redistributing full publisher article text in public artifacts; store only what is necessary for analysis and provide links to original URLs.
 
-```bash
-# Option A: Docker (Recommended for Production)
-docker-compose -f docker-compose.spacy.yml up -d
-
-# Option B: Local with Virtual Environment
-python3 -m venv venv
-source venv/bin/activate
-pip install spacy==3.7.4
-python -m spacy download en_core_web_sm
-
-# Enable spaCy
-USE_SPACY_FUNDS=true
-```
-
-### **Phase 3: Data Migration**
-
-```bash
-# Recompute all existing articles with new rules
-curl -X POST "http://localhost:8000/maintenance/recompute_is_funds" \
-  -H "X-Admin-Token: your-admin-token"
-```
-
-## 📊 **Current Performance Metrics**
-
-From your live system:
-
-- ✅ **90 funds articles** detected in last 24 hours
-- ✅ **< 500ms** response time (excellent)
-- ✅ **Top sources**: GMA (17), Manila Times (16), Sunstar (15)
-- ✅ **Database integration** working perfectly
-
-## 🔧 **Production Monitoring**
-
-### **Automated Monitoring**
-
-```bash
-# Run every 15 minutes
-./scripts/monitor_funds_detection.sh
-
-# Set up alerts for:
-# - Response time > 5 seconds
-# - API health check failures
-# - Memory usage > 1GB (if using spaCy)
-```
-
-### **Key Metrics to Watch**
-
-1. **Classification Accuracy**: Monitor false positives/negatives
-2. **Performance**: Keep response times < 2 seconds
-3. **Memory Usage**: spaCy model uses ~50MB RAM
-4. **Database Load**: Monitor query performance
-
-## 🎯 **Senior Dev Recommendations**
-
-### **Immediate Actions (Today)**
-
-1. ✅ **Deploy with regex-only** (already working)
-2. ✅ **Test all endpoints** (use provided test script)
-3. ✅ **Monitor for 24-48 hours**
-
-### **Next Week (If Performance is Good)**
-
-1. 🔄 **Enable spaCy in staging** first
-2. 🔄 **Compare regex vs spaCy accuracy**
-3. 🔄 **Validate memory usage**
-
-### **Future Enhancements (When Needed)**
-
-1. 📈 **Add funds_insights table** for historical analytics
-2. 📈 **Implement caching** for frequently accessed data
-3. 📈 **Add entity extraction** to bias_analysis table
-
-## 🚨 **Rollback Plan**
-
-If issues arise:
-
-```bash
-# Disable spaCy immediately
-USE_SPACY_FUNDS=false
-
-# Restart services
-# (Your regex-only mode will continue working)
-
-# Revert to previous classification if needed
-curl -X POST "http://localhost:8000/maintenance/recompute_is_funds"
-```
-
-## 📈 **Success Metrics**
-
-**Week 1 Goals:**
-
-- ✅ 95%+ uptime
-- ✅ < 2s response times
-- ✅ < 5% false positive rate
-
-**Month 1 Goals:**
-
-- 📊 1000+ funds articles analyzed
-- 📊 spaCy enabled with 10%+ accuracy improvement
-- 📊 Analytics dashboard showing trends
-
-## 🎉 **You're Production Ready!**
-
-Your implementation follows senior dev best practices:
-
-- ✅ **Incremental deployment** (regex first, spaCy later)
-- ✅ **Feature flags** for safe rollout
-- ✅ **Comprehensive testing** scripts
-- ✅ **Monitoring and alerting** setup
-- ✅ **Rollback strategy** in place
-
-**No new tables needed** - your current architecture is solid! 🚀
-
-
-
-
+Last updated: March 2026
 

@@ -7,6 +7,11 @@ __pycache__/
 .coverage
 dist/
 build/
+*.log
+*.bak
+*.backup
+*.broken
+-Headers
 
 # Virtual envs
 venv/

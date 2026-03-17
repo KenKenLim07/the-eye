@@ -6,7 +6,6 @@ export interface Article {
   published_at: string | null;
   source: string;
   category: string | null;
-  is_funds?: boolean | null;
   // Optional fields that may be present in responses
   sentiment?: string | null;
 }

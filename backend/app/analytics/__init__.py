@@ -1,1 +1,1 @@
-# Analytics module for funds analysis
+# Analytics helpers.

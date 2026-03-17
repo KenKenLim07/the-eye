@@ -176,10 +176,11 @@ export_frontend_data() {
     
     if echo "$response" | grep -q '"ok": true'; then
         # Save to file
-        echo "$response" | python3 -m json.tool > frontend_data.json
+        mkdir -p archive/artifacts
+        echo "$response" | python3 -m json.tool > archive/artifacts/frontend_data.json
         
-        echo -e "${GREEN}✅ Frontend data exported to frontend_data.json${NC}"
-        echo -e "${BLUE}File size: $(wc -c < frontend_data.json) bytes${NC}"
+        echo -e "${GREEN}✅ Frontend data exported to archive/artifacts/frontend_data.json${NC}"
+        echo -e "${BLUE}File size: $(wc -c < archive/artifacts/frontend_data.json) bytes${NC}"
         
         # Create a summary file
         echo "$response" | python3 -c "
@@ -203,11 +204,11 @@ summary = {
     'generated_at': data['generated_at']
 }
 
-with open('frontend_summary.json', 'w') as f:
+with open('archive/artifacts/frontend_summary.json', 'w') as f:
     json.dump(summary, f, indent=2)
 " > /dev/null
         
-        echo -e "${GREEN}✅ Summary exported to frontend_summary.json${NC}"
+        echo -e "${GREEN}✅ Summary exported to archive/artifacts/frontend_summary.json${NC}"
     else
         echo -e "${RED}❌ Failed to export data${NC}"
     fi
