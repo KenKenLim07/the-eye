@@ -6,11 +6,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Loader2, RefreshCw } from "lucide-react";
+import { supabase } from "@/lib/supabase";
 
 interface NerEntity {
   text: string;
   type: string;
   mentions: number;
+  avg_sentiment?: number | null;
 }
 
 interface NerSampleData {
@@ -21,6 +23,7 @@ interface NerSampleData {
   total_available?: number;
   total_capped?: number;
   scan_mode?: string;
+  computed_at?: string;
   top_entities: NerEntity[];
 }
 
@@ -42,6 +45,18 @@ const PERIODS = [
 
 const cache = new Map<string, { expires: number; data: NerSampleData }>();
 const inflight = new Map<string, Promise<NerSampleData>>();
+
+const snapshotsCache = new Map<string, { expires: number; data: NerSampleData }>();
+const snapshotsInflight = new Map<string, Promise<NerSampleData>>();
+
+function shouldUseSnapshots(): boolean {
+  return process.env.NEXT_PUBLIC_ANALYTICS_SOURCE === "supabase_snapshots" || !process.env.NEXT_PUBLIC_BACKEND_URL;
+}
+
+function snapshotKeyFor(period: string): string {
+  // Matches backend/scripts/entity_rankings_snapshot.py
+  return `entities:period=${period}:source=all:include_today=1:scan=fast:limit=500:cap=1000:max=100`;
+}
 
 async function fetchTopEntities(period: string, source: string | undefined, scanProfile: "fast500" | "deep1000", refresh = false): Promise<NerSampleData> {
   const base = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
@@ -123,7 +138,81 @@ async function fetchTopEntities(period: string, source: string | undefined, scan
   return req;
 }
 
+async function fetchTopEntitiesFromSnapshots(period: string, refresh = false): Promise<NerSampleData> {
+  const key = `entities_snapshots:${period}:all`;
+  const now = Date.now();
+  const ttl = 60_000;
+
+  if (!refresh) {
+    const c = snapshotsCache.get(key);
+    if (c && c.expires > now) return c.data;
+    const r = snapshotsInflight.get(key);
+    if (r) return r;
+  }
+
+  const req = (async () => {
+    try {
+      const snapshotKey = snapshotKeyFor(period);
+
+      const snapRes = await supabase
+        .from("entity_rankings_snapshots")
+        .select("key,period,source,computed_at,sampled,limit_articles,total_cap,total_available,total_capped,scan_mode,max_entities")
+        .eq("key", snapshotKey)
+        .maybeSingle();
+
+      if (snapRes.error) {
+        throw new Error(snapRes.error.message);
+      }
+      if (!snapRes.data) {
+        return { ok: false, top_entities: [] };
+      }
+
+      const itemsRes = await supabase
+        .from("entity_rankings_items")
+        .select("entity_text,entity_type,mentions,avg_sentiment")
+        .eq("snapshot_key", snapRes.data.key)
+        .order("mentions", { ascending: false })
+        .limit(100);
+
+      if (itemsRes.error) {
+        throw new Error(itemsRes.error.message);
+      }
+
+      const data: NerSampleData = {
+        ok: true,
+        computed_at: snapRes.data.computed_at ?? undefined,
+        sampled: typeof snapRes.data.sampled === "number" ? snapRes.data.sampled : 0,
+        sample_cap: typeof snapRes.data.limit_articles === "number" ? snapRes.data.limit_articles : 500,
+        total_cap: typeof snapRes.data.total_cap === "number" ? snapRes.data.total_cap : 1000,
+        total_available: typeof snapRes.data.total_available === "number" ? snapRes.data.total_available : undefined,
+        total_capped: typeof snapRes.data.total_capped === "number" ? snapRes.data.total_capped : undefined,
+        scan_mode: typeof snapRes.data.scan_mode === "string" ? snapRes.data.scan_mode : "fast",
+        top_entities: Array.isArray(itemsRes.data)
+          ? itemsRes.data.map((r) => ({
+              text: String(r.entity_text ?? ""),
+              type: String(r.entity_type ?? ""),
+              mentions: Number(r.mentions ?? 0),
+              avg_sentiment: r.avg_sentiment == null ? null : Number(r.avg_sentiment),
+            }))
+          : [],
+      };
+
+      snapshotsCache.set(key, { expires: now + ttl, data });
+      return data;
+    } catch (err) {
+      console.error("Failed to fetch entity snapshots:", err);
+      return { ok: false, top_entities: [] };
+    } finally {
+      snapshotsInflight.delete(key);
+    }
+  })();
+
+  snapshotsInflight.set(key, req);
+  return req;
+}
+
 export default function EntitiesPage() {
+  const useSnapshots = shouldUseSnapshots();
   const [selectedSource, setSelectedSource] = useState("all");
   const [selectedPeriod, setSelectedPeriod] = useState("30d");
   const [rows, setRows] = useState<NerEntity[]>([]);
@@ -136,24 +225,37 @@ export default function EntitiesPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [isPending, startTransition] = useTransition();
+  const [computedAt, setComputedAt] = useState<string | null>(null);
 
   const load = useCallback(async (refresh = false) => {
     if (refresh) setRefreshing(true);
     else setLoading(true);
-    const data = await fetchTopEntities(selectedPeriod, selectedSource !== "all" ? selectedSource : undefined, scanProfile, refresh);
+    const effectiveSource = useSnapshots ? "all" : selectedSource;
+    const effectiveScanProfile = useSnapshots ? "fast500" : scanProfile;
+    const data = useSnapshots
+      ? await fetchTopEntitiesFromSnapshots(selectedPeriod, refresh)
+      : await fetchTopEntities(selectedPeriod, effectiveSource !== "all" ? effectiveSource : undefined, effectiveScanProfile, refresh);
     setRows(data.top_entities || []);
     setSampled(data.sampled || 0);
     setSampleCap(data.sample_cap || (scanProfile === "deep1000" ? 1000 : 500));
     setTotalCap(data.total_cap || 1000);
     setTotalAvailable(typeof data.total_available === "number" ? data.total_available : null);
     setTotalCapped(typeof data.total_capped === "number" ? data.total_capped : null);
+    setComputedAt(typeof data.computed_at === "string" ? data.computed_at : null);
     setLoading(false);
     setRefreshing(false);
-  }, [selectedPeriod, selectedSource, scanProfile]);
+  }, [selectedPeriod, selectedSource, scanProfile, useSnapshots]);
 
   useEffect(() => {
     load(false);
   }, [selectedSource, selectedPeriod, scanProfile, load]);
+
+  useEffect(() => {
+    if (useSnapshots) {
+      setSelectedSource("all");
+      setScanProfile("fast500");
+    }
+  }, [useSnapshots]);
 
   return (
     <MainLayout containerSize="xl">
@@ -172,13 +274,13 @@ export default function EntitiesPage() {
               <Select
                 value={selectedSource}
                 onValueChange={(v) => startTransition(() => setSelectedSource(v))}
-                disabled={loading || isPending}
+                disabled={loading || isPending || useSnapshots}
               >
                 <SelectTrigger className="w-[180px]">
                   <SelectValue placeholder="Select source" />
                 </SelectTrigger>
                 <SelectContent>
-                  {SOURCES.map((s) => (
+                  {(useSnapshots ? SOURCES.slice(0, 1) : SOURCES).map((s) => (
                     <SelectItem key={s.value} value={s.value}>
                       {s.label}
                     </SelectItem>
@@ -210,7 +312,7 @@ export default function EntitiesPage() {
               <Select
                 value={scanProfile}
                 onValueChange={(v) => startTransition(() => setScanProfile(v as "fast500" | "deep1000"))}
-                disabled={loading || isPending}
+                disabled={loading || isPending || useSnapshots}
               >
                 <SelectTrigger className="w-[180px]">
                   <SelectValue placeholder="Select scan profile" />
@@ -233,6 +335,7 @@ export default function EntitiesPage() {
           <CardHeader>
             <CardTitle>Entity Ranking</CardTitle>
             <CardDescription>
+              {computedAt ? `Snapshot: ${new Date(computedAt).toLocaleString()}. ` : ""}
               Sampled: {sampled} / {totalCapped ?? totalCap}
               {typeof totalAvailable === "number" ? ` (available: ${totalAvailable})` : ""}
               {sampled >= sampleCap ? `, capped at ${sampleCap}` : ""}
@@ -252,6 +355,7 @@ export default function EntitiesPage() {
                       <th className="text-left p-2">Entity</th>
                       <th className="text-left p-2">Type</th>
                       <th className="text-left p-2">Mentions</th>
+                      <th className="text-left p-2">Avg Sentiment</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -261,6 +365,9 @@ export default function EntitiesPage() {
                         <td className="p-2 font-medium">{e.text}</td>
                         <td className="p-2 text-muted-foreground">{e.type}</td>
                         <td className="p-2">{e.mentions}</td>
+                        <td className="p-2 text-muted-foreground">
+                          {typeof e.avg_sentiment === "number" ? e.avg_sentiment.toFixed(3) : "-"}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
