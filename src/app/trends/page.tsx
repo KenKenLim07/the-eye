@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { RefreshCw, Loader2, TrendingUp, TrendingDown, Minus } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import { Skeleton } from "@/components/ui/skeleton";
+import MainLayout from "@/components/layout/main-layout";
 
 interface TrendsData {
   ok: boolean;
@@ -239,7 +240,7 @@ export default function TrendsPage() {
 
   if (loading && !data) {
     return (
-      <div className="container mx-auto max-w-6xl p-4">
+      <MainLayout containerSize="xl">
         <div className="space-y-6">
           <div>
             <Skeleton className="h-8 w-64 mb-2" />
@@ -272,7 +273,7 @@ export default function TrendsPage() {
           <ChartSkeleton />
           <TimelineSkeleton />
         </div>
-      </div>
+      </MainLayout>
     );
   }
 
@@ -316,10 +317,10 @@ export default function TrendsPage() {
   };
 
   return (
-    <div className="container mx-auto max-w-6xl p-4">
+    <MainLayout containerSize="xl">
       <div className="space-y-6">
         <div>
-          <h1 className="text-3xl font-bold">News Sentiment Trends</h1>
+          <h1 className="u-serif text-3xl font-semibold tracking-tight">News Sentiment Trends</h1>
           <p className="text-muted-foreground">Analyzing sentiment patterns across Philippine news sources</p>
         </div>
 
@@ -491,6 +492,6 @@ export default function TrendsPage() {
           </CardContent>
         </Card>
       </div>
-    </div>
+    </MainLayout>
   );
 }

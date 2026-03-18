@@ -44,3 +44,7 @@ test-results/
 playwright-report/
 blob-report/
 playwright/.local-browsers
+
+# Reference-only: UI/UX Pro Max kit (do not ship/deploy)
+ui-ux-pro-max-skill-*/
+ui-ux-pro-max-skill-2.5.0/

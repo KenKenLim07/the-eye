@@ -304,7 +304,7 @@ export default function EntitiesPage() {
     <MainLayout containerSize="xl">
       <div className="space-y-6">
         <div>
-          <h1 className="text-3xl font-bold">Top Mentioned Entities</h1>
+          <h1 className="u-serif text-3xl font-semibold tracking-tight">Top Mentioned Entities</h1>
           <p className="text-muted-foreground">
             Top Entities (NER + Sentiment) extracted from recent articles.
           </p>
@@ -380,23 +380,23 @@ export default function EntitiesPage() {
             ) : (
               <div className="overflow-auto">
                 <table className="min-w-full text-sm">
-                  <thead>
+                  <thead className="sticky top-0 bg-card/90 backdrop-blur border-b">
                     <tr>
-                      <th className="text-left p-2">Rank</th>
-                      <th className="text-left p-2">Entity</th>
-                      <th className="text-left p-2">Type</th>
-                      <th className="text-left p-2">Mentions</th>
-                      <th className="text-left p-2">Avg Sentiment</th>
+                      <th className="text-left p-2 u-mono text-[10px] uppercase tracking-widest text-muted-foreground">Rank</th>
+                      <th className="text-left p-2 u-mono text-[10px] uppercase tracking-widest text-muted-foreground">Entity</th>
+                      <th className="text-left p-2 u-mono text-[10px] uppercase tracking-widest text-muted-foreground">Type</th>
+                      <th className="text-right p-2 u-mono text-[10px] uppercase tracking-widest text-muted-foreground">Mentions</th>
+                      <th className="text-right p-2 u-mono text-[10px] uppercase tracking-widest text-muted-foreground">Avg</th>
                     </tr>
                   </thead>
                   <tbody>
                     {rows.map((e, idx) => (
-                      <tr key={`${e.text}:${e.type}:${idx}`} className="border-t">
-                        <td className="p-2">{idx + 1}</td>
+                      <tr key={`${e.text}:${e.type}:${idx}`} className={`border-t ${idx % 2 === 0 ? "bg-transparent" : "bg-muted/30"}`}>
+                        <td className="p-2 u-mono text-[11px] text-muted-foreground">{idx + 1}</td>
                         <td className="p-2 font-medium">{e.text}</td>
-                        <td className="p-2 text-muted-foreground">{e.type}</td>
-                        <td className="p-2">{e.mentions}</td>
-                        <td className="p-2 text-muted-foreground">
+                        <td className="p-2 text-muted-foreground u-mono text-[11px] uppercase tracking-widest">{e.type}</td>
+                        <td className="p-2 text-right u-mono text-[11px]">{e.mentions}</td>
+                        <td className="p-2 text-right u-mono text-[11px] text-muted-foreground">
                           {typeof e.avg_sentiment === "number" ? e.avg_sentiment.toFixed(3) : "-"}
                         </td>
                       </tr>

@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Loader2, RefreshCw } from "lucide-react";
+import MainLayout from "@/components/layout/main-layout";
 
 interface CorrelationData {
   ok: boolean;
@@ -97,11 +98,11 @@ export default function CorrelationPage() {
   }, [load]);
 
   return (
-    <div className="container mx-auto max-w-6xl p-4">
+    <MainLayout containerSize="xl">
       <div className="space-y-6">
         <div>
-          <h1 className="text-3xl font-bold">Source Correlation</h1>
-          <p className="text-muted-foreground">Pearson correlation of daily sentiment across sources</p>
+          <h1 className="u-serif text-3xl font-semibold tracking-tight">Correlation Matrix</h1>
+          <p className="text-muted-foreground">Daily average sentiment correlation across sources (last 7d/30d)</p>
         </div>
 
         <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
@@ -187,6 +188,6 @@ export default function CorrelationPage() {
           </CardContent>
         </Card>
       </div>
-    </div>
+    </MainLayout>
   );
 }

@@ -1,0 +1,4 @@
+Font files downloaded from Google Fonts (woff2 latin subset) for self-hosting.
+Newsreader weights=400;600;700 css=https://fonts.googleapis.com/css2?family=Newsreader:wght@400;600;700&display=swap
+Public Sans weights=400;500;600 css=https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600&display=swap
+JetBrains Mono weights=400;500 css=https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { CSSProperties, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -25,27 +25,36 @@ interface ArticleCardsInteractiveProps {
 
 export function ArticleCardsInteractive({ articles }: ArticleCardsInteractiveProps) {
   const [openId, setOpenId] = useState<number | null>(null);
+  const items = useMemo(() => articles ?? [], [articles]);
+  type StaggerStyle = CSSProperties & { ["--i"]?: number };
+
+  const sentimentClass = (s: string) => {
+    if (s === "positive") return "bg-emerald-600 text-white border-transparent";
+    if (s === "negative") return "bg-primary text-primary-foreground border-transparent";
+    return "bg-muted text-foreground border-transparent";
+  };
 
   return (
     <>
-      {articles.map((a) => {
+      {items.map((a, idx) => {
         const numericId = Number(a.id);
         const sentiment = a.sentiment;
+        const staggerStyle: StaggerStyle = { ["--i"]: idx };
 
         return (
-          <div key={a.id} className="group">
-            <Card className="transition-all duration-200 hover:shadow-md">
+          <div key={a.id} className="group u-stagger-item" style={staggerStyle}>
+            <Card className="transition-[transform,box-shadow,border-color] duration-200 hover:shadow-md hover:-translate-y-[1px] border-border/70">
               <CardHeader className="pb-3">
                 <div className="flex items-start justify-between gap-2">
-                  <CardTitle className="text-lg leading-tight line-clamp-2 group-hover:text-blue-600 transition-colors flex-1">
+                  <CardTitle className="u-serif text-lg leading-tight line-clamp-2 group-hover:text-accent transition-colors flex-1">
                     {a.title}
                   </CardTitle>
-                  
+                   
                   {/* VADER sentiment badge in top right */}
                   {sentiment && (
                     <Badge 
-                      variant={sentiment === "positive" ? "default" : sentiment === "negative" ? "destructive" : "secondary"}
-                      className="shrink-0 text-xs"
+                      variant="outline"
+                      className={`shrink-0 text-[10px] u-mono uppercase tracking-widest ${sentimentClass(sentiment)}`}
                     >
                       {sentiment}
                     </Badge>
@@ -53,15 +62,16 @@ export function ArticleCardsInteractive({ articles }: ArticleCardsInteractivePro
                 </div>
                 
                 {/* Metadata badges below title */}
-                <div className="flex items-center gap-2 flex-wrap text-sm text-muted-foreground">
-                  <Badge variant="outline">{a.source}</Badge>
-                  {a.category && <Badge variant="secondary">{a.category}</Badge>}
-                  <Badge variant="outline">{formatDate(a.published_at)}</Badge>
+                <div className="flex items-center gap-2 flex-wrap text-xs text-muted-foreground">
+                  <Badge variant="outline" className="u-mono uppercase tracking-widest text-[10px]">{a.source}</Badge>
+                  {a.category && <Badge variant="secondary" className="u-mono uppercase tracking-widest text-[10px]">{a.category}</Badge>}
+                  <Badge variant="outline" className="u-mono uppercase tracking-widest text-[10px]">{formatDate(a.published_at)}</Badge>
                 </div>
               </CardHeader>
-              
+               
               <CardContent className="pt-0">
-                <p className="text-sm text-muted-foreground line-clamp-3 leading-5">
+                <div className="h-px bg-border/60 mb-3" />
+                <p className="text-sm text-muted-foreground line-clamp-3 leading-6">
                   {a.content || "No summary available."}
                 </p>
                 <div className="flex items-center justify-between mt-3">
@@ -97,11 +107,11 @@ export function ArticleCardsInteractive({ articles }: ArticleCardsInteractivePro
                 
                 {/* Badges moved outside DialogDescription to fix HTML validation */}
                 <div className="flex items-center gap-2 flex-wrap mb-4">
-                  <Badge variant="outline">{a.source}</Badge>
-                  {a.category && <Badge variant="secondary">{a.category}</Badge>}
-                  <Badge variant="outline">{formatDate(a.published_at)}</Badge>
+                  <Badge variant="outline" className="u-mono uppercase tracking-widest text-[10px]">{a.source}</Badge>
+                  {a.category && <Badge variant="secondary" className="u-mono uppercase tracking-widest text-[10px]">{a.category}</Badge>}
+                  <Badge variant="outline" className="u-mono uppercase tracking-widest text-[10px]">{formatDate(a.published_at)}</Badge>
                   {sentiment && (
-                    <Badge variant={sentiment === "positive" ? "default" : sentiment === "negative" ? "destructive" : "secondary"}>
+                    <Badge variant="outline" className={`u-mono uppercase tracking-widest text-[10px] ${sentimentClass(sentiment)}`}>
                       {sentiment}
                     </Badge>
                   )}
@@ -118,7 +128,7 @@ export function ArticleCardsInteractive({ articles }: ArticleCardsInteractivePro
                   {a.url && (
                     <div className="pt-4 border-t">
                       <a 
-                        className="inline-flex items-center text-sm text-blue-600 hover:text-blue-800 underline" 
+                        className="inline-flex items-center text-sm text-accent hover:text-accent/80 underline" 
                         href={a.url} 
                         target="_blank" 
                         rel="noreferrer"

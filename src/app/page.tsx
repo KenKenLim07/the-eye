@@ -155,8 +155,10 @@ export default async function Home() {
     <MainLayout>
       <div className="space-y-8 mt-10">
         <div className="text-center space-y-2">
-          <h1 className="text-3xl font-bold tracking-tight">Philippine News</h1>
-          <p className="text-sm text-muted-foreground">Latest headlines aggregated from top PH news sources</p>
+          <h1 className="u-serif text-4xl font-semibold tracking-tight">Philippine News</h1>
+          <p className="text-sm text-muted-foreground">
+            Latest headlines aggregated from top PH news sources
+          </p>
         </div>
 
         <div className="max-w-3xl mx-auto">
@@ -164,7 +166,7 @@ export default async function Home() {
             <select
               name="source"
               defaultValue="all"
-              className="border rounded-md px-3 py-2 text-sm md:w-56 bg-background"
+              className="border rounded-md px-3 py-2 text-sm md:w-56 bg-card"
             >
               <option value="all">All Sources</option>
               <option value="GMA">GMA</option>
@@ -179,9 +181,9 @@ export default async function Home() {
               type="text"
               name="q"
               placeholder="Search headlines or summaries..."
-              className="flex-1 border rounded-md px-3 py-2 text-sm"
+              className="flex-1 border rounded-md px-3 py-2 text-sm bg-card"
             />
-            <button className="text-sm border rounded-md px-4 py-2">Search</button>
+            <button className="text-sm border rounded-md px-4 py-2 bg-card hover:bg-accent/5 transition-colors">Search</button>
           </form>
           <div className="text-xs text-muted-foreground mt-2 text-center">
             Tip: use <Link className="underline" href="/search">Advanced search</Link> for pagination.
