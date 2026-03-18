@@ -2,12 +2,13 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { Menu, Search, X } from "lucide-react";
+import { Menu, Moon, Search, Sun, X } from "lucide-react";
 
 export default function Navigation() {
   const pathname = usePathname();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+  const [isDark, setIsDark] = useState(false);
 
   const navItems = useMemo(
     () => [
@@ -47,8 +48,23 @@ export default function Navigation() {
     };
   }, []);
 
+  useEffect(() => {
+    // Keep button state in sync with the html class toggled by the inline <head> script.
+    setIsDark(document.documentElement.classList.contains("dark"));
+  }, []);
+
+  const toggleTheme = () => {
+    const next = !document.documentElement.classList.contains("dark");
+    document.documentElement.classList.toggle("dark", next);
+    document.documentElement.style.colorScheme = next ? "dark" : "light";
+    try {
+      localStorage.setItem("theme", next ? "dark" : "light");
+    } catch {}
+    setIsDark(next);
+  };
+
   return (
-    <nav className="sticky top-0 z-50 border-b bg-background/85 backdrop-blur supports-[backdrop-filter]:bg-background/65">
+    <nav className="sticky top-0 z-50 border-b bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
           <div className="flex-shrink-0">
@@ -57,12 +73,9 @@ export default function Navigation() {
               className="flex items-center gap-3"
               onClick={closeMobileMenu}
             >
-              <div className="h-9 w-9 rounded-lg border bg-card flex items-center justify-center">
-                <span className="u-mono text-xs font-semibold tracking-widest text-primary">PH</span>
-              </div>
               <div className="leading-none">
-                <div className="u-serif text-lg font-semibold tracking-tight">PH-Eye</div>
-                <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">News Intelligence</div>
+                <div className="u-serif text-xl font-semibold tracking-tight">PH-Eye</div>
+                <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">Editorial analytics</div>
               </div>
             </Link>
           </div>
@@ -73,10 +86,10 @@ export default function Navigation() {
               <Link
                 key={item.href}
                 href={item.href}
-                className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                className={`px-1 py-2 text-sm font-medium transition-colors border-b-2 ${
                   pathname === item.href
-                    ? "text-foreground bg-accent/10"
-                    : "text-muted-foreground hover:text-foreground hover:bg-accent/5"
+                    ? "text-foreground border-primary"
+                    : "text-muted-foreground border-transparent hover:text-foreground hover:border-border"
                 }`}
               >
                 {item.label}
@@ -98,6 +111,16 @@ export default function Navigation() {
             >
               <Search className="h-4 w-4" />
             </Link>
+
+            <button
+              type="button"
+              onClick={toggleTheme}
+              className="hidden md:inline-flex items-center justify-center h-9 w-9 rounded-md border bg-card hover:bg-accent/5 transition-colors"
+              aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+              title={isDark ? "Light mode" : "Dark mode"}
+            >
+              {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            </button>
 
             {/* Mobile menu button */}
             <div className="md:hidden">

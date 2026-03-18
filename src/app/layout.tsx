@@ -43,6 +43,23 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+(() => {
+  try {
+    const stored = localStorage.getItem('theme');
+    const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const useDark = stored ? stored === 'dark' : prefersDark;
+    document.documentElement.classList.toggle('dark', useDark);
+    document.documentElement.style.colorScheme = useDark ? 'dark' : 'light';
+  } catch {}
+})();
+            `.trim(),
+          }}
+        />
+      </head>
       <body
         className={`${fontBody.variable} ${fontHead.variable} ${fontCode.variable} antialiased`}
         suppressHydrationWarning={true}

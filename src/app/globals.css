@@ -47,24 +47,24 @@
 
 :root {
   --radius: 0.625rem;
-  /* UI UX Pro Max: News/Media Platform palette (Breaking red + link blue) */
-  --background: #FEF2F2;
-  --foreground: #450A0A;
-  --card: oklch(1 0 0);
-  --card-foreground: #450A0A;
-  --popover: oklch(1 0 0);
-  --popover-foreground: #450A0A;
+  /* UI UX Pro Max reference: keep Breaking red + link blue, but use a neutral “paper” background (less pink). */
+  --background: #FFFBF5;
+  --foreground: #111827;
+  --card: #FFFFFF;
+  --card-foreground: #111827;
+  --popover: #FFFFFF;
+  --popover-foreground: #111827;
   --primary: #DC2626;
   --primary-foreground: #FFFFFF;
-  --secondary: #EF4444;
-  --secondary-foreground: #FFFFFF;
-  --muted: #F0EDF1;
+  --secondary: #F1F5F9;
+  --secondary-foreground: #0F172A;
+  --muted: #F5F5F4;
   --muted-foreground: #64748B;
   --accent: #1E40AF;
   --accent-foreground: #FFFFFF;
   --destructive: #DC2626;
-  --border: #FECACA;
-  --input: #FECACA;
+  --border: #E7E5E4;
+  --input: #E7E5E4;
   --ring: #DC2626;
   --chart-1: oklch(0.646 0.222 41.116);
   --chart-2: oklch(0.6 0.118 184.704);
@@ -84,21 +84,21 @@
 .dark {
   --background: #0B0A0A;
   --foreground: #F8FAFC;
-  --card: #141112;
+  --card: #111214;
   --card-foreground: #F8FAFC;
-  --popover: #141112;
+  --popover: #111214;
   --popover-foreground: #F8FAFC;
   --primary: #EF4444;
   --primary-foreground: #0B0A0A;
   --secondary: #1F2937;
   --secondary-foreground: #F8FAFC;
-  --muted: #151214;
+  --muted: #151617;
   --muted-foreground: #94A3B8;
   --accent: #60A5FA;
   --accent-foreground: #0B0A0A;
   --destructive: #EF4444;
-  --border: #2B1B1C;
-  --input: #2B1B1C;
+  --border: #232425;
+  --input: #232425;
   --ring: #EF4444;
   --chart-1: oklch(0.488 0.243 264.376);
   --chart-2: oklch(0.696 0.17 162.48);
@@ -129,7 +129,7 @@
     /* Paper texture: subtle lines + soft vignette. */
     background-image:
       radial-gradient(800px 400px at 20% 0%, color-mix(in oklab, var(--accent) 12%, transparent) 0%, transparent 60%),
-      radial-gradient(900px 600px at 80% 10%, color-mix(in oklab, var(--primary) 10%, transparent) 0%, transparent 65%),
+      radial-gradient(900px 600px at 80% 10%, color-mix(in oklab, var(--foreground) 6%, transparent) 0%, transparent 65%),
       repeating-linear-gradient(
         0deg,
         color-mix(in oklab, var(--foreground) 2%, transparent) 0px,
