@@ -55,13 +55,13 @@ function shouldUseSnapshots(): boolean {
 
 function snapshotKeyFor(period: string): string {
   // Matches backend/scripts/entity_rankings_snapshot.py
-  return `entities:period=${period}:source=all:include_today=1:scan=fast:limit=500:cap=1000:max=100`;
+  return `entities:period=${period}:source=all:include_today=1:scan=full:limit=0:cap=0:max=100`;
 }
 
 async function fetchTopEntities(period: string, source: string | undefined, scanProfile: "fast500" | "deep1000", refresh = false): Promise<NerSampleData> {
   const base = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
-  const limitArticles = scanProfile === "deep1000" ? 1000 : 500;
-  const scanMode = scanProfile === "deep1000" ? "full" : "fast";
+  const limitArticles = 500;
+  const scanMode = "fast";
   const params = new URLSearchParams({
     period,
     limit_articles: String(limitArticles),
@@ -71,7 +71,7 @@ async function fetchTopEntities(period: string, source: string | undefined, scan
   });
   if (source && source !== "all") params.set("source", source);
   if (refresh) params.set("refresh", "true");
-  const key = `entities:${period}:${source || "all"}:${scanProfile}`;
+  const key = `entities:${period}:${source || "all"}:fast500`;
   const now = Date.now();
   const ttl = 60_000;
 
@@ -182,7 +182,10 @@ async function fetchTopEntitiesFromSnapshots(period: string, refresh = false): P
         ok: true,
         computed_at: snapRes.data.computed_at ?? undefined,
         sampled: typeof snapRes.data.sampled === "number" ? snapRes.data.sampled : 0,
-        sample_cap: typeof snapRes.data.limit_articles === "number" ? snapRes.data.limit_articles : 500,
+        sample_cap:
+          typeof snapRes.data.limit_articles === "number" && snapRes.data.limit_articles > 0
+            ? snapRes.data.limit_articles
+            : (typeof snapRes.data.total_capped === "number" ? snapRes.data.total_capped : 0),
         total_cap: typeof snapRes.data.total_cap === "number" ? snapRes.data.total_cap : 1000,
         total_available: typeof snapRes.data.total_available === "number" ? snapRes.data.total_available : undefined,
         total_capped: typeof snapRes.data.total_capped === "number" ? snapRes.data.total_capped : undefined,
@@ -214,14 +217,13 @@ async function fetchTopEntitiesFromSnapshots(period: string, refresh = false): P
 export default function EntitiesPage() {
   const useSnapshots = shouldUseSnapshots();
   const [selectedSource, setSelectedSource] = useState("all");
-  const [selectedPeriod, setSelectedPeriod] = useState("30d");
+  const [selectedPeriod, setSelectedPeriod] = useState("7d");
   const [rows, setRows] = useState<NerEntity[]>([]);
   const [sampled, setSampled] = useState<number>(0);
   const [sampleCap, setSampleCap] = useState<number>(500);
   const [totalCap, setTotalCap] = useState<number>(1000);
   const [totalAvailable, setTotalAvailable] = useState<number | null>(null);
   const [totalCapped, setTotalCapped] = useState<number | null>(null);
-  const [scanProfile, setScanProfile] = useState<"fast500" | "deep1000">("fast500");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -231,29 +233,27 @@ export default function EntitiesPage() {
     if (refresh) setRefreshing(true);
     else setLoading(true);
     const effectiveSource = useSnapshots ? "all" : selectedSource;
-    const effectiveScanProfile = useSnapshots ? "fast500" : scanProfile;
     const data = useSnapshots
       ? await fetchTopEntitiesFromSnapshots(selectedPeriod, refresh)
-      : await fetchTopEntities(selectedPeriod, effectiveSource !== "all" ? effectiveSource : undefined, effectiveScanProfile, refresh);
+      : await fetchTopEntities(selectedPeriod, effectiveSource !== "all" ? effectiveSource : undefined, "fast500", refresh);
     setRows(data.top_entities || []);
     setSampled(data.sampled || 0);
-    setSampleCap(data.sample_cap || (scanProfile === "deep1000" ? 1000 : 500));
+    setSampleCap(data.sample_cap || 500);
     setTotalCap(data.total_cap || 1000);
     setTotalAvailable(typeof data.total_available === "number" ? data.total_available : null);
     setTotalCapped(typeof data.total_capped === "number" ? data.total_capped : null);
     setComputedAt(typeof data.computed_at === "string" ? data.computed_at : null);
     setLoading(false);
     setRefreshing(false);
-  }, [selectedPeriod, selectedSource, scanProfile, useSnapshots]);
+  }, [selectedPeriod, selectedSource, useSnapshots]);
 
   useEffect(() => {
     load(false);
-  }, [selectedSource, selectedPeriod, scanProfile, load]);
+  }, [selectedSource, selectedPeriod, load]);
 
   useEffect(() => {
     if (useSnapshots) {
       setSelectedSource("all");
-      setScanProfile("fast500");
     }
   }, [useSnapshots]);
 
@@ -263,7 +263,7 @@ export default function EntitiesPage() {
         <div>
           <h1 className="text-3xl font-bold">Top Mentioned Entities</h1>
           <p className="text-muted-foreground">
-            Frequency ranking of people, organizations, and places across Philippine news sources.
+            Top Entities (NER + Sentiment) extracted from recent articles.
           </p>
         </div>
 
@@ -307,22 +307,6 @@ export default function EntitiesPage() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="flex flex-col gap-2">
-              <label className="text-sm font-medium">Scan</label>
-              <Select
-                value={scanProfile}
-                onValueChange={(v) => startTransition(() => setScanProfile(v as "fast500" | "deep1000"))}
-                disabled={loading || isPending || useSnapshots}
-              >
-                <SelectTrigger className="w-[180px]">
-                  <SelectValue placeholder="Select scan profile" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="fast500">Fast (500)</SelectItem>
-                  <SelectItem value="deep1000">Deep (1000)</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
           </div>
 
           <Button onClick={() => load(true)} variant="outline" size="sm" disabled={loading || refreshing}>
@@ -333,7 +317,7 @@ export default function EntitiesPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Entity Ranking</CardTitle>
+            <CardTitle>Top Entities (NER + Sentiment)</CardTitle>
             <CardDescription>
               {computedAt ? `Snapshot: ${new Date(computedAt).toLocaleString()}. ` : ""}
               Sampled: {sampled} / {totalCapped ?? totalCap}
@@ -359,7 +343,7 @@ export default function EntitiesPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {rows.slice(0, 100).map((e, idx) => (
+                    {rows.map((e, idx) => (
                       <tr key={`${e.text}:${e.type}:${idx}`} className="border-t">
                         <td className="p-2">{idx + 1}</td>
                         <td className="p-2 font-medium">{e.text}</td>

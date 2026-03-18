@@ -46,3 +46,13 @@ create policy "Public read entity snapshot items"
   for select
   using (true);
 
+-- Supabase also requires GRANTs in addition to RLS policies.
+-- Allow the frontend (anon/authenticated) to read snapshots.
+grant usage on schema public to anon, authenticated;
+grant select on table public.entity_rankings_snapshots to anon, authenticated;
+grant select on table public.entity_rankings_items to anon, authenticated;
+
+-- Allow snapshot writer (service_role key) to upsert/delete/insert.
+grant usage on schema public to service_role;
+grant select, insert, update, delete on table public.entity_rankings_snapshots to service_role;
+grant select, insert, update, delete on table public.entity_rankings_items to service_role;

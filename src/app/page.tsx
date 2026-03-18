@@ -2,15 +2,50 @@ import MainLayout from "@/components/layout/main-layout";
 import ArticleRowServer from "../components/articles/article-row-server";
 import { fetchAllArticles, fetchLatestAnalysisByIds } from "@/lib/articles";
 import type { AnalysisRow, Article } from "@/lib/types";
+import { supabaseServer } from "@/lib/supabase/server";
 
 // Cache the page for faster first load; refresh every 60s
 export const revalidate = 60;
+
+async function fetchHomeArticlesFromSupabase(limitPerSource: number): Promise<Record<string, Article[]>> {
+  const sources = [
+    "GMA",
+    "Rappler",
+    "Inquirer",
+    "Manila Times",
+    "Philstar",
+    "Sunstar",
+    "Manila Bulletin",
+  ];
+
+  const results = await Promise.all(
+    sources.map(async (src) => {
+      const { data, error } = await supabaseServer
+        .from("articles")
+        .select("id,title,url,content,published_at,source,category")
+        .eq("source", src)
+        .order("published_at", { ascending: false })
+        .limit(limitPerSource);
+
+      if (error) {
+        console.error("Home supabase fetch error for source:", src, error);
+        return [src, [] as Article[]] as const;
+      }
+      return [src, ((data as unknown) as Article[] | null) || []] as const;
+    })
+  );
+
+  return Object.fromEntries(results);
+}
 
 export default async function Home() {
   const t0 = Date.now();
   // Fetch latest articles per source using optimized single endpoint
   const PER_SOURCE_LIMIT = 10;
-  const articlesBySource = await fetchAllArticles(PER_SOURCE_LIMIT);
+  const hasBackend = !!process.env.NEXT_PUBLIC_BACKEND_URL;
+  const articlesBySource = hasBackend
+    ? await fetchAllArticles(PER_SOURCE_LIMIT)
+    : await fetchHomeArticlesFromSupabase(PER_SOURCE_LIMIT);
   const tAfterOptimized = Date.now();
 
   // Normalize backend source keys to canonical labels used in UI
@@ -84,7 +119,7 @@ export default async function Home() {
 
   // Fetch latest sentiment/bias analysis in one request (optional; non-fatal if fails)
   let analysisById: Record<number, AnalysisRow | null> = {};
-  if (allArticleIds.length > 0) {
+  if (hasBackend && allArticleIds.length > 0) {
     try {
       analysisById = await fetchLatestAnalysisByIds(allArticleIds);
     } catch (err) {

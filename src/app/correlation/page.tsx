@@ -14,7 +14,6 @@ interface CorrelationData {
   sources: string[];
   matrix: Array<Array<number | null>>;
   p_values: Array<Array<number | null>>;
-  entities?: Array<{ text: string; type: string; mentions: number; avg_sentiment: number }>;
 }
 
 const SOURCES = [
@@ -38,11 +37,11 @@ const inflightRequests = new Map<string, Promise<CorrelationData>>();
 
 async function fetchCorrelation(period: string, source?: string, refresh = false): Promise<CorrelationData> {
   const base = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
-  const params = new URLSearchParams({ period, include_today: "true", with_entities: "true" });
+  const params = new URLSearchParams({ period, include_today: "true" });
   if (source && source !== "all") params.set("sources", source);
   if (refresh) params.set("refresh", "true");
 
-  const key = `corr:${period}:${source || "all"}:today:1:entities:1`;
+  const key = `corr:${period}:${source || "all"}:today:1`;
   const now = Date.now();
   const ttl = 60_000;
 
@@ -174,43 +173,6 @@ export default function CorrelationPage() {
                             </td>
                           );
                         })}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Top Entities (NER + Sentiment)</CardTitle>
-            <CardDescription>Entities extracted from the same correlation window</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {loading ? (
-              <div className="text-sm text-muted-foreground py-6">Loading entities...</div>
-            ) : !corr?.entities || corr.entities.length === 0 ? (
-              <div className="text-sm text-muted-foreground py-6">No entity data available.</div>
-            ) : (
-              <div className="overflow-auto">
-                <table className="min-w-full text-sm">
-                  <thead>
-                    <tr>
-                      <th className="text-left p-2">Entity</th>
-                      <th className="text-left p-2">Type</th>
-                      <th className="text-left p-2">Mentions</th>
-                      <th className="text-left p-2">Avg Sentiment</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {corr.entities.map((e) => (
-                      <tr key={`${e.text}:${e.type}`} className="border-t">
-                        <td className="p-2">{e.text}</td>
-                        <td className="p-2 text-muted-foreground">{e.type}</td>
-                        <td className="p-2">{e.mentions}</td>
-                        <td className="p-2">{e.avg_sentiment.toFixed(3)}</td>
                       </tr>
                     ))}
                   </tbody>

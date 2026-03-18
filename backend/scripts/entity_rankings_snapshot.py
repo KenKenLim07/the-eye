@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 
 from supabase import Client, create_client
 from postgrest.exceptions import APIError
+from supabase._sync.client import SupabaseException
 
 
 # Allow importing backend "app" package when invoked from repo root.
@@ -254,7 +255,11 @@ def get_supabase() -> Client:
     key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
     if not url or not key:
         raise RuntimeError("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY")
-    return create_client(url, key)
+    try:
+        return create_client(url, key)
+    except SupabaseException as e:
+        # Most commonly happens when the key is truncated (e.g., contains "...") or has extra quotes/whitespace.
+        raise RuntimeError("Invalid Supabase API key. Ensure SUPABASE_SERVICE_ROLE_KEY is the full service_role key.") from e
 
 
 def fetch_articles_paginated(
@@ -328,6 +333,7 @@ class SnapshotParams:
 
     @property
     def snapshot_key(self) -> str:
+        # total_cap=0 means "no cap" (use all available in window).
         return (
             f"entities:period={self.period}:"
             f"source={(self.source or 'all')}:"
@@ -431,6 +437,12 @@ def write_snapshot(
                 "If you just created the tables, run `select pg_notify('pgrst', 'reload schema');` "
                 "in the Supabase SQL editor (or wait 1-2 minutes) and retry."
             ) from e
+        if isinstance(payload, dict) and payload.get("code") == "42501":
+            raise RuntimeError(
+                "permission denied writing snapshots. In Supabase you need GRANTs in addition to RLS policies. "
+                "Re-run backend/scripts/create_entity_rankings_tables.sql (it includes GRANT select for anon/authenticated "
+                "and GRANT insert/update/delete for service_role), then retry."
+            ) from e
         raise
 
     sb.table("entity_rankings_items").delete().eq("snapshot_key", key).execute()
@@ -457,19 +469,24 @@ def run_snapshot(period: str) -> None:
         period=period,
         source=None,
         include_today=True,
-        scan_mode="fast",
-        limit_articles=500,
-        total_cap=1000,
+        scan_mode="full",
+        limit_articles=0,
+        total_cap=0,
         max_entities=100,
     )
 
     start_iso, end_iso = window_bounds(period, include_today=True)
     all_articles = fetch_articles_paginated(sb, start_iso, end_iso, source=None)
     total_available = len(all_articles)
-    total_capped = min(total_available, max(1, params.total_cap))
+    total_capped = total_available if params.total_cap <= 0 else min(total_available, max(1, params.total_cap))
     capped = all_articles[:total_capped]
-    sample_cap = min(params.limit_articles, total_capped)
-    sampled = capped[:sample_cap]
+    if params.scan_mode == "full":
+        sampled = capped
+        sample_cap = total_capped
+    else:
+        desired = total_capped if params.limit_articles <= 0 else params.limit_articles
+        sample_cap = min(desired, total_capped)
+        sampled = capped[:sample_cap]
 
     articles_by_id = {int(a["id"]): a for a in sampled if a.get("id") is not None}
     article_ids = list(articles_by_id.keys())
