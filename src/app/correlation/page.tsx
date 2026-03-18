@@ -36,7 +36,12 @@ const corrCache = new Map<string, { expires: number; data: CorrelationData }>();
 const inflightRequests = new Map<string, Promise<CorrelationData>>();
 
 async function fetchCorrelation(period: string, source?: string, refresh = false): Promise<CorrelationData> {
-  const base = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
+  const base =
+    process.env.NEXT_PUBLIC_BACKEND_URL ||
+    (process.env.NODE_ENV === "development" ? "http://localhost:8000" : "");
+  if (!base || (process.env.NODE_ENV !== "development" && (base.includes("localhost") || base.includes("127.0.0.1")))) {
+    return { ok: false, period, include_today: true, sources: [], matrix: [], p_values: [] } as CorrelationData;
+  }
   const params = new URLSearchParams({ period, include_today: "true" });
   if (source && source !== "all") params.set("sources", source);
   if (refresh) params.set("refresh", "true");

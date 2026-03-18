@@ -60,7 +60,24 @@ const trendsCache = new Map<string, { expires: number; data: TrendsData }>();
 const inflightRequests = new Map<string, Promise<TrendsData>>();
 
 async function fetchTrends(source?: string, period: string = "7d", opts?: { refresh?: boolean; ttlMs?: number }): Promise<TrendsData> {
-  const base = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
+  const base =
+    process.env.NEXT_PUBLIC_BACKEND_URL ||
+    (process.env.NODE_ENV === "development" ? "http://localhost:8000" : "");
+  if (!base || (process.env.NODE_ENV !== "development" && (base.includes("localhost") || base.includes("127.0.0.1")))) {
+    return {
+      ok: false,
+      summary: {
+        period,
+        source: source || null,
+        total_articles: 0,
+        positive_pct: 0,
+        negative_pct: 0,
+        neutral_pct: 0,
+        avg_daily_articles: 0,
+      },
+      timeline: [],
+    };
+  }
   const params = new URLSearchParams({ period, include_today: "true" });
   if (source && source !== "all") params.set("source", source);
   if (opts?.refresh) params.set("refresh", "true");

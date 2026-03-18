@@ -4,8 +4,9 @@ import { fetchAllArticles, fetchLatestAnalysisByIds } from "@/lib/articles";
 import type { AnalysisRow, Article } from "@/lib/types";
 import { supabaseServer } from "@/lib/supabase/server";
 
-// Cache the page for faster first load; refresh every 60s
-export const revalidate = 60;
+// In production we often run without a deployed backend; force dynamic so Supabase reads happen at request-time
+// instead of being snapshotted during build (which can result in a "blank" homepage until the next revalidate).
+export const dynamic = "force-dynamic";
 
 async function fetchHomeArticlesFromSupabase(limitPerSource: number): Promise<Record<string, Article[]>> {
   const sources = [
@@ -42,7 +43,11 @@ export default async function Home() {
   const t0 = Date.now();
   // Fetch latest articles per source using optimized single endpoint
   const PER_SOURCE_LIMIT = 10;
-  const hasBackend = !!process.env.NEXT_PUBLIC_BACKEND_URL;
+  const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "";
+  const hasBackend =
+    !!backendUrl &&
+    (process.env.NODE_ENV === "development" ||
+      (!backendUrl.includes("localhost") && !backendUrl.includes("127.0.0.1")));
   const articlesBySource = hasBackend
     ? await fetchAllArticles(PER_SOURCE_LIMIT)
     : await fetchHomeArticlesFromSupabase(PER_SOURCE_LIMIT);

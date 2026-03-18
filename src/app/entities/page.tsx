@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Loader2, RefreshCw } from "lucide-react";
-import { supabase } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase/client";
 
 interface NerEntity {
   text: string;
@@ -26,6 +26,20 @@ interface NerSampleData {
   computed_at?: string;
   top_entities: NerEntity[];
 }
+
+type SnapshotRow = {
+  key: string;
+  period: string | null;
+  source: string | null;
+  computed_at: string | null;
+  sampled: number | null;
+  limit_articles: number | null;
+  total_cap: number | null;
+  total_available: number | null;
+  total_capped: number | null;
+  scan_mode: string | null;
+  max_entities: number | null;
+};
 
 const SOURCES = [
   { value: "all", label: "All Sources" },
@@ -49,13 +63,29 @@ const inflight = new Map<string, Promise<NerSampleData>>();
 const snapshotsCache = new Map<string, { expires: number; data: NerSampleData }>();
 const snapshotsInflight = new Map<string, Promise<NerSampleData>>();
 
+function hasUsableBackend(): boolean {
+  const url = process.env.NEXT_PUBLIC_BACKEND_URL;
+  if (!url) return false;
+  // Treat local-only URLs as "no backend" for hosted demos.
+  if (url.includes("localhost") || url.includes("127.0.0.1")) return false;
+  return true;
+}
+
 function shouldUseSnapshots(): boolean {
-  return process.env.NEXT_PUBLIC_ANALYTICS_SOURCE === "supabase_snapshots" || !process.env.NEXT_PUBLIC_BACKEND_URL;
+  return process.env.NEXT_PUBLIC_ANALYTICS_SOURCE === "supabase_snapshots" || !hasUsableBackend();
 }
 
 function snapshotKeyFor(period: string): string {
   // Matches backend/scripts/entity_rankings_snapshot.py
   return `entities:period=${period}:source=all:include_today=1:scan=full:limit=0:cap=0:max=100`;
+}
+
+function snapshotKeyFallbacks(period: string): string[] {
+  // Compatibility for older snapshots written before switching to "full/no-cap".
+  return [
+    snapshotKeyFor(period),
+    `entities:period=${period}:source=all:include_today=1:scan=fast:limit=500:cap=1000:max=100`,
+  ];
 }
 
 async function fetchTopEntities(period: string, source: string | undefined, scanProfile: "fast500" | "deep1000", refresh = false): Promise<NerSampleData> {
@@ -152,27 +182,32 @@ async function fetchTopEntitiesFromSnapshots(period: string, refresh = false): P
 
   const req = (async () => {
     try {
-      const snapshotKey = snapshotKeyFor(period);
+      const keys = snapshotKeyFallbacks(period);
+      let snap: SnapshotRow | null = null;
 
-      const snapRes = await supabase
-        .from("entity_rankings_snapshots")
-        .select("key,period,source,computed_at,sampled,limit_articles,total_cap,total_available,total_capped,scan_mode,max_entities")
-        .eq("key", snapshotKey)
-        .maybeSingle();
+      for (const snapshotKey of keys) {
+        const snapRes = await supabase
+          .from("entity_rankings_snapshots")
+          .select("key,period,source,computed_at,sampled,limit_articles,total_cap,total_available,total_capped,scan_mode,max_entities")
+          .eq("key", snapshotKey)
+          .maybeSingle();
+        if (snapRes.error) {
+          throw new Error(snapRes.error.message);
+        }
+        if (snapRes.data) {
+          snap = snapRes.data;
+          break;
+        }
+      }
 
-      if (snapRes.error) {
-        throw new Error(snapRes.error.message);
-      }
-      if (!snapRes.data) {
-        return { ok: false, top_entities: [] };
-      }
+      if (!snap) return { ok: false, top_entities: [] };
 
       const itemsRes = await supabase
         .from("entity_rankings_items")
         .select("entity_text,entity_type,mentions,avg_sentiment")
-        .eq("snapshot_key", snapRes.data.key)
+        .eq("snapshot_key", snap.key)
         .order("mentions", { ascending: false })
-        .limit(100);
+        .limit(Math.max(1, Math.min(Number(snap.max_entities ?? 100), 2000)));
 
       if (itemsRes.error) {
         throw new Error(itemsRes.error.message);
@@ -180,16 +215,16 @@ async function fetchTopEntitiesFromSnapshots(period: string, refresh = false): P
 
       const data: NerSampleData = {
         ok: true,
-        computed_at: snapRes.data.computed_at ?? undefined,
-        sampled: typeof snapRes.data.sampled === "number" ? snapRes.data.sampled : 0,
+        computed_at: snap.computed_at ?? undefined,
+        sampled: typeof snap.sampled === "number" ? snap.sampled : 0,
         sample_cap:
-          typeof snapRes.data.limit_articles === "number" && snapRes.data.limit_articles > 0
-            ? snapRes.data.limit_articles
-            : (typeof snapRes.data.total_capped === "number" ? snapRes.data.total_capped : 0),
-        total_cap: typeof snapRes.data.total_cap === "number" ? snapRes.data.total_cap : 1000,
-        total_available: typeof snapRes.data.total_available === "number" ? snapRes.data.total_available : undefined,
-        total_capped: typeof snapRes.data.total_capped === "number" ? snapRes.data.total_capped : undefined,
-        scan_mode: typeof snapRes.data.scan_mode === "string" ? snapRes.data.scan_mode : "fast",
+          typeof snap.limit_articles === "number" && snap.limit_articles > 0
+            ? snap.limit_articles
+            : (typeof snap.total_capped === "number" ? snap.total_capped : 0),
+        total_cap: typeof snap.total_cap === "number" ? snap.total_cap : 1000,
+        total_available: typeof snap.total_available === "number" ? snap.total_available : undefined,
+        total_capped: typeof snap.total_capped === "number" ? snap.total_capped : undefined,
+        scan_mode: typeof snap.scan_mode === "string" ? snap.scan_mode : "fast",
         top_entities: Array.isArray(itemsRes.data)
           ? itemsRes.data.map((r) => ({
               text: String(r.entity_text ?? ""),
@@ -228,14 +263,22 @@ export default function EntitiesPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [computedAt, setComputedAt] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const load = useCallback(async (refresh = false) => {
     if (refresh) setRefreshing(true);
     else setLoading(true);
+    setLoadError(null);
     const effectiveSource = useSnapshots ? "all" : selectedSource;
-    const data = useSnapshots
-      ? await fetchTopEntitiesFromSnapshots(selectedPeriod, refresh)
-      : await fetchTopEntities(selectedPeriod, effectiveSource !== "all" ? effectiveSource : undefined, "fast500", refresh);
+    let data: NerSampleData;
+    try {
+      data = useSnapshots
+        ? await fetchTopEntitiesFromSnapshots(selectedPeriod, refresh)
+        : await fetchTopEntities(selectedPeriod, effectiveSource !== "all" ? effectiveSource : undefined, "fast500", refresh);
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : "Failed to load entities.");
+      data = { ok: false, top_entities: [] };
+    }
     setRows(data.top_entities || []);
     setSampled(data.sampled || 0);
     setSampleCap(data.sample_cap || 500);
@@ -328,6 +371,10 @@ export default function EntitiesPage() {
           <CardContent>
             {loading ? (
               <div className="text-sm text-muted-foreground py-6">Loading entities...</div>
+            ) : loadError ? (
+              <div className="text-sm text-red-600 py-6 whitespace-pre-wrap break-words">
+                {loadError}
+              </div>
             ) : rows.length === 0 ? (
               <div className="text-sm text-muted-foreground py-6">No entity data available for the selected filter.</div>
             ) : (
