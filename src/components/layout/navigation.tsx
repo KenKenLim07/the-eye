@@ -115,7 +115,7 @@ export default function Navigation() {
             <button
               type="button"
               onClick={toggleTheme}
-              className="hidden md:inline-flex items-center justify-center h-9 w-9 rounded-md border bg-card hover:bg-accent/5 transition-colors"
+              className="inline-flex items-center justify-center h-9 w-9 rounded-md border bg-card hover:bg-accent/5 transition-colors"
               aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
               title={isDark ? "Light mode" : "Dark mode"}
             >
@@ -158,6 +158,19 @@ export default function Navigation() {
                   {item.label}
                 </Link>
               ))}
+
+              <button
+                type="button"
+                onClick={() => {
+                  toggleTheme();
+                  closeMobileMenu();
+                }}
+                className="w-full flex items-center gap-2 px-3 py-2 rounded-md text-base font-medium text-muted-foreground hover:text-foreground hover:bg-accent/5 transition-colors"
+                aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+              >
+                {isDark ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
+                <span>{isDark ? "Light mode" : "Dark mode"}</span>
+              </button>
             </div>
           </div>
         )}
