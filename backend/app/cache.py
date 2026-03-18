@@ -1,9 +1,12 @@
 
-import redis
-import json
 import hashlib
+import json
+import logging
 from typing import Any, Optional
-from datetime import datetime, timedelta
+
+import redis
+
+logger = logging.getLogger(__name__)
 
 class RedisCache:
     def __init__(self, host: str = "redis", port: int = 6379, db: int = 2):
@@ -25,7 +28,7 @@ class RedisCache:
                 return json.loads(value)
             return None
         except Exception as e:
-            print(f"Cache get error: {e}")
+            logger.warning("Cache get error: %s", e)
             return None
     
     def set(self, key: str, value: Any, ttl: int = 300) -> bool:
@@ -34,7 +37,7 @@ class RedisCache:
             serialized = json.dumps(value, default=str)
             return self.redis_client.setex(key, ttl, serialized)
         except Exception as e:
-            print(f"Cache set error: {e}")
+            logger.warning("Cache set error: %s", e)
             return False
     
     def delete(self, key: str) -> bool:
@@ -42,7 +45,7 @@ class RedisCache:
         try:
             return bool(self.redis_client.delete(key))
         except Exception as e:
-            print(f"Cache delete error: {e}")
+            logger.warning("Cache delete error: %s", e)
             return False
     
     def clear_pattern(self, pattern: str) -> int:
@@ -53,7 +56,7 @@ class RedisCache:
                 return self.redis_client.delete(*keys)
             return 0
         except Exception as e:
-            print(f"Cache clear error: {e}")
+            logger.warning("Cache clear error: %s", e)
             return 0
 
 # Global cache instance

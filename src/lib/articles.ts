@@ -162,24 +162,6 @@ export async function fetchAllArticles(limit: number = 10): Promise<Record<strin
   }
 }
 
-export async function fetchDashboardData(): Promise<unknown> {
-  try {
-    const response = await fetch(
-      `${process.env.NEXT_PUBLIC_BACKEND_URL}/dashboard/comprehensive`,
-      { cache: 'no-store' }
-    );
-    
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-    
-    return await response.json();
-  } catch (error) {
-    console.error('Failed to fetch dashboard data:', error);
-    return null;
-  }
-}
-
 export async function fetchTrendsData(period: string = '7d', source?: string): Promise<unknown> {
   try {
     const params = new URLSearchParams({ period });

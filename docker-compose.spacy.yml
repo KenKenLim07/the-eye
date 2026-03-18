@@ -1,5 +1,4 @@
 # Senior Dev: Production Docker Compose with spaCy
-version: '3.8'
 
 services:
   backend:

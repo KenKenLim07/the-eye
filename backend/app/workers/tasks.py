@@ -1,11 +1,11 @@
 from celery import shared_task
 from app.core.supabase import get_supabase
 from datetime import datetime, timezone
-from app.scrapers.inquirer import scrape_inquirer_latest, InquirerScraper
-from app.pipeline.store import insert_articles
+from app.scrapers.inquirer import InquirerScraper
 import logging
 from app.observability.logs import start_run, finalize_run
 from app.workers.ml_tasks import analyze_articles_task
+from app.workers.scrape_pipeline import run_scrape_task
 
 # ABS-CBN scraper (requires PLAYWRIGHT_HEADLESS=false in dev, or xvfb in prod)
 from app.scrapers.abs_cbn import ABSCBNScraper
@@ -21,52 +21,9 @@ from app.scrapers.manila_bulletin import ManilaBulletinScraper
 # New import for Manila Times
 from app.scrapers.manila_times import ManilaTimesScraper
 from app.scrapers.rappler import RapplerScraper
+from app.scrapers.sunstar import SunstarScraper
 
 logger = logging.getLogger(__name__)
-
-
-def _is_transient_storage_error(err: str | Exception | None) -> bool:
-    if err is None:
-        return False
-    msg = str(err).lower()
-    transient_markers = [
-        "temporary failure in name resolution",
-        "err_name_not_resolved",
-        "name or service not known",
-        "connect timeout",
-        "read timeout",
-        "connection reset",
-        "connection refused",
-        "service unavailable",
-        "502",
-        "503",
-        "504",
-    ]
-    return any(marker in msg for marker in transient_markers)
-
-
-def _handle_storage_result(self, task_id: str, source_name: str, log: dict, articles_found: int, store_result: dict) -> bool:
-    """Return True when storage is healthy; False/Retry otherwise."""
-    storage_error = (store_result or {}).get("error")
-    if not storage_error:
-        return True
-
-    logger.error("Task %s - %s storage failed: %s", task_id, source_name, storage_error)
-    finalize_run(
-        log["id"],
-        status="error",
-        articles_scraped=articles_found,
-        error_message=f"storage_error: {storage_error}",
-    )
-
-    if self.request.retries < self.max_retries and _is_transient_storage_error(storage_error):
-        logger.warning(
-            "Task %s - %s transient storage error, retrying (%s/%s)",
-            task_id, source_name, self.request.retries + 1, self.max_retries,
-        )
-        raise self.retry(countdown=60 * (2 ** self.request.retries))
-
-    return False
 
 @shared_task
 def scrape_sample(source: str = "Inquirer"):
@@ -97,88 +54,17 @@ def scrape_sample(source: str = "Inquirer"):
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
 def scrape_inquirer_task(self):
     """Enhanced Inquirer scraping task with retry logic and comprehensive monitoring."""
-    task_id = self.request.id
-    logger.info(f"Starting Inquirer scraping task {task_id}")
-    log = start_run("inquirer")
-    
-    try:
-        # Run the scraper
-        scraper = InquirerScraper()
-        import random
-        result = scraper.scrape_latest(max_articles=10)
-        
-        # Log scraping results
-        logger.info(f"Task {task_id} - Scraping completed: {len(result.articles)} articles, {len(result.errors)} errors")
-        logger.info(f"Task {task_id} - Performance: {result.performance}")
-        
-        if result.errors:
-            logger.warning(f"Task {task_id} - Scraping errors: {result.errors}")
-        
-        # Store articles in database
-        if result.articles:
-            store_result = insert_articles(result.articles)
-            logger.info(f"Task {task_id} - Storage result: {store_result}")
-            if not _handle_storage_result(self, task_id, "Inquirer", log, len(result.articles), store_result):
-                return {
-                    "ok": False,
-                    "task_id": task_id,
-                    "error": f"storage_failed: {store_result.get('error')}",
-                    "scraping": {
-                        "articles_found": len(result.articles),
-                        "errors": result.errors,
-                    },
-                    "storage": store_result,
-                }
-            # Enqueue ML analysis for newly inserted articles
-            inserted_ids = store_result.get("inserted_ids") or []
-            if inserted_ids:
-                analyze_articles_task.delay(inserted_ids)
-            finalize_run(log["id"], status="success", articles_scraped=len(result.articles))
-            
-            # Return comprehensive result
-            return {
-                "ok": True,
-                "task_id": task_id,
-                "scraping": {
-                    "articles_found": len(result.articles),
-                    "errors": result.errors,
-                    "performance": result.performance,
-                    "metadata": result.metadata
-                },
-                "storage": store_result
-            }
-        else:
-            logger.warning(f"Task {task_id} - No articles found to store")
-            finalize_run(log["id"], status="success", articles_scraped=0)
-            return {
-                "ok": True,
-                "task_id": task_id,
-                "scraping": {
-                    "articles_found": 0,
-                    "errors": result.errors,
-                    "performance": result.performance,
-                    "metadata": result.metadata
-                },
-                "storage": {"checked": 0, "skipped": 0, "inserted": 0}
-            }
-            
-    except Exception as e:
-        error_msg = f"Task {task_id} failed: {str(e)}"
-        logger.error(error_msg)
-        finalize_run(log["id"], status="error", articles_scraped=(len(result.articles) if "result" in locals() else 0), error_message=str(e))
-        
-        # Retry logic for transient failures
-        if self.request.retries < self.max_retries:
-            logger.info(f"Task {task_id} - Retrying ({self.request.retries + 1}/{self.max_retries})")
-            raise self.retry(countdown=60 * (2 ** self.request.retries))  # Exponential backoff
-        else:
-            logger.error(f"Task {task_id} - Max retries exceeded, marking as failed")
-            return {
-                "ok": False,
-                "task_id": task_id,
-                "error": error_msg,
-                "retries_exhausted": True
-            }
+    task_id = str(self.request.id)
+    logger.info("Starting Inquirer scraping task %s", task_id)
+    scraper = InquirerScraper()
+    return run_scrape_task(
+        celery_self=self,
+        source_key="inquirer",
+        source_name="Inquirer",
+        task_id=task_id,
+        scrape_fn=lambda: scraper.scrape_latest(max_articles=10),
+        retry_base_seconds=60,
+    )
 
 # ABS-CBN task (requires headed mode or xvfb for Akamai bypass)
 @shared_task(bind=True, max_retries=2, default_retry_delay=120)
@@ -192,10 +78,15 @@ def scrape_abs_cbn_task(self):
         result = scraper.scrape_latest(max_articles=10)
         logger.info(f"Task {task_id} - ABS-CBN scraped {len(result.articles)} articles, {len(result.errors)} errors")
         if result.articles:
+            from app.pipeline.store import insert_articles
             store_result = insert_articles(result.articles)
             logger.info(f"Task {task_id} - ABS-CBN storage result: {store_result}")
-            if not _handle_storage_result(self, task_id, "ABS-CBN", log, len(result.articles), store_result):
-                return {"ok": False, "task_id": task_id, "error": f"storage_failed: {store_result.get('error')}", "storage": store_result}
+            # Keep ABS-CBN behavior unchanged (custom retry style).
+            storage_error = (store_result or {}).get("error")
+            if storage_error:
+                logger.error("Task %s - ABS-CBN storage failed: %s", task_id, storage_error)
+                finalize_run(log["id"], status="error", articles_scraped=len(result.articles), error_message=f"storage_error: {storage_error}")
+                return {"ok": False, "task_id": task_id, "error": f"storage_failed: {storage_error}", "storage": store_result}
             inserted_ids = store_result.get("inserted_ids") or []
             if inserted_ids:
                 analyze_articles_task.delay(inserted_ids)
@@ -223,383 +114,87 @@ def scrape_abs_cbn_task(self):
 # New GMA task
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
 def scrape_gma_task(self):
-    task_id = self.request.id
-    logger.info(f"Starting GMA scraping task {task_id}")
-    log = start_run("gma")
-    try:
-        scraper = GMAScraper()
-        import random
-        result = scraper.scrape_latest(max_articles=10)
-        logger.info(f"Task {task_id} - GMA scraped {len(result.articles)} articles, {len(result.errors)} errors")
-        if result.articles:
-            store_result = insert_articles(result.articles)
-            logger.info(f"Task {task_id} - GMA storage result: {store_result}")
-            if not _handle_storage_result(self, task_id, "GMA", log, len(result.articles), store_result):
-                return {"ok": False, "task_id": task_id, "error": f"storage_failed: {store_result.get('error')}", "storage": store_result}
-            inserted_ids = store_result.get("inserted_ids") or []
-            if inserted_ids:
-                analyze_articles_task.delay(inserted_ids)
-            finalize_run(log["id"], status="success", articles_scraped=len(result.articles))
-            return {
-                "ok": True,
-                "task_id": task_id,
-                "scraping": {
-                    "articles_found": len(result.articles),
-                    "errors": result.errors,
-                    "performance": result.performance,
-                    "metadata": result.metadata
-                },
-                "storage": store_result
-            }
-        else:
-            finalize_run(log["id"], status="success", articles_scraped=0)
-            return {
-                "ok": True,
-                "task_id": task_id,
-                "scraping": {
-                    "articles_found": 0,
-                    "errors": result.errors,
-                    "performance": result.performance,
-                    "metadata": result.metadata
-                },
-                "storage": {"checked": 0, "skipped": 0, "inserted": 0}
-            }
-    except Exception as e:
-        error_msg = f"GMA task {task_id} failed: {str(e)}"
-        logger.error(error_msg)
-        finalize_run(log["id"], status="error", articles_scraped=(len(result.articles) if "result" in locals() else 0), error_message=str(e))
-        if self.request.retries < self.max_retries:
-            logger.info(f"Task {task_id} - Retrying ({self.request.retries + 1}/{self.max_retries})")
-            raise self.retry(countdown=60 * (2 ** self.request.retries))
-        else:
-            return {"ok": False, "task_id": task_id, "error": error_msg, "retries_exhausted": True} 
+    task_id = str(self.request.id)
+    logger.info("Starting GMA scraping task %s", task_id)
+    scraper = GMAScraper()
+    return run_scrape_task(
+        celery_self=self,
+        source_key="gma",
+        source_name="GMA",
+        task_id=task_id,
+        scrape_fn=lambda: scraper.scrape_latest(max_articles=10),
+        retry_base_seconds=60,
+    )
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
 def scrape_philstar_task(self):
-    task_id = self.request.id
-    logger.info(f"Starting Philstar scraping task {task_id}")
-    log = start_run("philstar")
-    try:
-        scraper = PhilStarScraper()
-        import random
-        result = scraper.scrape_latest(max_articles=10)
-        logger.info(f"Task {task_id} - Philstar scraped {len(result.articles)} articles, {len(result.errors)} errors")
-        if result.articles:
-            store_result = insert_articles(result.articles)
-            logger.info(f"Task {task_id} - Philstar storage result: {store_result}")
-            if not _handle_storage_result(self, task_id, "Philstar", log, len(result.articles), store_result):
-                return {"ok": False, "task_id": task_id, "error": f"storage_failed: {store_result.get('error')}", "storage": store_result}
-            inserted_ids = store_result.get("inserted_ids") or []
-            if inserted_ids:
-                analyze_articles_task.delay(inserted_ids)
-            finalize_run(log["id"], status="success", articles_scraped=len(result.articles))
-            return {
-                "ok": True,
-                "task_id": task_id,
-                "scraping": {
-                    "articles_found": len(result.articles),
-                    "errors": result.errors,
-                    "performance": result.performance,
-                    "metadata": result.metadata
-                },
-                "storage": store_result
-            }
-        else:
-            finalize_run(log["id"], status="success", articles_scraped=0)
-            return {
-                "ok": True,
-                "task_id": task_id,
-                "scraping": {
-                    "articles_found": 0,
-                    "errors": result.errors,
-                    "performance": result.performance,
-                    "metadata": result.metadata
-                },
-                "storage": {"checked": 0, "skipped": 0, "inserted": 0}
-            }
-    except Exception as e:
-        error_msg = f"Philstar task {task_id} failed: {str(e)}"
-        logger.error(error_msg)
-        finalize_run(log["id"], status="error", articles_scraped=(len(result.articles) if "result" in locals() else 0), error_message=str(e))
-        if self.request.retries < self.max_retries:
-            logger.info(f"Task {task_id} - Retrying ({self.request.retries + 1}/{self.max_retries})")
-            raise self.retry(countdown=60 * (2 ** self.request.retries))
-        else:
-            return {"ok": False, "task_id": task_id, "error": error_msg, "retries_exhausted": True} 
+    task_id = str(self.request.id)
+    logger.info("Starting Philstar scraping task %s", task_id)
+    scraper = PhilStarScraper()
+    return run_scrape_task(
+        celery_self=self,
+        source_key="philstar",
+        source_name="Philstar",
+        task_id=task_id,
+        scrape_fn=lambda: scraper.scrape_latest(max_articles=10),
+        retry_base_seconds=60,
+    )
         
         # New Manila Bulletin task
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
 def scrape_manila_bulletin_task(self):
-    task_id = self.request.id
-    logger.info(f"Starting Manila Bulletin scraping task {task_id}")
-    log = start_run("manila_bulletin")
-    try:
-        scraper = ManilaBulletinScraper()
-        import random
-        result = scraper.scrape_latest(max_articles=10)  # More conservative range
-        logger.info(f"Task {task_id} - Manila Bulletin scraped {len(result.articles)} articles, {len(result.errors)} errors")
-        if result.articles:
-            store_result = insert_articles(result.articles)
-            logger.info(f"Task {task_id} - Manila Bulletin storage result: {store_result}")
-            if not _handle_storage_result(self, task_id, "Manila Bulletin", log, len(result.articles), store_result):
-                return {"ok": False, "task_id": task_id, "error": f"storage_failed: {store_result.get('error')}", "storage": store_result}
-            inserted_ids = store_result.get("inserted_ids") or []
-            if inserted_ids:
-                analyze_articles_task.delay(inserted_ids)
-            finalize_run(log["id"], status="success", articles_scraped=len(result.articles))
-            return {
-                "ok": True,
-                "task_id": task_id,
-                "scraping": {
-                    "articles_found": len(result.articles),
-                    "errors": result.errors,
-                    "performance": result.performance,
-                    "metadata": result.metadata
-                },
-                "storage": store_result
-            }
-        else:
-            finalize_run(log["id"], status="success", articles_scraped=0)
-            return {
-                "ok": True,
-                "task_id": task_id,
-                "scraping": {
-                    "articles_found": 0,
-                    "errors": result.errors,
-                    "performance": result.performance,
-                    "metadata": result.metadata
-                },
-                "storage": {"checked": 0, "skipped": 0, "inserted": 0}
-            }
-    except Exception as e:
-        error_msg = f"Manila Bulletin task {task_id} failed: {str(e)}"
-        logger.error(error_msg)
-        finalize_run(log["id"], status="error", articles_scraped=(len(result.articles) if "result" in locals() else 0), error_message=str(e))
-        if self.request.retries < self.max_retries:
-            logger.info(f"Task {task_id} - Retrying ({self.request.retries + 1}/{self.max_retries})")
-            raise self.retry(countdown=60 * (2 ** self.request.retries))
-        else:
-            return {"ok": False, "task_id": task_id, "error": error_msg, "retries_exhausted": True} 
+    task_id = str(self.request.id)
+    logger.info("Starting Manila Bulletin scraping task %s", task_id)
+    scraper = ManilaBulletinScraper()
+    return run_scrape_task(
+        celery_self=self,
+        source_key="manila_bulletin",
+        source_name="Manila Bulletin",
+        task_id=task_id,
+        scrape_fn=lambda: scraper.scrape_latest(max_articles=10),
+        retry_base_seconds=60,
+    )
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
 def scrape_rappler_task(self):
-    """Advanced Rappler scraping task with senior dev and black hat techniques."""
-    task_id = self.request.id
-    logger.info(f"Starting Rappler scraping task {task_id}")
-    
-    log = start_run("rappler")
-    
-    try:
-        import random
-        scraper = RapplerScraper()
-        result = scraper.scrape_latest(max_articles=50)
-        
-        logger.info(f"Task {task_id} - Rappler scraped {len(result.articles)} articles, {len(result.errors)} errors")
-        
-        if result.articles:
-            store_result = insert_articles(result.articles)
-            logger.info(f"Task {task_id} - Rappler storage result: {store_result}")
-            if not _handle_storage_result(self, task_id, "Rappler", log, len(result.articles), store_result):
-                return {"ok": False, "task_id": task_id, "error": f"storage_failed: {store_result.get('error')}", "storage": store_result}
-            inserted_ids = store_result.get("inserted_ids") or []
-            if inserted_ids:
-                analyze_articles_task.delay(inserted_ids)
-            
-            finalize_run(log["id"], status="success", articles_scraped=len(result.articles))
-            
-            return {
-                "ok": True,
-                "task_id": task_id,
-                "scraping": {
-                    "articles_found": len(result.articles),
-                    "errors": result.errors,
-                    "performance": result.performance,
-                    "metadata": result.metadata,
-                },
-                "storage": store_result,
-            }
-        else:
-            finalize_run(log["id"], status="success", articles_scraped=0)
-            return {
-                "ok": True,
-                "task_id": task_id,
-                "scraping": {
-                    "articles_found": 0,
-                    "errors": result.errors,
-                    "performance": result.performance,
-                    "metadata": result.metadata,
-                },
-                "storage": {"checked": 0, "skipped": 0, "inserted": 0},
-            }
-    
-    except Exception as e:
-        error_msg = f"Rappler task {task_id} failed: {str(e)}"
-        logger.error(error_msg)
-        
-        finalize_run(
-            log["id"],
-            status="error",
-            articles_scraped=(len(result.articles) if "result" in locals() else 0),
-            error_message=str(e),
-        )
-        
-        if self.request.retries < self.max_retries:
-            logger.info(f"Task {task_id} - Retrying ({self.request.retries + 1}/{self.max_retries})")
-            raise self.retry(countdown=60 * (2 ** self.request.retries))
-        else:
-            return {
-                "ok": False, 
-                "task_id": task_id, 
-                "error": error_msg, 
-                "retries_exhausted": True
-            }
-
-# New import for Sunstar
-from app.scrapers.sunstar import SunstarScraper
+    task_id = str(self.request.id)
+    logger.info("Starting Rappler scraping task %s", task_id)
+    scraper = RapplerScraper()
+    return run_scrape_task(
+        celery_self=self,
+        source_key="rappler",
+        source_name="Rappler",
+        task_id=task_id,
+        scrape_fn=lambda: scraper.scrape_latest(max_articles=50),
+        retry_base_seconds=60,
+    )
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
 def scrape_sunstar_task(self):
     """Celery task for scraping Sunstar articles."""
     task_id = str(self.request.id)
-    logger.info(f"Starting Sunstar scraping task {task_id}")
-    
-    log = start_run("sunstar")
-    
-    try:
-        scraper = SunstarScraper()
-        import random
-        result = scraper.scrape_all(max_articles=10)  # Conservative range like other scrapers
-        
-        if result.articles:
-            # Store articles in database
-            storage_result = insert_articles(result.articles)
-            if not _handle_storage_result(self, task_id, "Sunstar", log, len(result.articles), storage_result):
-                return {"ok": False, "task_id": task_id, "error": f"storage_failed: {storage_result.get('error')}", "storage": storage_result}
-            inserted_ids = storage_result.get("inserted_ids") or []
-            if inserted_ids:
-                analyze_articles_task.delay(inserted_ids)
-            finalize_run(log["id"], status="success", articles_scraped=len(result.articles))
-            
-            return {
-                "ok": True,
-                "task_id": task_id,
-                "scraping": {
-                    "articles_found": len(result.articles),
-                    "errors": result.errors,
-                    "performance": result.performance,
-                    "metadata": result.metadata,
-                },
-                "storage": storage_result,
-            }
-        else:
-            finalize_run(log["id"], status="success", articles_scraped=0)
-            return {
-                "ok": True,
-                "task_id": task_id,
-                "scraping": {
-                    "articles_found": 0,
-                    "errors": result.errors,
-                    "performance": result.performance,
-                    "metadata": result.metadata,
-                },
-                "storage": {"checked": 0, "skipped": 0, "inserted": 0},
-            }
-    except Exception as e:
-        error_msg = f"Sunstar task {task_id} failed: {str(e)}"
-        logger.error(error_msg)
-        finalize_run(log["id"], status="error", articles_scraped=(len(result.articles) if "result" in locals() else 0), error_message=str(e))
-        if self.request.retries < self.max_retries:
-            logger.info(f"Task {task_id} - Retrying ({self.request.retries + 1}/{self.max_retries})")
-            raise self.retry(countdown=60 * (2 ** self.request.retries))
-        else:
-            return {
-                "ok": False, 
-                "task_id": task_id, 
-                "error": error_msg, 
-                "retries_exhausted": True
-            }
+    logger.info("Starting Sunstar scraping task %s", task_id)
+    scraper = SunstarScraper()
+    return run_scrape_task(
+        celery_self=self,
+        source_key="sunstar",
+        source_name="Sunstar",
+        task_id=task_id,
+        scrape_fn=lambda: scraper.scrape_all(max_articles=10),
+        retry_base_seconds=60,
+    )
 
 # Manila Times task
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
 def scrape_manila_times_task(self):
-    """Manila Times scraping task with stealth approach."""
-    task_id = self.request.id
-    logger.info(f"Starting Manila Times scraping task {task_id}")
-    log = start_run("manila_times")
-    
-    try:
-        scraper = ManilaTimesScraper()
-        import random
-        result = scraper.scrape_latest(max_articles=10)
-        
-        logger.info(f"Task {task_id} - Manila Times scraped {len(result.articles)} articles, {len(result.errors)} errors")
-        
-        if result.articles:
-            store_result = insert_articles(result.articles)
-            logger.info(f"Task {task_id} - Manila Times storage result: {store_result}")
-            if not _handle_storage_result(self, task_id, "Manila Times", log, len(result.articles), store_result):
-                return {"ok": False, "task_id": task_id, "error": f"storage_failed: {store_result.get('error')}", "storage": store_result}
-            inserted_ids = store_result.get("inserted_ids") or []
-            if inserted_ids:
-                analyze_articles_task.delay(inserted_ids)
-            finalize_run(log["id"], status="success", articles_scraped=len(result.articles))
-            
-            return {
-                "ok": True,
-                "task_id": task_id,
-                "scraping": {
-                    "articles_found": len(result.articles),
-                    "errors": result.errors,
-                    "performance": result.performance,
-                    "metadata": result.metadata
-                },
-                "storage": store_result
-            }
-        else:
-            finalize_run(log["id"], status="success", articles_scraped=0)
-            return {
-                "ok": True,
-                "task_id": task_id,
-                "scraping": {
-                    "articles_found": 0,
-                    "errors": result.errors,
-                    "performance": result.performance,
-                    "metadata": result.metadata
-                },
-                "storage": {"checked": 0, "skipped": 0, "inserted": 0}
-            }
-            
-    except Exception as e:
-        error_msg = f"Manila Times task {task_id} failed: {str(e)}"
-        logger.error(error_msg)
-        finalize_run(log["id"], status="error", articles_scraped=(len(result.articles) if "result" in locals() else 0), error_message=str(e))
-        
-        if self.request.retries < self.max_retries:
-            logger.info(f"Task {task_id} - Retrying ({self.request.retries + 1}/{self.max_retries})")
-            raise self.retry(countdown=60 * (2 ** self.request.retries))
-        else:
-            return {
-                "ok": False,
-                "task_id": task_id,
-                "error": error_msg,
-                "retries_exhausted": True
-            }
+    task_id = str(self.request.id)
+    logger.info("Starting Manila Times scraping task %s", task_id)
+    scraper = ManilaTimesScraper()
+    return run_scrape_task(
+        celery_self=self,
+        source_key="manila_times",
+        source_name="Manila Times",
+        task_id=task_id,
+        scrape_fn=lambda: scraper.scrape_latest(max_articles=10),
+        retry_base_seconds=60,
+    )
 
-# Maintenance: weekly entity mining to refresh suggestions
-from subprocess import Popen, PIPE
-
-@shared_task(bind=True, max_retries=3, default_retry_delay=60)
-def mine_entities_task(self):
-    """Run the mining script to generate keyword suggestions."""
-    try:
-        import sys, os
-        backend_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-        script_path = os.path.join(backend_root, 'scripts', 'mine_entities.py')
-        if not os.path.exists(script_path):
-            return {"ok": False, "error": f"Script not found: {script_path}"}
-        proc = Popen([sys.executable, script_path], cwd=backend_root, stdout=PIPE, stderr=PIPE)
-        out, err = proc.communicate(timeout=300)
-        return {"ok": proc.returncode == 0, "code": proc.returncode, "stdout": out.decode('utf-8', 'ignore')[-1000:], "stderr": err.decode('utf-8', 'ignore')[-1000:]}
-    except Exception as e:
-        if self.request.retries < self.max_retries:
-            raise self.retry(exc=e, countdown=60 * (2 ** self.request.retries))
-        return {"ok": False, "error": str(e)}

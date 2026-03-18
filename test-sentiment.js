@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
 // Quick test of the new function
 const { fetchAllArticlesWithSentiment } = require('./src/lib/articles.ts');
 

@@ -10,7 +10,6 @@ from fastapi import APIRouter, Body, Header
 
 from app.cache import get_cached, set_cached
 from app.core.supabase import get_supabase
-from app.ml.bias import get_political_keywords_and_weights
 from app.services.analytics_service import aggregate_entities_with_sentiment, clean_entity_for_counting
 from app.services.articles_service import get_all_articles_paginated
 from app.services.window_service import window_bounds
@@ -22,56 +21,6 @@ router = APIRouter()
 
 # Simple token guard using env ADMIN_TOKEN (optional)
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN")
-
-
-@router.get("/ml/keywords/status")
-async def get_keywords_status():
-    try:
-        kw, weights, version = get_political_keywords_and_weights()
-        categories = {k: len(v or []) for k, v in (kw or {}).items()}
-        return {"ok": True, "version": version, "categories": categories, "weights_present": bool(weights)}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
-
-
-@router.get("/ml/keywords/suggestions")
-async def get_keywords_suggestions(x_admin_token: Optional[str] = Header(default=None)):
-    if ADMIN_TOKEN and x_admin_token != ADMIN_TOKEN:
-        return {"ok": False, "error": "unauthorized"}
-    sugg_path = os.path.join(os.path.dirname(__file__), "ml", "suggestions", "keywords_ph_suggestions.json")
-    try:
-        with open(sugg_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return {"ok": True, "data": data}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
-
-
-@router.post("/ml/keywords/apply_suggestions")
-async def apply_keywords_suggestions(
-    category: str = Body(default="neutral_institutional"),
-    apply: bool = Body(default=True),
-    x_admin_token: Optional[str] = Header(default=None),
-):
-    if ADMIN_TOKEN and x_admin_token != ADMIN_TOKEN:
-        return {"ok": False, "error": "unauthorized"}
-    backend_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-    script_path = os.path.join(backend_root, "scripts", "apply_keywords_suggestions.py")
-    if not os.path.exists(script_path):
-        return {"ok": False, "error": f"script not found: {script_path}"}
-    cmd = [sys.executable, script_path, "--category", category]
-    if apply:
-        cmd.append("--apply")
-    try:
-        proc = subprocess.Popen(cmd, cwd=backend_root, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        out, err = proc.communicate(timeout=60)
-        return {
-            "ok": proc.returncode == 0,
-            "stdout": out.decode("utf-8", "ignore"),
-            "stderr": err.decode("utf-8", "ignore"),
-        }
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
 
 
 @router.get("/ml/correlation")
@@ -317,25 +266,26 @@ async def get_top_entities(
             return cached
 
     try:
-        all_articles = get_all_articles_paginated(
+        # Phase 1: fetch only IDs + metadata for counting/capping.
+        all_meta = get_all_articles_paginated(
             sb,
             start_date_str,
             source=source,
             end_date=end_date_str,
-            select_fields="id,source,published_at,title,content",
+            select_fields="id,source,published_at",
         )
-        total_available = len(all_articles)
+        total_available = len(all_meta)
         total_capped = min(total_available, max(1, total_cap))
-        capped_articles = all_articles[:total_capped]
+        capped_meta = all_meta[:total_capped]
 
         if scan_mode == "full":
-            sampled_articles = capped_articles
+            sampled_meta = capped_meta
             sample_cap = total_capped
         else:
             sample_cap = max(1, min(limit_articles, total_capped))
-            sampled_articles = capped_articles[:sample_cap]
+            sampled_meta = capped_meta[:sample_cap]
 
-        if not sampled_articles:
+        if not sampled_meta:
             result = {
                 "ok": True,
                 "sampled": 0,
@@ -349,7 +299,17 @@ async def get_top_entities(
             set_cached(cache_key, result, 120)
             return result
 
-        articles_by_id = {a["id"]: a for a in sampled_articles if a.get("id")}
+        # Phase 2: fetch full text only for the sampled IDs (this is the heavy part).
+        sampled_ids = [a["id"] for a in sampled_meta if a.get("id") is not None]
+        articles_by_id = {}
+        batch_size = 200
+        for i in range(0, len(sampled_ids), batch_size):
+            batch_ids = sampled_ids[i : i + batch_size]
+            res = sb.table("articles").select("id,source,published_at,title,content").in_("id", batch_ids).execute()
+            for a in (res.data or []):
+                if a.get("id") is not None:
+                    articles_by_id[a["id"]] = a
+
         article_ids = list(articles_by_id.keys())
 
         all_analysis = []
@@ -358,7 +318,7 @@ async def get_top_entities(
             batch_ids = article_ids[i : i + batch_size]
             res = (
                 sb.table("bias_analysis")
-                .select("article_id,sentiment_score,model_type,created_at")
+                .select("article_id,sentiment_score,created_at")
                 .in_("article_id", batch_ids)
                 .eq("model_type", "sentiment")
                 .order("created_at", desc=True)
@@ -564,7 +524,14 @@ async def get_trends(period: str = "7d", source: Optional[str] = None, include_t
         return cached_result
 
     try:
-        articles = get_all_articles_paginated(sb, start_date_str, source, end_date=end_date_str)
+        # Only pull fields needed for trends; full article content makes this endpoint much slower.
+        articles = get_all_articles_paginated(
+            sb,
+            start_date_str,
+            source,
+            end_date=end_date_str,
+            select_fields="id,published_at",
+        )
 
         if not articles:
             result = {
@@ -583,17 +550,6 @@ async def get_trends(period: str = "7d", source: Optional[str] = None, include_t
             set_cached(cache_key, result, 60)
             return result
 
-        article_ids = [a["id"] for a in articles]
-        all_analysis = []
-        batch_size = 500
-
-        for i in range(0, len(article_ids), batch_size):
-            batch_ids = article_ids[i : i + batch_size]
-            analysis_result = (
-                sb.table("bias_analysis").select("*").in_("article_id", batch_ids).eq("model_type", "sentiment").execute()
-            )
-            all_analysis.extend(analysis_result.data or [])
-
         from collections import defaultdict
 
         daily_data = defaultdict(lambda: {"positive": 0, "negative": 0, "neutral": 0, "total": 0, "sentiment_scores": []})
@@ -605,26 +561,68 @@ async def get_trends(period: str = "7d", source: Optional[str] = None, include_t
             except Exception:
                 return (ts or "")[:10]
 
-        for article in articles:
-            date_str = to_ph_date_str(article.get("published_at", ""))
-            daily_data[date_str]["total"] += 1
+        # Build id -> local date map once (avoids O(n^2) scanning later).
+        article_id_to_ph_date = {}
+        for a in articles:
+            aid = a.get("id")
+            if aid is None:
+                continue
+            article_id_to_ph_date[aid] = to_ph_date_str(a.get("published_at", ""))
 
-        for analysis in all_analysis:
-            article_id = analysis["article_id"]
-            sentiment_label = analysis.get("sentiment_label", "neutral")
-            sentiment_score = analysis.get("sentiment_score", 0)
+        # Total article counts per day come from the articles table (not from sentiment rows).
+        for d in article_id_to_ph_date.values():
+            if d:
+                daily_data[d]["total"] += 1
 
-            article = next((a for a in articles if a["id"] == article_id), None)
-            if article:
-                date_str = to_ph_date_str(article.get("published_at", ""))
-                daily_data[date_str]["sentiment_scores"].append(sentiment_score)
+        article_ids = list(article_id_to_ph_date.keys())
 
-                if sentiment_label == "positive":
-                    daily_data[date_str]["positive"] += 1
-                elif sentiment_label == "negative":
-                    daily_data[date_str]["negative"] += 1
-                else:
-                    daily_data[date_str]["neutral"] += 1
+        # Fetch sentiment rows (in batches) and keep only the latest row per article.
+        all_analysis = []
+        batch_size = 2000
+        for i in range(0, len(article_ids), batch_size):
+            batch_ids = article_ids[i : i + batch_size]
+            try:
+                analysis_result = (
+                    sb.table("bias_analysis")
+                    .select("article_id,sentiment_label,sentiment_score,created_at")
+                    .in_("article_id", batch_ids)
+                    .eq("model_type", "sentiment")
+                    .order("created_at", desc=True)
+                    .execute()
+                )
+                all_analysis.extend(analysis_result.data or [])
+            except Exception:
+                if batch_size > 500:
+                    batch_size = 500
+                    continue
+                raise
+
+        latest_by_article = {}
+        for row in all_analysis:
+            aid = row.get("article_id")
+            if aid and aid not in latest_by_article:
+                latest_by_article[aid] = row
+        analysis_rows = list(latest_by_article.values())
+
+        for row in analysis_rows:
+            aid = row.get("article_id")
+            if aid is None:
+                continue
+            date_str = article_id_to_ph_date.get(aid)
+            if not date_str:
+                continue
+
+            sentiment_label = row.get("sentiment_label") or "neutral"
+            sentiment_score = row.get("sentiment_score")
+            if sentiment_score is not None:
+                daily_data[date_str]["sentiment_scores"].append(float(sentiment_score))
+
+            if sentiment_label == "positive":
+                daily_data[date_str]["positive"] += 1
+            elif sentiment_label == "negative":
+                daily_data[date_str]["negative"] += 1
+            else:
+                daily_data[date_str]["neutral"] += 1
 
         timeline = []
         total_articles = 0
@@ -632,25 +630,16 @@ async def get_trends(period: str = "7d", source: Optional[str] = None, include_t
         total_negative = 0
         total_neutral = 0
 
-        aggregated_daily_data = defaultdict(lambda: {"positive": 0, "negative": 0, "neutral": 0, "total": 0, "sentiment_scores": []})
-
-        for date_str, data in daily_data.items():
-            aggregated_daily_data[date_str]["total"] += data["total"]
-            aggregated_daily_data[date_str]["positive"] += data["positive"]
-            aggregated_daily_data[date_str]["negative"] += data["negative"]
-            aggregated_daily_data[date_str]["neutral"] += data["neutral"]
-            aggregated_daily_data[date_str]["sentiment_scores"].extend(data["sentiment_scores"])
-
         window_start_local = start_local.date()
         window_end_local = end_local.date()
-        for date_str in sorted(aggregated_daily_data.keys()):
+        for date_str in sorted(daily_data.keys()):
             try:
                 date_obj = datetime.fromisoformat(date_str).date()
             except Exception:
                 date_obj = None
             if date_obj and not (window_start_local <= date_obj <= window_end_local):
                 continue
-            data = aggregated_daily_data[date_str]
+            data = daily_data[date_str]
             total = data["total"]
             positive = data["positive"]
             negative = data["negative"]
@@ -703,193 +692,3 @@ async def get_trends(period: str = "7d", source: Optional[str] = None, include_t
         return {"error": str(e)}
 
 
-@router.get("/ml/bias_analysis_political_latest")
-async def get_political_bias_latest(limit: int = 100):
-    """Get latest political bias analysis results."""
-    sb = get_supabase()
-    try:
-        result = (
-            sb.table("bias_analysis")
-            .select("*")
-            .eq("model_version", "philippine_bias_v1")
-            .eq("model_type", "political_bias")
-            .order("created_at", desc=True)
-            .limit(limit)
-            .execute()
-        )
-        return result.data or []
-    except Exception as e:
-        return {"error": str(e)}
-
-
-@router.get("/dashboard/comprehensive")
-async def get_comprehensive_dashboard(period: str = "7d", source: Optional[str] = None):
-    """Comprehensive dashboard data including both sentiment and political bias analysis."""
-    sb = get_supabase()
-
-    now = datetime.now()
-
-    if period == "1d":
-        start_date = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-        end_date = (now - timedelta(days=1)).replace(hour=23, minute=59, second=59, microsecond=999999)
-    elif period == "7d":
-        start_date = (now - timedelta(days=8)).replace(hour=0, minute=0, second=0, microsecond=0)
-        end_date = (now - timedelta(days=1)).replace(hour=23, minute=59, second=59, microsecond=999999)
-    elif period == "30d":
-        start_date = (now - timedelta(days=31)).replace(hour=0, minute=0, second=0, microsecond=0)
-        end_date = (now - timedelta(days=1)).replace(hour=23, minute=59, second=59, microsecond=999999)
-    else:
-        start_date = (now - timedelta(days=8)).replace(hour=0, minute=0, second=0, microsecond=0)
-        end_date = (now - timedelta(days=1)).replace(hour=23, minute=59, second=59, microsecond=999999)
-
-    start_date_str = start_date.isoformat()
-
-    try:
-        articles = get_all_articles_paginated(sb, start_date_str, source)
-
-        if not articles:
-            return {
-                "ok": True,
-                "articles": {"total": 0, "by_source": {}, "by_date": {}},
-                "sentiment": {"total_analyses": 0, "avg_compound": 0, "distribution": {"positive": 0, "neutral": 0, "negative": 0}},
-                "political_bias": {"total_analyses": 0, "avg_bias_score": 0, "avg_confidence": 0, "distribution": {"pro_government": 0, "pro_opposition": 0, "neutral": 0, "mixed": 0}},
-                "source_comparison": [],
-                "timeline": [],
-                "generated_at": now.isoformat(),
-            }
-
-        article_ids = [a["id"] for a in articles]
-        sentiment_result = (
-            sb.table("bias_analysis")
-            .select("*")
-            .in_("article_id", article_ids)
-            .eq("model_version", "vader_v1")
-            .eq("model_type", "sentiment")
-            .execute()
-        )
-        sentiment_data = sentiment_result.data or []
-
-        political_result = (
-            sb.table("bias_analysis")
-            .select("*")
-            .in_("article_id", article_ids)
-            .eq("model_version", "philippine_bias_v1")
-            .eq("model_type", "political_bias")
-            .execute()
-        )
-        political_data = political_result.data or []
-
-        sentiment_scores = [s.get("sentiment_score", 0) for s in sentiment_data if s.get("sentiment_score") is not None]
-        sentiment_labels = [s.get("sentiment_label", "neutral") for s in sentiment_data]
-
-        sentiment_distribution = {"positive": 0, "neutral": 0, "negative": 0}
-        for label in sentiment_labels:
-            if label in sentiment_distribution:
-                sentiment_distribution[label] += 1
-
-        political_scores = [p.get("political_bias_score", 0) for p in political_data if p.get("political_bias_score") is not None]
-        political_directions = [p.get("model_metadata", {}).get("direction", "neutral") for p in political_data]
-
-        political_distribution = {"pro_government": 0, "pro_opposition": 0, "neutral": 0, "mixed": 0}
-        for direction in political_directions:
-            if direction in political_distribution:
-                political_distribution[direction] += 1
-
-        by_source = {}
-        for article in articles:
-            source_name = article.get("source", "Unknown")
-            by_source[source_name] = by_source.get(source_name, 0) + 1
-
-        by_date = {}
-        for article in articles:
-            date_str = article.get("published_at", "")[:10]
-            if date_str:
-                by_date[date_str] = by_date.get(date_str, 0) + 1
-
-        timeline = []
-        for date_str in sorted(by_date.keys()):
-            day_articles = [a for a in articles if a.get("published_at", "").startswith(date_str)]
-            day_article_ids = [a["id"] for a in day_articles]
-
-            day_sentiment = [s for s in sentiment_data if s.get("article_id") in day_article_ids]
-            day_political = [p for p in political_data if p.get("article_id") in day_article_ids]
-
-            day_sentiment_scores = [s.get("sentiment_score", 0) for s in day_sentiment if s.get("sentiment_score") is not None]
-            day_political_scores = [p.get("political_bias_score", 0) for p in day_political if p.get("political_bias_score") is not None]
-            day_political_confidences = [p.get("confidence_score", 0) for p in day_political if p.get("confidence_score") is not None]
-
-            timeline.append(
-                {
-                    "date": date_str,
-                    "articles": len(day_articles),
-                    "sentiment": {
-                        "avg_score": sum(day_sentiment_scores) / len(day_sentiment_scores) if day_sentiment_scores else 0,
-                        "distribution": {
-                            "positive": len([s for s in day_sentiment if s.get("sentiment_label") == "positive"]),
-                            "neutral": len([s for s in day_sentiment if s.get("sentiment_label") == "neutral"]),
-                            "negative": len([s for s in day_sentiment if s.get("sentiment_label") == "negative"]),
-                        },
-                    },
-                    "political_bias": {
-                        "avg_bias_score": sum(day_political_scores) / len(day_political_scores) if day_political_scores else 0,
-                        "avg_confidence": sum(day_political_confidences) / len(day_political_confidences) if day_political_confidences else 0,
-                        "distribution": {
-                            "pro_government": len([p for p in day_political if p.get("model_metadata", {}).get("direction") == "pro_government"]),
-                            "pro_opposition": len([p for p in day_political if p.get("model_metadata", {}).get("direction") == "pro_opposition"]),
-                            "neutral": len([p for p in day_political if p.get("model_metadata", {}).get("direction") == "neutral"]),
-                        },
-                    },
-                }
-            )
-
-        source_comparison = []
-        for source_name, count in by_source.items():
-            source_articles = [a for a in articles if a.get("source") == source_name]
-            source_article_ids = [a["id"] for a in source_articles]
-
-            source_sentiment = [s for s in sentiment_data if s.get("article_id") in source_article_ids]
-            source_political = [p for p in political_data if p.get("article_id") in source_article_ids]
-
-            source_political_scores = [p.get("political_bias_score", 0) for p in source_political if p.get("political_bias_score") is not None]
-            source_political_confidences = [p.get("confidence_score", 0) for p in source_political if p.get("confidence_score") is not None]
-
-            source_political_distribution = {"pro_government": 0, "pro_opposition": 0, "neutral": 0}
-            for p in source_political:
-                direction = p.get("model_metadata", {}).get("direction", "neutral")
-                if direction in source_political_distribution:
-                    source_political_distribution[direction] += 1
-
-            source_comparison.append(
-                {
-                    "source": source_name,
-                    "article_count": count,
-                    "political_bias": {
-                        "avg_bias_score": sum(source_political_scores) / len(source_political_scores) if source_political_scores else 0,
-                        "avg_confidence": sum(source_political_confidences) / len(source_political_confidences) if source_political_confidences else 0,
-                        "distribution": source_political_distribution,
-                    },
-                }
-            )
-
-        return {
-            "ok": True,
-            "articles": {"total": len(articles), "by_source": by_source, "by_date": by_date},
-            "sentiment": {"total_analyses": len(sentiment_data), "avg_compound": sum(sentiment_scores) / len(sentiment_scores) if sentiment_scores else 0, "distribution": sentiment_distribution},
-            "political_bias": {
-                "total_analyses": len(political_data),
-                "avg_bias_score": sum(political_scores) / len(political_scores) if political_scores else 0,
-                "avg_confidence": (
-                    sum([p.get("confidence_score", 0) for p in political_data if p.get("confidence_score") is not None])
-                    / len([p for p in political_data if p.get("confidence_score") is not None])
-                    if political_data
-                    else 0
-                ),
-                "distribution": political_distribution,
-            },
-            "source_comparison": source_comparison,
-            "timeline": timeline,
-            "generated_at": now.isoformat(),
-        }
-
-    except Exception as e:
-        return {"ok": False, "error": str(e)}

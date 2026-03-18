@@ -49,8 +49,10 @@ Notes:
 - `backend/app/`: FastAPI application (`backend/app/main.py` is the entrypoint).
 - `backend/app/workers/`: Celery worker + tasks.
 - `backend/app/scrapers/`: Source scrapers.
+- `backend/app/scrapers/support/`: Shared scraper helpers (stealth profile + Playwright/http wrappers).
 - `backend/scripts/`: maintenance and analysis scripts.
 - `docker-compose.yml`: Redis + api + worker + beat.
+- `docker-compose.prod.yml`: Same services, but API runs without `--reload` (more stable for smoke tests).
 
 ## Quickstart (Local Dev)
 
@@ -81,6 +83,12 @@ docker compose up -d redis api worker beat
 
 API will be on `http://localhost:8000`.
 
+For a more stable run (no FastAPI hot-reload), use:
+
+```powershell
+docker compose -f docker-compose.prod.yml up -d redis api worker beat
+```
+
 3. Start the frontend
 
 ```powershell
@@ -89,6 +97,22 @@ npm run dev
 ```
 
 Frontend will be on `http://localhost:3000`.
+
+## Smoke Test (Backend)
+
+Run a minimal API sanity check suite (requires backend running):
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File backend/scripts/smoke_test.ps1
+```
+
+## Pipeline Test (Scrape + Verify)
+
+Runs one scrape task, polls status, then hits key API endpoints:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File backend/scripts/pipeline_test.ps1 -Source inquirer
+```
 
 ## Common Endpoints
 
@@ -105,7 +129,7 @@ Frontend will be on `http://localhost:3000`.
 
 Generate/update types:
 
-```bash
+```powershell
 supabase gen types typescript --project-id <PROJECT_ID> --schema public | Out-File -Encoding utf8 src/types/database.ts
 ```
 

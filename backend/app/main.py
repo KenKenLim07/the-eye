@@ -2,7 +2,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.articles_router import router as articles_router
-from app.api.bias_router import router as bias_router
 from app.api.cache_router import router as cache_router
 from app.api.health_router import router as health_router
 from app.api.ml_router import router as ml_router
@@ -31,7 +30,6 @@ def create_app() -> FastAPI:
     app.include_router(scrape_router)
     app.include_router(ml_router)
     app.include_router(articles_router)
-    app.include_router(bias_router)
     app.include_router(cache_router)
     return app
 

@@ -1,4 +1,4 @@
-# 🔧 Fix DNS Resolution Issue on Windows Docker
+﻿# 🔧 Fix DNS Resolution Issue on Windows Docker
 
 ## Problem
 Worker container can't resolve hostnames (DNS failure):

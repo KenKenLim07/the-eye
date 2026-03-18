@@ -45,38 +45,3 @@ def get_all_articles_paginated(
             break
 
     return all_articles
-
-
-def get_all_bias_analysis_paginated(
-    sb,
-    start_date,
-    model_type: str = "political_bias",
-    limit_per_batch: int = 1000,
-):
-    """Get ALL bias_analysis records with proper pagination to bypass 1000-row limit."""
-    all_analysis = []
-    offset = 0
-
-    while True:
-        query = (
-            sb.table("bias_analysis")
-            .select("*, articles(*)")
-            .eq("model_type", model_type)
-            .gte("created_at", start_date)
-            .order("created_at", desc=True)
-        )
-
-        result = query.range(offset, offset + limit_per_batch - 1).execute()
-        analysis_batch = result.data or []
-
-        if not analysis_batch:
-            break
-
-        all_analysis.extend(analysis_batch)
-        offset += limit_per_batch
-
-        if len(analysis_batch) < limit_per_batch:
-            break
-
-    return all_analysis
-
