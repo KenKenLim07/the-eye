@@ -19,7 +19,7 @@
 
 ### Check Status
 ```bash
-./check_ph_eye.sh
+./archive/legacy/root_tools/check_ph_eye.sh
 ```
 - Shows if all services are running
 - Displays recent VADER analysis count
@@ -95,10 +95,13 @@ tail -f backend/beat.log
 ### VADER Not Working
 ```bash
 # Check Celery worker
-./check_ph_eye.sh
+./archive/legacy/root_tools/check_ph_eye.sh
 
 # Manual analysis test
 curl -X POST http://localhost:8000/ml/analyze \
   -H "Content-Type: application/json" \
   -d '{"since":"2025-01-01T00:00:00Z"}'
 ```
+# Note (Archived Tools)
+Some legacy helper scripts referenced in this document were moved to `archive/legacy/root_tools/` to keep the repo root clean.
+Primary workflow is now documented in `README.md` (Docker Compose + smoke/pipeline tests).

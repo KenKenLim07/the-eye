@@ -40,7 +40,7 @@ The beat schedule file stores when each task last ran. To see next run times:
 
 ```powershell
 # Copy the check script into container
-docker cp check_next_runs.py ph-eye-beat:/app/backend/
+docker cp archive/legacy/root_tools/check_next_runs.py ph-eye-beat:/app/backend/
 
 # Run it to see next scheduled times
 docker exec ph-eye-beat python /app/backend/check_next_runs.py
@@ -52,7 +52,7 @@ docker exec ph-eye-beat python /app/backend/check_next_runs.py
 
 ```powershell
 # Run the quick checker
-.\quick_check_beat.ps1
+.\archive\legacy\root_tools\quick_check_beat.ps1
 ```
 
 This shows:
@@ -114,3 +114,6 @@ Since your shortest interval is **1 hour** (scrape_rappler), you should see task
 1. Check beat is running: `docker ps | findstr beat`
 2. Check recent activity: `docker logs ph-eye-worker --tail 10`
 3. Wait and watch: `docker logs -f ph-eye-beat` (you'll see tasks fire within the hour)
+# Note (Archived Tools)
+The helper scripts referenced here were moved to `archive/legacy/root_tools/` to keep the repo root clean.
+If you still need them, use the updated paths below.

@@ -114,6 +114,10 @@ Runs one scrape task, polls status, then hits key API endpoints:
 powershell -NoProfile -ExecutionPolicy Bypass -File backend/scripts/pipeline_test.ps1 -Source inquirer
 ```
 
+## Legacy Root Tools (Archived)
+
+Older one-off scripts (tests, beat monitors, etc.) were moved out of the repo root into `archive/legacy/root_tools/` to keep the root clean. The supported verification flow is `backend/scripts/smoke_test.ps1` and `backend/scripts/pipeline_test.ps1`.
+
 ## Common Endpoints
 
 - Health: `GET /`, `GET /health`

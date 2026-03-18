@@ -6,7 +6,7 @@
 ```powershell
 # Run the monitor script
 cd backend
-python ../monitor_beat.py
+python archive/legacy/root_tools/monitor_beat.py
 ```
 
 This shows:
@@ -72,7 +72,7 @@ Your tasks run at these intervals:
 
 ```powershell
 # Full status check
-.\check_beat.ps1
+.\archive\legacy\root_tools\check_beat.ps1
 
 # Check if beat is scheduling
 docker logs ph-eye-beat | findstr "Sending"
@@ -81,5 +81,8 @@ docker logs ph-eye-beat | findstr "Sending"
 docker exec ph-eye-redis redis-cli LLEN celery
 
 # See all scheduled tasks and next run times
-cd backend && python ../monitor_beat.py
+cd backend && python ../archive/legacy/root_tools/monitor_beat.py
 ```
+# Note (Archived Tools)
+This document references older one-off monitoring scripts that have been moved to `archive/legacy/root_tools/`.
+For current verification, use `backend/scripts/smoke_test.ps1` and `backend/scripts/pipeline_test.ps1`.
