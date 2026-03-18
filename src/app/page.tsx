@@ -3,6 +3,7 @@ import ArticleRowServer from "../components/articles/article-row-server";
 import { fetchAllArticles, fetchLatestAnalysisByIds } from "@/lib/articles";
 import type { AnalysisRow, Article } from "@/lib/types";
 import { supabaseServer } from "@/lib/supabase/server";
+import Link from "next/link";
 
 // In production we often run without a deployed backend; force dynamic so Supabase reads happen at request-time
 // instead of being snapshotted during build (which can result in a "blank" homepage until the next revalidate).
@@ -156,6 +157,35 @@ export default async function Home() {
         <div className="text-center space-y-2">
           <h1 className="text-3xl font-bold tracking-tight">Philippine News</h1>
           <p className="text-sm text-muted-foreground">Latest headlines aggregated from top PH news sources</p>
+        </div>
+
+        <div className="max-w-3xl mx-auto">
+          <form className="flex flex-col md:flex-row items-stretch gap-2" action="/search" method="get">
+            <select
+              name="source"
+              defaultValue="all"
+              className="border rounded-md px-3 py-2 text-sm md:w-56 bg-background"
+            >
+              <option value="all">All Sources</option>
+              <option value="GMA">GMA</option>
+              <option value="Rappler">Rappler</option>
+              <option value="Inquirer">Inquirer</option>
+              <option value="Manila Times">Manila Times</option>
+              <option value="Philstar">Philstar</option>
+              <option value="Sunstar">Sunstar</option>
+              <option value="Manila Bulletin">Manila Bulletin</option>
+            </select>
+            <input
+              type="text"
+              name="q"
+              placeholder="Search headlines or summaries..."
+              className="flex-1 border rounded-md px-3 py-2 text-sm"
+            />
+            <button className="text-sm border rounded-md px-4 py-2">Search</button>
+          </form>
+          <div className="text-xs text-muted-foreground mt-2 text-center">
+            Tip: use <Link className="underline" href="/search">Advanced search</Link> for pagination.
+          </div>
         </div>
 
         <div className="space-y-8">
