@@ -141,6 +141,10 @@ supabase gen types typescript --project-id <PROJECT_ID> --schema public | Out-Fi
 
 - DNS / Supabase resolution issues in Docker:
   - See `[FIX_DNS_ISSUE.md](FIX_DNS_ISSUE.md)`.
+- Analytics looks "unscored" even though `bias_analysis` has sentiment rows:
+  - Supabase/PostgREST commonly caps result sets around ~1000 rows unless you explicitly paginate.
+  - Some analytics endpoints batch `bias_analysis` reads using an `IN (article_ids...)` filter; if that batch is too large, older days can look like `Analyzed 0/N` because the response is silently truncated to newer rows.
+  - Fix: keep batches small (this repo uses ~250 IDs per request in `backend/app/api/ml_router.py` for `/ml/trends`, `/ml/correlation`, and `/ml/entities/top`).
 - Slow local scanning / indexing on Windows:
   - Exclude `node_modules/` and `.next/` in your editor, and avoid recursive searches over them.
 - Missing days / partial coverage:

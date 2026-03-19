@@ -96,18 +96,20 @@ function snapshotKeyFallbacks(period: string): string[] {
 
 async function fetchTopEntities(period: string, source: string | undefined, scanProfile: "fast500" | "deep1000", refresh = false): Promise<NerSampleData> {
   const base = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
-  const limitArticles = 500;
-  const scanMode = "fast";
+  // Default to a full scan (no article cap) for entities ranking accuracy.
+  // Backend supports limit_articles=0 and total_cap=0 as "no cap".
+  const limitArticles = 0;
+  const scanMode = "full";
   const params = new URLSearchParams({
     period,
     limit_articles: String(limitArticles),
-    total_cap: "1000",
+    total_cap: "0",
     max_entities: "100",
     scan_mode: scanMode,
   });
   if (source && source !== "all") params.set("source", source);
   if (refresh) params.set("refresh", "true");
-  const key = `entities:${period}:${source || "all"}:fast500`;
+  const key = `entities:${period}:${source || "all"}:full`;
   const now = Date.now();
   const ttl = 60_000;
 
@@ -365,13 +367,13 @@ export default function EntitiesPage() {
         </div>
 
         <Card>
-          <CardHeader>
+            <CardHeader>
             <CardTitle>Top Entities (NER + Sentiment)</CardTitle>
             <CardDescription>
               {computedAt ? `Snapshot: ${new Date(computedAt).toLocaleString()}. ` : ""}
               Sampled: {sampled} / {totalCapped ?? totalCap}
               {typeof totalAvailable === "number" ? ` (available: ${totalAvailable})` : ""}
-              {sampled >= sampleCap ? `, capped at ${sampleCap}` : ""}
+              {sampleCap > 0 && sampled >= sampleCap && (totalCapped ?? totalCap) > sampleCap ? `, capped at ${sampleCap}` : ""}
             </CardDescription>
           </CardHeader>
           <CardContent>

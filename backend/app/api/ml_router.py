@@ -283,10 +283,12 @@ async def get_top_entities(
             select_fields="id,source,published_at",
         )
         total_available = len(all_meta)
-        total_capped = min(total_available, max(1, total_cap))
+        # total_cap <= 0 means "no cap".
+        total_capped = total_available if total_cap <= 0 else min(total_available, max(1, total_cap))
         capped_meta = all_meta[:total_capped]
 
-        if scan_mode == "full":
+        # scan_mode=full OR limit_articles <= 0 means "scan everything" (within total_cap).
+        if scan_mode == "full" or limit_articles <= 0:
             sampled_meta = capped_meta
             sample_cap = total_capped
         else:
