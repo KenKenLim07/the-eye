@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import os
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import logging
 from typing import Iterable
 
@@ -36,54 +36,76 @@ def _chunked(items: list[int], size: int) -> Iterable[list[int]]:
         yield items[i : i + size]
 
 
+def _fetch_all_ids_recent_articles(since_iso: str, page_size: int = 1000) -> list[int]:
+    sb = get_supabase()
+    out: list[int] = []
+    offset = 0
+    while True:
+        res = (
+            sb.table("articles")
+            .select("id")
+            .gte("published_at", since_iso)
+            .order("published_at", desc=True)
+            .range(offset, offset + page_size - 1)
+            .execute()
+        )
+        rows = res.data or []
+        if not rows:
+            break
+        out.extend(int(r["id"]) for r in rows if r.get("id") is not None)
+        if len(rows) < page_size:
+            break
+        offset += page_size
+    return out
+
+
+def _fetch_all_sentiment_analyzed_article_ids(since_iso: str, page_size: int = 1000) -> set[int]:
+    """
+    Fetch all article_ids that have *any* sentiment row created since `since_iso`.
+
+    This avoids huge `article_id=in.(...)` URLs, and is accurate enough for backfilling
+    recent data because sentiment rows for recent articles are also created recently.
+    """
+    sb = get_supabase()
+    out: set[int] = set()
+    offset = 0
+    while True:
+        res = (
+            sb.table("bias_analysis")
+            .select("article_id")
+            .eq("model_type", "sentiment")
+            .gte("created_at", since_iso)
+            .order("created_at", desc=True)
+            .range(offset, offset + page_size - 1)
+            .execute()
+        )
+        rows = res.data or []
+        if not rows:
+            break
+        for r in rows:
+            aid = r.get("article_id")
+            if aid is not None:
+                out.add(int(aid))
+        if len(rows) < page_size:
+            break
+        offset += page_size
+    return out
+
+
 def find_articles_missing_sentiment(since_days: int = 7) -> list[int]:
     """Return article IDs published in last `since_days` that lack sentiment rows."""
-    sb = get_supabase()
-    since_date = (datetime.now() - timedelta(days=since_days)).isoformat()
+    # Use an explicit UTC timestamp for stable comparisons in PostgREST filters.
+    since_date = (datetime.now(timezone.utc) - timedelta(days=since_days)).isoformat()
 
-    # Prefer SQL RPC if available.
-    query = f"""
-    SELECT a.id
-    FROM articles a
-    LEFT JOIN bias_analysis ba
-      ON a.id = ba.article_id
-     AND ba.model_type = 'sentiment'
-    WHERE a.published_at >= '{since_date}'
-      AND ba.article_id IS NULL
-    ORDER BY a.published_at DESC
-    """
-
-    try:
-        result = sb.rpc("execute_sql", {"query": query}).execute()
-        ids = [int(row["id"]) for row in (result.data or []) if row.get("id") is not None]
-        logger.info("Found %d articles missing sentiment since %s (SQL RPC).", len(ids), since_date)
-        return ids
-    except Exception as e:
-        logger.warning("SQL RPC path failed (%s). Falling back to REST queries.", e)
-
-    # Fallback: fetch recent articles then subtract articles with sentiment rows.
-    articles_result = sb.table("articles").select("id").gte("published_at", since_date).execute()
-    all_article_ids = [int(row["id"]) for row in (articles_result.data or []) if row.get("id") is not None]
+    # Fetch recent articles then subtract articles that already have sentiment rows.
+    all_article_ids = _fetch_all_ids_recent_articles(since_date)
     if not all_article_ids:
         return []
 
-    analyzed_ids: set[int] = set()
-    # Avoid huge `.in_` filters.
-    for batch in _chunked(all_article_ids, 2000):
-        analyzed_result = (
-            sb.table("bias_analysis")
-            .select("article_id")
-            .in_("article_id", batch)
-            .eq("model_type", "sentiment")
-            .execute()
-        )
-        for row in analyzed_result.data or []:
-            aid = row.get("article_id")
-            if aid is not None:
-                analyzed_ids.add(int(aid))
+    analyzed_ids = _fetch_all_sentiment_analyzed_article_ids(since_date)
 
     missing = [aid for aid in all_article_ids if aid not in analyzed_ids]
-    logger.info("Found %d articles missing sentiment since %s (REST fallback).", len(missing), since_date)
+    logger.info("Found %d articles missing sentiment since %s.", len(missing), since_date)
     return missing
 
 
@@ -142,4 +164,3 @@ def main(argv: list[str]) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv))
-
