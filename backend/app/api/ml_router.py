@@ -116,9 +116,16 @@ async def get_sentiment_correlation(
     article_ids = [a["id"] for a in all_articles]
     article_id_set = set(article_ids)
 
+    # Fetch sentiment rows with safe batching.
+    #
+    # Important: Supabase/PostgREST commonly caps results to ~1000 rows unless you
+    # explicitly paginate the response. If we query too many article_ids in a single
+    # `IN (...)` filter we can exceed that cap and silently drop rows (older dates
+    # appear "unscored"). Keep chunks small to stay well under the cap.
     all_analysis = []
-    batch_size = 2000
-    for i in range(0, len(article_ids), batch_size):
+    batch_size = 250
+    i = 0
+    while i < len(article_ids):
         batch_ids = article_ids[i : i + batch_size]
         try:
             res = (
@@ -129,9 +136,10 @@ async def get_sentiment_correlation(
                 .execute()
             )
             all_analysis.extend(res.data or [])
+            i += len(batch_ids)
         except Exception:
-            if batch_size > 500:
-                batch_size = 500
+            if batch_size > 100:
+                batch_size = 100
                 continue
             raise
 
@@ -312,8 +320,9 @@ async def get_top_entities(
 
         article_ids = list(articles_by_id.keys())
 
+        # Keep chunks small to avoid PostgREST row limits silently truncating results.
         all_analysis = []
-        batch_size = 2000
+        batch_size = 250
         for i in range(0, len(article_ids), batch_size):
             batch_ids = article_ids[i : i + batch_size]
             res = (
@@ -578,8 +587,9 @@ async def get_trends(period: str = "7d", source: Optional[str] = None, include_t
 
         # Fetch sentiment rows (in batches) and keep only the latest row per article.
         all_analysis = []
-        batch_size = 2000
-        for i in range(0, len(article_ids), batch_size):
+        batch_size = 250
+        i = 0
+        while i < len(article_ids):
             batch_ids = article_ids[i : i + batch_size]
             try:
                 analysis_result = (
@@ -591,9 +601,10 @@ async def get_trends(period: str = "7d", source: Optional[str] = None, include_t
                     .execute()
                 )
                 all_analysis.extend(analysis_result.data or [])
+                i += len(batch_ids)
             except Exception:
-                if batch_size > 500:
-                    batch_size = 500
+                if batch_size > 100:
+                    batch_size = 100
                     continue
                 raise
 
@@ -690,5 +701,3 @@ async def get_trends(period: str = "7d", source: Optional[str] = None, include_t
 
     except Exception as e:
         return {"error": str(e)}
-
-
