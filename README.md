@@ -141,6 +141,10 @@ supabase gen types typescript --project-id <PROJECT_ID> --schema public | Out-Fi
 
 - DNS / Supabase resolution issues in Docker:
   - See `[FIX_DNS_ISSUE.md](FIX_DNS_ISSUE.md)`.
+- Next.js builds appear “stuck” on Windows:
+  - This repo defaults `npm run build` to `next build` (Webpack). Turbopack builds can be extremely slow on some Windows filesystems and can leave long-running Node processes.
+  - If you previously ran Turbopack builds, kill the old Node build process and re-run: `npm.cmd run build`.
+  - Excluding the repo folder (and `.next/`) from Windows Defender/antivirus can drastically improve build speed.
 - Analytics looks "unscored" even though `bias_analysis` has sentiment rows:
   - Supabase/PostgREST commonly caps result sets around ~1000 rows unless you explicitly paginate.
   - Some analytics endpoints batch `bias_analysis` reads using an `IN (article_ids...)` filter; if that batch is too large, older days can look like `Analyzed 0/N` because the response is silently truncated to newer rows.
