@@ -64,15 +64,21 @@ const snapshotsCache = new Map<string, { expires: number; data: NerSampleData }>
 const snapshotsInflight = new Map<string, Promise<NerSampleData>>();
 
 function hasUsableBackend(): boolean {
+  // In dev, assume the backend is available at localhost (even if NEXT_PUBLIC_BACKEND_URL is unset).
+  if (process.env.NODE_ENV === "development") return true;
+
   const url = process.env.NEXT_PUBLIC_BACKEND_URL;
   if (!url) return false;
+
   // Treat local-only URLs as "no backend" for hosted demos.
   if (url.includes("localhost") || url.includes("127.0.0.1")) return false;
   return true;
 }
 
 function shouldUseSnapshots(): boolean {
-  return process.env.NEXT_PUBLIC_ANALYTICS_SOURCE === "supabase_snapshots" || !hasUsableBackend();
+  // Opt-in override for demo mode.
+  if (process.env.NEXT_PUBLIC_ANALYTICS_SOURCE === "supabase_snapshots") return true;
+  return !hasUsableBackend();
 }
 
 function snapshotKeyFor(period: string): string {
