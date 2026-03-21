@@ -4,7 +4,7 @@ import { fetchAllArticles, fetchLatestAnalysisByIds } from "@/lib/articles";
 import type { AnalysisRow, Article } from "@/lib/types";
 import { supabaseServer, supabaseServerUntyped } from "@/lib/supabase/server";
 import Link from "next/link";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 
 // In production we often run without a deployed backend; force dynamic so Supabase reads happen at request-time
 // instead of being snapshotted during build (which can result in a "blank" homepage until the next revalidate).
@@ -15,18 +15,6 @@ type HomeStats = {
   articles_last_24h: number;
   last_updated: string | null;
   coverage_7d: number | null; // 0..1, null when unavailable
-};
-
-type EntityPreview = {
-  computed_at: string | null;
-  sampled: number | null;
-  total_available: number | null;
-  items: Array<{
-    entity_text: string;
-    entity_type: string;
-    mentions: number;
-    avg_sentiment: number | null;
-  }>;
 };
 
 async function fetchHomeArticlesFromSupabase(limitPerSource: number): Promise<Record<string, Article[]>> {
@@ -99,60 +87,12 @@ async function fetchHomeStatsFromSupabase(): Promise<HomeStats> {
   return { total_articles, articles_last_24h, last_updated, coverage_7d };
 }
 
-function snapshotKeyFor(period: "7d" | "30d"): string {
-  // Matches src/app/entities/page.tsx and backend/scripts/entity_rankings_snapshot.py
-  return `entities:period=${period}:source=all:include_today=1:scan=full:limit=0:cap=0:max=100`;
-}
-
-function snapshotKeyFallbacks(period: "7d" | "30d"): string[] {
-  return [
-    snapshotKeyFor(period),
-    `entities:period=${period}:source=all:include_today=1:scan=fast:limit=500:cap=1000:max=100`,
-  ];
-}
-
-async function fetchEntityPreviewFromSnapshots(period: "7d" | "30d" = "7d"): Promise<EntityPreview> {
-  const keys = snapshotKeyFallbacks(period);
-
-  const snapRes = await supabaseServer
-    .from("entity_rankings_snapshots")
-    .select("key,computed_at,sampled,total_available")
-    .in("key", keys)
-    .order("computed_at", { ascending: false })
-    .limit(1);
-
-  const snap = snapRes.data?.[0];
-  if (!snap?.key) {
-    return { computed_at: null, sampled: null, total_available: null, items: [] };
-  }
-
-  const itemsRes = await supabaseServer
-    .from("entity_rankings_items")
-    .select("entity_text,entity_type,mentions,avg_sentiment")
-    .eq("snapshot_key", snap.key)
-    .order("mentions", { ascending: false })
-    .limit(10);
-
-  return {
-    computed_at: (snap.computed_at as string | null | undefined) ?? null,
-    sampled: (snap.sampled as number | null | undefined) ?? null,
-    total_available: (snap.total_available as number | null | undefined) ?? null,
-    items: (itemsRes.data ?? []) as EntityPreview["items"],
-  };
-}
-
 export default async function Home() {
   const t0 = Date.now();
-  const [stats, entityPreview] = await Promise.all([
-    fetchHomeStatsFromSupabase().catch((e) => {
-      console.error("Home stats fetch failed:", e);
-      return { total_articles: 0, articles_last_24h: 0, last_updated: null, coverage_7d: null } as HomeStats;
-    }),
-    fetchEntityPreviewFromSnapshots("7d").catch((e) => {
-      console.error("Home entity preview fetch failed:", e);
-      return { computed_at: null, sampled: null, total_available: null, items: [] } as EntityPreview;
-    }),
-  ]);
+  const stats = await fetchHomeStatsFromSupabase().catch((e) => {
+    console.error("Home stats fetch failed:", e);
+    return { total_articles: 0, articles_last_24h: 0, last_updated: null, coverage_7d: null } as HomeStats;
+  });
 
   // Fetch latest articles per source using optimized single endpoint
   const PER_SOURCE_LIMIT = 10;
@@ -329,102 +269,50 @@ export default async function Home() {
 
         <div className="space-y-4">
           <div className="flex items-end justify-between gap-3">
-            <div>
+            <div className="space-y-1">
               <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">At a glance</div>
-              <div className="u-serif text-2xl font-semibold tracking-tight">Today’s pulse</div>
+              <div className="u-serif text-xl sm:text-2xl font-semibold tracking-tight">Today’s pulse</div>
+              <div className="sm:hidden text-xs text-muted-foreground">
+                {stats.last_updated ? `Updated ${new Date(stats.last_updated).toLocaleString()}` : ""}
+              </div>
             </div>
             <div className="hidden sm:block text-xs text-muted-foreground">
               {stats.last_updated ? `Updated ${new Date(stats.last_updated).toLocaleString()}` : ""}
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3">
             <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">Total Articles</CardTitle>
-              </CardHeader>
-              <CardContent className="pt-0">
-                <div className="u-serif text-3xl font-semibold tabular-nums">{stats.total_articles.toLocaleString()}</div>
+              <CardContent className="p-3 sm:p-4">
+                <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">Total</div>
+                <div className="u-serif text-2xl sm:text-3xl font-semibold tabular-nums">{stats.total_articles.toLocaleString()}</div>
               </CardContent>
             </Card>
             <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">Last 24 Hours</CardTitle>
-              </CardHeader>
-              <CardContent className="pt-0">
-                <div className="u-serif text-3xl font-semibold tabular-nums">{stats.articles_last_24h.toLocaleString()}</div>
+              <CardContent className="p-3 sm:p-4">
+                <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">24h</div>
+                <div className="u-serif text-2xl sm:text-3xl font-semibold tabular-nums">{stats.articles_last_24h.toLocaleString()}</div>
               </CardContent>
             </Card>
             <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">Sources</CardTitle>
-              </CardHeader>
-              <CardContent className="pt-0">
-                <div className="u-serif text-3xl font-semibold tabular-nums">7</div>
-                <div className="text-xs text-muted-foreground mt-1">GMA, Rappler, Inquirer, Manila Times, Philstar, Sunstar, Manila Bulletin</div>
+              <CardContent className="p-3 sm:p-4">
+                <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">Sources</div>
+                <div className="u-serif text-2xl sm:text-3xl font-semibold tabular-nums">7</div>
+                <div className="hidden sm:block text-xs text-muted-foreground mt-1">
+                  GMA, Rappler, Inquirer, Manila Times, Philstar, Sunstar, Manila Bulletin
+                </div>
               </CardContent>
             </Card>
             <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">Sentiment Coverage (7d)</CardTitle>
-              </CardHeader>
-              <CardContent className="pt-0">
-                <div className="u-serif text-3xl font-semibold tabular-nums">
+              <CardContent className="p-3 sm:p-4">
+                <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">Coverage (7d)</div>
+                <div className="u-serif text-2xl sm:text-3xl font-semibold tabular-nums">
                   {typeof stats.coverage_7d === "number" ? `${Math.round(stats.coverage_7d * 100)}%` : "—"}
                 </div>
-                <div className="text-xs text-muted-foreground mt-1">Articles with VADER sentiment rows</div>
+                <div className="hidden sm:block text-xs text-muted-foreground mt-1">Articles with VADER sentiment rows</div>
               </CardContent>
             </Card>
           </div>
-
-          <Card>
-            <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-              <div>
-                <CardTitle>Top Entities (7d)</CardTitle>
-                <div className="text-sm text-muted-foreground">
-                  {entityPreview.computed_at ? `Updated ${new Date(entityPreview.computed_at).toLocaleString()}. ` : ""}
-                  {typeof entityPreview.sampled === "number" ? `Sampled: ${entityPreview.sampled}` : ""}
-                  {typeof entityPreview.total_available === "number" ? ` (available: ${entityPreview.total_available})` : ""}
-                </div>
-              </div>
-              <Link className="text-sm underline text-accent hover:text-accent/80" href="/entities">
-                View full ranking
-              </Link>
-            </CardHeader>
-            <CardContent>
-              {entityPreview.items.length === 0 ? (
-                <div className="text-sm text-muted-foreground py-2">No snapshot data yet. Run the snapshot generator to populate rankings.</div>
-              ) : (
-                <div className="overflow-auto">
-                  <table className="min-w-full text-sm">
-                    <thead className="border-b">
-                      <tr>
-                        <th className="text-left p-2 u-mono text-[10px] uppercase tracking-widest text-muted-foreground">Rank</th>
-                        <th className="text-left p-2 u-mono text-[10px] uppercase tracking-widest text-muted-foreground">Entity</th>
-                        <th className="text-right p-2 u-mono text-[10px] uppercase tracking-widest text-muted-foreground">Mentions</th>
-                        <th className="text-right p-2 u-mono text-[10px] uppercase tracking-widest text-muted-foreground">Avg</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {entityPreview.items.map((it, idx) => (
-                        <tr key={`${it.entity_text}:${it.entity_type}:${idx}`} className="border-t">
-                          <td className="p-2 u-mono text-[11px] text-muted-foreground">{idx + 1}</td>
-                          <td className="p-2">
-                            <div className="font-medium">{it.entity_text}</div>
-                            <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">{it.entity_type}</div>
-                          </td>
-                          <td className="p-2 text-right u-mono text-[11px] tabular-nums">{it.mentions}</td>
-                          <td className="p-2 text-right u-mono text-[11px] tabular-nums text-muted-foreground">
-                            {typeof it.avg_sentiment === "number" ? it.avg_sentiment.toFixed(3) : "—"}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </CardContent>
-          </Card>
         </div>
 
         <div className="space-y-8">
