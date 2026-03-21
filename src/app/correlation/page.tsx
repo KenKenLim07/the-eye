@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Loader2, RefreshCw } from "lucide-react";
 import MainLayout from "@/components/layout/main-layout";
+import { supabaseUntyped } from "@/lib/supabase/client";
 
 interface CorrelationData {
   ok: boolean;
@@ -36,7 +37,64 @@ const PERIODS = [
 const corrCache = new Map<string, { expires: number; data: CorrelationData }>();
 const inflightRequests = new Map<string, Promise<CorrelationData>>();
 
+function hasUsableBackend(): boolean {
+  if (process.env.NODE_ENV === "development") return true;
+  const url = process.env.NEXT_PUBLIC_BACKEND_URL;
+  if (!url) return false;
+  if (url.includes("localhost") || url.includes("127.0.0.1")) return false;
+  return true;
+}
+
+function shouldUseSnapshots(): boolean {
+  if (process.env.NEXT_PUBLIC_ANALYTICS_SOURCE === "supabase_snapshots") return true;
+  return !hasUsableBackend();
+}
+
+function corrSnapshotKey(period: string): string {
+  return `corr:period=${period}:sources=all:include_today=1`;
+}
+
+async function fetchCorrelationSnapshot(period: string): Promise<CorrelationData> {
+  const key = corrSnapshotKey(period);
+  const { data, error } = await supabaseUntyped
+    .from("correlation_snapshots")
+    .select("sources,matrix,p_values,period,include_today")
+    .eq("key", key)
+    .limit(1);
+  if (error) throw error;
+  const row = data?.[0];
+  if (!row) return { ok: false, period, include_today: true, sources: [], matrix: [], p_values: [] };
+  return {
+    ok: true,
+    period: row.period || period,
+    include_today: row.include_today ?? true,
+    sources: row.sources || [],
+    matrix: row.matrix || [],
+    p_values: row.p_values || [],
+  } as CorrelationData;
+}
+
 async function fetchCorrelation(period: string, source?: string, refresh = false): Promise<CorrelationData> {
+  if (shouldUseSnapshots()) {
+    const key = `corr_snap:${period}:all`;
+    const now = Date.now();
+    const ttl = 60_000;
+    if (!refresh) {
+      const c = corrCache.get(key);
+      if (c && c.expires > now) return c.data;
+      const inflight = inflightRequests.get(key);
+      if (inflight) return inflight;
+    }
+    const req = fetchCorrelationSnapshot(period)
+      .then((json) => {
+        corrCache.set(key, { expires: now + ttl, data: json });
+        return json;
+      })
+      .finally(() => inflightRequests.delete(key));
+    inflightRequests.set(key, req);
+    return await req;
+  }
+
   const base =
     process.env.NEXT_PUBLIC_BACKEND_URL ||
     (process.env.NODE_ENV === "development" ? "http://localhost:8000" : "");
@@ -83,15 +141,24 @@ export default function CorrelationPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [isPending, startTransition] = useTransition();
+  const useSnapshots = shouldUseSnapshots();
+
+  useEffect(() => {
+    if (useSnapshots && selectedSource !== "all") setSelectedSource("all");
+  }, [useSnapshots, selectedSource]);
 
   const load = useCallback(async (refresh = false) => {
     if (refresh) setRefreshing(true);
     else setLoading(true);
-    const data = await fetchCorrelation(selectedPeriod, selectedSource !== "all" ? selectedSource : undefined, refresh);
+    const data = await fetchCorrelation(
+      selectedPeriod,
+      useSnapshots ? undefined : (selectedSource !== "all" ? selectedSource : undefined),
+      refresh
+    );
     setCorr(data);
     setLoading(false);
     setRefreshing(false);
-  }, [selectedPeriod, selectedSource]);
+  }, [selectedPeriod, selectedSource, useSnapshots]);
 
   useEffect(() => {
     load(false);
@@ -107,14 +174,14 @@ export default function CorrelationPage() {
 
         <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
           <div className="flex gap-4">
-            <div className="flex flex-col gap-2">
-              <label className="text-sm font-medium">Source</label>
-              <Select value={selectedSource} onValueChange={(v) => startTransition(() => setSelectedSource(v))} disabled={loading || isPending}>
+              <div className="flex flex-col gap-2">
+                <label className="text-sm font-medium">Source</label>
+              <Select value={selectedSource} onValueChange={(v) => startTransition(() => setSelectedSource(v))} disabled={loading || isPending || useSnapshots}>
                 <SelectTrigger className="w-[180px]">
                   <SelectValue placeholder="Select source" />
                 </SelectTrigger>
                 <SelectContent>
-                  {SOURCES.map((s) => (
+                  {(useSnapshots ? SOURCES.slice(0, 1) : SOURCES).map((s) => (
                     <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
                   ))}
                 </SelectContent>

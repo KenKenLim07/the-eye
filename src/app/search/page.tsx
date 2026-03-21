@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { supabaseServer } from "@/lib/supabase/server";
+import { supabaseServer, supabaseServerUntyped } from "@/lib/supabase/server";
 import { ArticleCardsInteractive } from "@/components/articles/article-cards-interactive";
 import MainLayout from "@/components/layout/main-layout";
 import { SearchHeader } from "@/components/search/search-header";
@@ -89,6 +89,30 @@ export default async function SearchPage({ searchParams }: { searchParams: Searc
   const total = count ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
+  // Enrich with demo-mode sentiment badges (public table) for nicer UI on Vercel.
+  let enriched = data || [];
+  if (data && data.length > 0) {
+    try {
+      const ids = data.map((a) => Number(a.id)).filter(Boolean);
+      const sentimentById: Record<number, string | null> = {};
+      const batchSize = 250;
+      for (let i = 0; i < ids.length; i += batchSize) {
+        const batch = ids.slice(i, i + batchSize);
+        const { data: srows, error: serr } = await supabaseServerUntyped
+          .from("article_sentiment_public")
+          .select("article_id,sentiment_label")
+          .in("article_id", batch);
+        if (serr) throw serr;
+        for (const r of srows || []) {
+          sentimentById[Number(r.article_id)] = (r.sentiment_label as string | null | undefined) ?? null;
+        }
+      }
+      enriched = data.map((a) => ({ ...a, sentiment: sentimentById[Number(a.id)] ?? null }));
+    } catch {
+      // non-fatal
+    }
+  }
+
   return (
     <MainLayout containerSize="xl">
       <div className="space-y-6">
@@ -120,7 +144,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Searc
           </Card>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            <ArticleCardsInteractive articles={data} />
+            <ArticleCardsInteractive articles={enriched} />
           </div>
         )}
 

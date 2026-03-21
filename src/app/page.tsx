@@ -2,7 +2,7 @@ import MainLayout from "@/components/layout/main-layout";
 import ArticleRowServer from "../components/articles/article-row-server";
 import { fetchAllArticles, fetchLatestAnalysisByIds } from "@/lib/articles";
 import type { AnalysisRow, Article } from "@/lib/types";
-import { supabaseServer } from "@/lib/supabase/server";
+import { supabaseServer, supabaseServerUntyped } from "@/lib/supabase/server";
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -235,13 +235,37 @@ export default async function Home() {
     .map((a) => Number(a.id))
     .filter(Boolean);
 
-  // Fetch latest sentiment/bias analysis in one request (optional; non-fatal if fails)
+  // Fetch latest sentiment labels (optional; non-fatal if fails).
+  // - If backend exists: use backend bulk endpoint (fast, richer)
+  // - If no backend: use Supabase public cache table (demo mode)
   let analysisById: Record<number, AnalysisRow | null> = {};
-  if (hasBackend && allArticleIds.length > 0) {
-    try {
-      analysisById = await fetchLatestAnalysisByIds(allArticleIds);
-    } catch (err) {
-      console.error("Failed to fetch analysis for home articles:", err);
+  const sentimentById: Record<number, string | null> = {};
+
+  if (allArticleIds.length > 0) {
+    if (hasBackend) {
+      try {
+        analysisById = await fetchLatestAnalysisByIds(allArticleIds);
+      } catch (err) {
+        console.error("Failed to fetch analysis for home articles:", err);
+      }
+    } else {
+      try {
+        const batchSize = 250;
+        for (let i = 0; i < allArticleIds.length; i += batchSize) {
+          const batch = allArticleIds.slice(i, i + batchSize);
+          const { data, error } = await supabaseServerUntyped
+            .from("article_sentiment_public")
+            .select("article_id,sentiment_label")
+            .in("article_id", batch);
+          if (error) throw error;
+          for (const r of data || []) {
+            const id = Number(r.article_id);
+            sentimentById[id] = (r.sentiment_label as string | null | undefined) ?? null;
+          }
+        }
+      } catch (err) {
+        console.error("Failed to fetch demo sentiment badges:", err);
+      }
     }
   }
   const tAfterAnalysis = Date.now();
@@ -250,8 +274,9 @@ export default async function Home() {
   const enrichedBySource: Record<string, Article[]> = {};
   for (const [source, articles] of Object.entries(normalizedBySource)) {
     enrichedBySource[source] = (articles || []).map((article) => {
-      const analysis = analysisById[Number(article.id)];
-      const sentiment = analysis?.sentiment_label || null;
+      const id = Number(article.id);
+      const analysis = analysisById[id];
+      const sentiment = hasBackend ? (analysis?.sentiment_label || null) : (sentimentById[id] ?? null);
       return { ...article, sentiment };
     });
   }

@@ -129,6 +129,23 @@ Older one-off scripts (tests, beat monitors, etc.) were moved out of the repo ro
   - `GET /ml/entities/top?period=7d|30d`
   - `GET /ml/ner/sample`
 
+## Demo Mode (No Deployed FastAPI)
+
+For thesis demos, you can deploy only the Next.js frontend to Vercel and read precomputed analytics from Supabase:
+
+1. Run these SQL files in the Supabase SQL editor:
+   - `backend/scripts/create_entity_rankings_tables.sql`
+   - `backend/scripts/create_demo_analytics_tables.sql`
+2. Keep your home PC (Docker worker) running to scrape/analyze, then write snapshots:
+
+```powershell
+docker compose exec worker python scripts/entity_rankings_snapshot.py 7d
+docker compose exec worker python scripts/trends_snapshot.py 7d
+docker compose exec worker python scripts/correlation_snapshot.py 7d
+```
+
+The frontend will automatically fall back to Supabase snapshots when `NEXT_PUBLIC_BACKEND_URL` is not usable.
+
 ## Supabase Type Safety
 
 Generate/update types:

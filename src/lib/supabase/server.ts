@@ -16,4 +16,12 @@ export const supabaseServer = createClient<Database>(supabaseUrl, supabaseAnonKe
     persistSession: false,
     autoRefreshToken: false,
   },
-}); 
+});
+
+// Untyped server client: use for demo/snapshot tables that aren't represented in `src/types/database.ts`.
+export const supabaseServerUntyped = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    persistSession: false,
+    autoRefreshToken: false,
+  },
+});

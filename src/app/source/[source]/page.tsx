@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { supabaseServer } from "@/lib/supabase/server";
+import { supabaseServer, supabaseServerUntyped } from "@/lib/supabase/server";
 import { ArticleCardsInteractive } from "@/components/articles/article-cards-interactive";
 import MainLayout from "@/components/layout/main-layout";
 import { SearchHeader } from "@/components/search/search-header";
@@ -70,33 +70,29 @@ export default async function SourcePage({ params, searchParams }: PageProps) {
   const total = count ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
-  // Get sentiment data for articles (optional - don't block if it fails)
+  // Enrich with demo-mode sentiment badges (public table). Non-fatal.
   let articlesWithSentiment = data || [];
-  
   if (data && data.length > 0) {
     try {
-      const articleIds = data.map(a => Number(a.id));
-      const response = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/ml/analysis?ids=${articleIds.join(',')}`, {
-        cache: 'no-store'
-      });
-      
-      if (response.ok) {
-        const analysisData = await response.json();
-        const sentimentAnalysis = analysisData.analysis?.filter((a: { model_type: string }) => a.model_type === 'sentiment') || [];
-        
-        const sentimentData: Record<number, string> = {};
-        sentimentAnalysis.forEach((analysis: { article_id: number; sentiment_label: string }) => {
-          sentimentData[analysis.article_id] = analysis.sentiment_label;
-        });
-
-        // Merge sentiment data with articles
-        articlesWithSentiment = data.map(article => ({
-          ...article,
-          sentiment: sentimentData[Number(article.id)] || null
-        }));
+      const ids = data.map((a) => Number(a.id)).filter(Boolean);
+      const sentimentById: Record<number, string | null> = {};
+      const batchSize = 250;
+      for (let i = 0; i < ids.length; i += batchSize) {
+        const batch = ids.slice(i, i + batchSize);
+        const { data: srows, error: serr } = await supabaseServerUntyped
+          .from("article_sentiment_public")
+          .select("article_id,sentiment_label")
+          .in("article_id", batch);
+        if (serr) throw serr;
+        for (const r of srows || []) {
+          sentimentById[Number(r.article_id)] = (r.sentiment_label as string | null | undefined) ?? null;
+        }
       }
-    } catch (error) {
-      console.error('Error fetching sentiment data:', error);
+      articlesWithSentiment = data.map((article) => ({
+        ...article,
+        sentiment: sentimentById[Number(article.id)] ?? null,
+      }));
+    } catch {
       // Continue without sentiment data
     }
   }

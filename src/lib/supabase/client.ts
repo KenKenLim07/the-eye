@@ -16,4 +16,13 @@ export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
     persistSession: true,
     autoRefreshToken: true,
   },
-}); 
+});
+
+// Untyped client: use for demo/snapshot tables that aren't represented in `src/types/database.ts`.
+// This avoids sprinkling `as any` casts across the codebase (which breaks `@typescript-eslint/no-explicit-any`).
+export const supabaseUntyped = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+  },
+});

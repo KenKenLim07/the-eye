@@ -10,9 +10,11 @@ import { RefreshCw, Loader2, TrendingUp, TrendingDown, Minus } from "lucide-reac
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import { Skeleton } from "@/components/ui/skeleton";
 import MainLayout from "@/components/layout/main-layout";
+import { supabaseUntyped } from "@/lib/supabase/client";
 
 interface TrendsData {
   ok: boolean;
+  computed_at?: string | null;
   summary: {
     period: string;
     source: string | null;
@@ -60,7 +62,67 @@ const COLORS = {
 const trendsCache = new Map<string, { expires: number; data: TrendsData }>();
 const inflightRequests = new Map<string, Promise<TrendsData>>();
 
+function hasUsableBackend(): boolean {
+  if (process.env.NODE_ENV === "development") return true;
+  const url = process.env.NEXT_PUBLIC_BACKEND_URL;
+  if (!url) return false;
+  if (url.includes("localhost") || url.includes("127.0.0.1")) return false;
+  return true;
+}
+
+function shouldUseSnapshots(): boolean {
+  if (process.env.NEXT_PUBLIC_ANALYTICS_SOURCE === "supabase_snapshots") return true;
+  return !hasUsableBackend();
+}
+
+function trendsSnapshotKey(period: string): string {
+  return `trends:period=${period}:source=all:include_today=1`;
+}
+
+async function fetchTrendsSnapshot(period: string): Promise<TrendsData> {
+  const key = trendsSnapshotKey(period);
+  const { data, error } = await supabaseUntyped
+    .from("sentiment_trends_snapshots")
+    .select("summary,timeline,computed_at")
+    .eq("key", key)
+    .limit(1);
+  if (error) throw error;
+  const row = data?.[0];
+  if (!row) {
+    return {
+      ok: false,
+      computed_at: null,
+      summary: { period, source: null, total_articles: 0, positive_pct: 0, negative_pct: 0, neutral_pct: 0, avg_daily_articles: 0 },
+      timeline: [],
+    };
+  }
+  return { ok: true, computed_at: row.computed_at ?? null, summary: row.summary, timeline: row.timeline } as TrendsData;
+}
+
 async function fetchTrends(source?: string, period: string = "7d", opts?: { refresh?: boolean; ttlMs?: number }): Promise<TrendsData> {
+  if (shouldUseSnapshots()) {
+    const key = `trends_snap:${period}:all`;
+    const now = Date.now();
+    const ttl = opts?.ttlMs ?? 60_000;
+
+    if (!opts?.refresh) {
+      const cached = trendsCache.get(key);
+      if (cached && cached.expires > now) return cached.data;
+      const inflight = inflightRequests.get(key);
+      if (inflight) return inflight;
+    }
+
+    const req = fetchTrendsSnapshot(period)
+      .then((d) => {
+        trendsCache.set(key, { expires: now + ttl, data: d });
+        return d;
+      })
+      .finally(() => inflightRequests.delete(key));
+
+    inflightRequests.set(key, req);
+    return await req;
+  }
+
   const base =
     process.env.NEXT_PUBLIC_BACKEND_URL ||
     (process.env.NODE_ENV === "development" ? "http://localhost:8000" : "");
@@ -188,6 +250,11 @@ export default function TrendsPage() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isFilterLoading, setIsFilterLoading] = useState(false);
   const [, startTransition] = useTransition();
+  const useSnapshots = shouldUseSnapshots();
+
+  useEffect(() => {
+    if (useSnapshots && selectedSource !== "all") setSelectedSource("all");
+  }, [useSnapshots, selectedSource]);
 
   const loadData = useCallback(async (showRefreshIndicator = false, forceRefresh = false) => {
     if (showRefreshIndicator) {
@@ -200,12 +267,13 @@ export default function TrendsPage() {
 
     try {
       const trendsData = await fetchTrends(
-        selectedSource !== "all" ? selectedSource : undefined,
+        useSnapshots ? undefined : (selectedSource !== "all" ? selectedSource : undefined),
         selectedPeriod,
         { refresh: forceRefresh, ttlMs: 120_000 }
       );
       setData(trendsData);
-      setLastUpdated(new Date());
+      const computedAt = trendsData.computed_at;
+      setLastUpdated(computedAt ? new Date(computedAt) : new Date());
     } catch (error) {
       console.error("Failed to load trends:", error);
     } finally {
@@ -213,7 +281,7 @@ export default function TrendsPage() {
       setIsRefreshing(false);
       setIsFilterLoading(false);
     }
-  }, [data, selectedSource, selectedPeriod]);
+  }, [data, selectedSource, selectedPeriod, useSnapshots]);
 
   const handleSourceChange = (newSource: string) => {
     setIsFilterLoading(true);
@@ -326,14 +394,14 @@ export default function TrendsPage() {
 
         <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
           <div className="flex gap-4">
-            <div className="flex flex-col gap-2">
-              <label className="text-sm font-medium">Source</label>
-              <Select value={selectedSource} onValueChange={handleSourceChange} disabled={isFilterLoading}>
+              <div className="flex flex-col gap-2">
+                <label className="text-sm font-medium">Source</label>
+              <Select value={selectedSource} onValueChange={handleSourceChange} disabled={isFilterLoading || useSnapshots}>
                 <SelectTrigger className="w-[180px]">
                   <SelectValue placeholder="Select source" />
                 </SelectTrigger>
                 <SelectContent>
-                  {SOURCES.map((source) => (
+                  {(useSnapshots ? SOURCES.slice(0, 1) : SOURCES).map((source) => (
                     <SelectItem key={source.value} value={source.value}>
                       {source.label}
                     </SelectItem>
