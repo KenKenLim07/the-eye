@@ -9,18 +9,79 @@ Reads from: public.articles, public.bias_analysis (model_type='sentiment')
 from __future__ import annotations
 
 import argparse
+import os
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from math import sqrt
 from typing import Optional
 from zoneinfo import ZoneInfo
 
-from app.core.supabase import get_supabase
-from app.services.articles_service import get_all_articles_paginated
-from app.services.window_service import window_bounds
+from supabase import Client, create_client
+from supabase._sync.client import SupabaseException
 
 
 TZ_PH = ZoneInfo("Asia/Manila")
+TZ_UTC = ZoneInfo("UTC")
+
+
+def get_supabase() -> Client:
+    url = os.getenv("SUPABASE_URL", "").strip()
+    key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+    if not url or not key:
+        raise RuntimeError("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY")
+    try:
+        return create_client(url, key)
+    except SupabaseException as e:
+        raise RuntimeError(
+            "Invalid Supabase API key. Ensure SUPABASE_SERVICE_ROLE_KEY is the full service_role key."
+        ) from e
+
+
+def window_bounds(period: str, include_today: bool = True) -> tuple[str, str]:
+    now_local = datetime.now(TZ_PH)
+    window_days = 30 if period == "30d" else 7
+
+    if include_today:
+        end_local = now_local.replace(hour=23, minute=59, second=59, microsecond=999999)
+        start_local = (now_local - timedelta(days=window_days - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    else:
+        end_local = (now_local - timedelta(days=1)).replace(hour=23, minute=59, second=59, microsecond=999999)
+        start_local = (end_local - timedelta(days=window_days - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
+
+    start_utc = start_local.astimezone(TZ_UTC)
+    end_utc = end_local.astimezone(TZ_UTC)
+    return start_utc.isoformat(), end_utc.isoformat()
+
+
+def fetch_articles_paginated(
+    sb: Client,
+    start_iso: str,
+    end_iso: str,
+    source: Optional[str],
+    limit_per_batch: int = 1000,
+) -> list[dict]:
+    all_rows: list[dict] = []
+    offset = 0
+    while True:
+        q = (
+            sb.table("articles")
+            .select("id,source,published_at")
+            .gte("published_at", start_iso)
+            .lte("published_at", end_iso)
+            .order("published_at", desc=True)
+            .range(offset, offset + limit_per_batch - 1)
+        )
+        if source:
+            q = q.eq("source", source)
+        res = q.execute()
+        batch = res.data or []
+        if not batch:
+            break
+        all_rows.extend(batch)
+        offset += limit_per_batch
+        if len(batch) < limit_per_batch:
+            break
+    return all_rows
 
 
 def to_ph_date_str(ts: str) -> str:
@@ -94,13 +155,7 @@ def compute_correlation(period: str, include_today: bool) -> dict:
     sb = get_supabase()
     start_date_str, end_date_str = window_bounds(period, include_today=include_today)
 
-    articles = get_all_articles_paginated(
-        sb,
-        start_date_str,
-        source=None,
-        end_date=end_date_str,
-        select_fields="id,source,published_at",
-    )
+    articles = fetch_articles_paginated(sb, start_date_str, end_date_str, source=None, limit_per_batch=1000)
     if not articles:
         return {"ok": True, "period": period, "include_today": include_today, "sources": [], "matrix": [], "p_values": []}
 
@@ -199,4 +254,3 @@ def main(argv: list[str]) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main(__import__("sys").argv))
-
