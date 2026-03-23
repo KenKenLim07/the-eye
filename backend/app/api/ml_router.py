@@ -472,7 +472,8 @@ async def analyze_articles(payload: dict = Body(default={})):
 
     # Queue analysis task
     try:
-        task = analyze_articles_task.delay(article_ids)
+        # Explicitly target the `ml` queue so it is picked up by `worker_ml`.
+        task = analyze_articles_task.apply_async(args=[article_ids], queue="ml")
         return {"queued": True, "task_id": str(task), "article_count": len(article_ids)}
     except Exception as e:
         return {"error": f"Failed to queue analysis: {e}"}

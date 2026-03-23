@@ -58,17 +58,18 @@ async function fetchHomeStatsFromSupabase(): Promise<HomeStats> {
     last24hRes,
     lastUpdatedRes,
     articles7dRes,
-    sentiment7dRes,
+    sentimentCoverage7dRes,
   ] = await Promise.all([
     supabaseServer.from("articles").select("id", { count: "exact", head: true }),
     supabaseServer.from("articles").select("id", { count: "exact", head: true }).gte("published_at", iso24h),
     supabaseServer.from("articles").select("published_at").order("published_at", { ascending: false }).limit(1),
     supabaseServer.from("articles").select("id", { count: "exact", head: true }).gte("published_at", iso7d),
-    supabaseServer
-      .from("bias_analysis")
-      .select("article_id", { count: "exact", head: true })
-      .eq("model_type", "sentiment")
-      .gte("created_at", iso7d),
+    // `bias_analysis` is not publicly readable under typical Supabase RLS, so compute
+    // coverage using the public per-article sentiment cache table.
+    supabaseServerUntyped
+      .from("articles")
+      .select("id, article_sentiment_public!inner(article_id)", { count: "exact", head: true })
+      .gte("published_at", iso7d),
   ]);
 
   const total_articles = totalRes.count ?? 0;
@@ -76,7 +77,7 @@ async function fetchHomeStatsFromSupabase(): Promise<HomeStats> {
   const last_updated = (lastUpdatedRes.data?.[0]?.published_at as string | null | undefined) ?? null;
 
   const articles_last_7d = articles7dRes.count ?? null;
-  const sentiment_rows_last_7d = sentiment7dRes.count ?? null;
+  const sentiment_rows_last_7d = sentimentCoverage7dRes.count ?? null;
   const coverage_7d =
     typeof articles_last_7d === "number" &&
     articles_last_7d > 0 &&

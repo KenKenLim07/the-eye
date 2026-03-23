@@ -1,6 +1,7 @@
 from celery import Celery
 from app.core.config import settings
 from celery.schedules import schedule
+from kombu import Queue
 
 celery = Celery(
     "ph_eye",
@@ -19,6 +20,16 @@ celery.conf.update(
     # Beat configuration - using default scheduler for reliability
     beat_max_loop_interval=60,  # Check every minute
     beat_sync_every=1,  # Sync every task
+    # Route scraping and ML work to separate queues so we can run separate workers.
+    task_queues=(
+        Queue("scrape"),
+        Queue("ml"),
+        Queue("celery"),  # fallback/default
+    ),
+    task_routes={
+        "app.workers.tasks.*": {"queue": "scrape"},
+        "app.workers.ml_tasks.*": {"queue": "ml"},
+    },
 )
 
 celery.autodiscover_tasks(["app.workers", "app.workers.ml_tasks"])

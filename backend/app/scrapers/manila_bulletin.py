@@ -8,7 +8,8 @@ from playwright.sync_api import Browser
 from bs4 import BeautifulSoup
 from app.pipeline.normalize import build_article, NormalizedArticle
 from app.scrapers.base import launch_browser
-from datetime import datetime
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 import re
 import urllib.request
 import json
@@ -374,15 +375,48 @@ class ManilaBulletinScraper:
         return (content or "")[:20000]
 
     def _parse_published(self, raw: Optional[str]) -> Optional[str]:
+        """
+        Parse Manila Bulletin published date into a timezone-aware UTC ISO string.
+
+        Manila Bulletin often provides timestamps without an explicit offset; those should be
+        treated as Asia/Manila (UTC+8) before converting to UTC.
+        """
         if not raw:
             return None
         try:
-            if re.search(r"\d{4}-\d{2}-\d{2}", raw):
-                return raw
-        except Exception:
-            pass
-        try:
-            return datetime.utcnow().isoformat()
+            s = str(raw).strip()
+            # Remove common PH tz abbreviations without offsets
+            s = re.sub(r"\b(PHT|PST)\b", "", s, flags=re.IGNORECASE).strip()
+
+            # 1) ISO-ish strings (may include Z / offset)
+            if re.search(r"\d{4}-\d{2}-\d{2}", s):
+                try:
+                    dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=ZoneInfo("Asia/Manila"))
+                    return dt.astimezone(timezone.utc).isoformat()
+                except Exception:
+                    # Fall through to display formats
+                    pass
+
+            # 2) Display formats (date-only or date+time)
+            for fmt in (
+                "%B %d, %Y %I:%M %p",
+                "%b %d, %Y %I:%M %p",
+                "%B %d, %Y",
+                "%b %d, %Y",
+                "%Y-%m-%d %H:%M:%S",
+                "%Y-%m-%d",
+            ):
+                try:
+                    dt_naive = datetime.strptime(s, fmt)
+                    dt = dt_naive.replace(tzinfo=ZoneInfo("Asia/Manila"))
+                    return dt.astimezone(timezone.utc).isoformat()
+                except Exception:
+                    continue
+
+            # 3) Fallback: always return an aware UTC time (avoid naive utcnow()).
+            return datetime.now(timezone.utc).isoformat()
         except Exception:
             return None
 

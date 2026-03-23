@@ -60,7 +60,7 @@ def scrape_inquirer_task(self):
         source_key="inquirer",
         source_name="Inquirer",
         task_id=task_id,
-        scrape_fn=lambda: scraper.scrape_latest(max_articles=10),
+        scrape_fn=lambda: scraper.scrape_latest(max_articles=15),
         retry_base_seconds=60,
     )
 
@@ -75,7 +75,7 @@ def scrape_gma_task(self):
         source_key="gma",
         source_name="GMA",
         task_id=task_id,
-        scrape_fn=lambda: scraper.scrape_latest(max_articles=10),
+        scrape_fn=lambda: scraper.scrape_latest(max_articles=15),
         retry_base_seconds=60,
     )
 
@@ -89,7 +89,7 @@ def scrape_philstar_task(self):
         source_key="philstar",
         source_name="Philstar",
         task_id=task_id,
-        scrape_fn=lambda: scraper.scrape_latest(max_articles=10),
+        scrape_fn=lambda: scraper.scrape_latest(max_articles=15),
         retry_base_seconds=60,
     )
         
@@ -104,7 +104,7 @@ def scrape_manila_bulletin_task(self):
         source_key="manila_bulletin",
         source_name="Manila Bulletin",
         task_id=task_id,
-        scrape_fn=lambda: scraper.scrape_latest(max_articles=10),
+        scrape_fn=lambda: scraper.scrape_latest(max_articles=15),
         retry_base_seconds=60,
     )
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
@@ -117,7 +117,7 @@ def scrape_rappler_task(self):
         source_key="rappler",
         source_name="Rappler",
         task_id=task_id,
-        scrape_fn=lambda: scraper.scrape_latest(max_articles=50),
+        scrape_fn=lambda: scraper.scrape_latest(max_articles=15),
         retry_base_seconds=60,
     )
 
@@ -132,7 +132,7 @@ def scrape_sunstar_task(self):
         source_key="sunstar",
         source_name="Sunstar",
         task_id=task_id,
-        scrape_fn=lambda: scraper.scrape_all(max_articles=10),
+        scrape_fn=lambda: scraper.scrape_all(max_articles=15),
         retry_base_seconds=60,
     )
 
@@ -147,6 +147,6 @@ def scrape_manila_times_task(self):
         source_key="manila_times",
         source_name="Manila Times",
         task_id=task_id,
-        scrape_fn=lambda: scraper.scrape_latest(max_articles=10),
+        scrape_fn=lambda: scraper.scrape_latest(max_articles=15),
         retry_base_seconds=60,
     )

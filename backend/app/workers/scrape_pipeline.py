@@ -4,6 +4,7 @@ import logging
 from typing import Any, Callable, Mapping
 
 from app.observability.logs import finalize_run, start_run
+from app.core.supabase import get_supabase
 from app.pipeline.store import insert_articles
 from app.workers.ml_tasks import analyze_articles_task
 
@@ -129,9 +130,31 @@ def run_scrape_task(
                     "storage": store_result,
                 }
 
-            inserted_ids = store_result.get("inserted_ids") or []
-            if inserted_ids:
-                analyze_articles_task.delay(inserted_ids)
+            inserted_ids = [int(x) for x in (store_result.get("inserted_ids") or []) if x is not None]
+
+            # Also backfill sentiment for duplicate URLs when the article row already exists
+            # but sentiment rows are missing (common after transient ML outages).
+            missing_existing_ids: list[int] = []
+            existing_ids = [int(x) for x in (store_result.get("existing_ids") or []) if x is not None]
+            if existing_ids:
+                try:
+                    sb = get_supabase()
+                    analyzed = (
+                        sb.table("bias_analysis")
+                        .select("article_id")
+                        .eq("model_type", "sentiment")
+                        .in_("article_id", existing_ids)
+                        .execute()
+                    )
+                    analyzed_set = {int(r.get("article_id")) for r in (analyzed.data or []) if r.get("article_id") is not None}
+                    missing_existing_ids = [aid for aid in existing_ids if aid not in analyzed_set]
+                except Exception as e:
+                    logger.warning("Failed to check existing_ids sentiment coverage (will skip): %s", e)
+
+            analyze_ids = inserted_ids + missing_existing_ids
+            if analyze_ids:
+                # Always target the ML queue; the ML worker runs with `-Q ml`.
+                analyze_articles_task.apply_async(args=[analyze_ids], queue="ml")
 
             finalize_run(run_log["id"], status="success", articles_scraped=len(articles))
             return {
@@ -185,4 +208,3 @@ def run_scrape_task(
             raise celery_self.retry(countdown=retry_base_seconds * (2 ** celery_self.request.retries))
 
         return {"ok": False, "task_id": task_id, "error": error_msg, "retries_exhausted": True}
-

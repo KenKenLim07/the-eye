@@ -78,14 +78,14 @@ Frontend (`.env.local`):
 2. Start backend services (Redis + API + worker + beat)
 
 ```bash
-docker compose up -d redis api worker beat
+docker compose up -d
 
 # Linux-only (optional overrides):
-docker compose -f docker-compose.yml -f docker-compose.linux.yml up -d redis api worker beat
+docker compose -f docker-compose.yml -f docker-compose.linux.yml up -d
 ```
 
 ```powershell
-docker compose up -d redis api worker beat
+docker compose up -d
 ```
 
 API will be on `http://localhost:8000`.
@@ -93,14 +93,14 @@ API will be on `http://localhost:8000`.
 For a more stable run (no FastAPI hot-reload), use:
 
 ```bash
-docker compose -f docker-compose.prod.yml up -d redis api worker beat
+docker compose -f docker-compose.prod.yml up -d
 
 # Linux-only (optional overrides):
-docker compose -f docker-compose.prod.yml -f docker-compose.linux.yml up -d redis api worker beat
+docker compose -f docker-compose.prod.yml -f docker-compose.linux.yml up -d
 ```
 
 ```powershell
-docker compose -f docker-compose.prod.yml up -d redis api worker beat
+docker compose -f docker-compose.prod.yml up -d
 ```
 
 3. Start the frontend
@@ -188,6 +188,64 @@ $taskId = $run.jobs[0].task_id
 Invoke-RestMethod "http://localhost:8000/scrape/status/$taskId"
 ```
 
+## ML Backfill (Fix Missing Sentiment Labels)
+
+Sometimes articles exist in Supabase but are missing sentiment rows (so the UI shows unlabeled items). This backfill scans for missing sentiment and queues ML analysis jobs to fill `bias_analysis` + `article_sentiment_public`.
+
+Linux / bash:
+
+```bash
+# Real run (queues ML tasks)
+./backfill.sh 30 200
+
+# Dry run (no tasks queued; only prints missing IDs)
+./backfill.sh 30 200 --dry-run
+
+# Watch progress
+sudo docker logs -f ph-eye-worker-ml
+```
+
+Windows / PowerShell:
+
+```powershell
+# Real run (queues ML tasks)
+.\backfill.ps1 -Days 30 -BatchSize 200
+
+# Dry run (no tasks queued; only prints missing IDs)
+.\backfill.ps1 -Days 30 -BatchSize 200 -DryRun
+
+# Watch progress
+docker logs -f ph-eye-worker-ml
+```
+
+## Fix Wrong `published_at` (Time Drift / Dual-Boot Clock Issues)
+
+If your PC clock was wrong while scraping (common in Windows+Linux dual boot), some articles can get a `published_at` timestamp that is **in the future** relative to `inserted_at`. This breaks Trends daily bucketing.
+
+This helper scans recent rows and fixes the two most common issues:
+- **Timezone skew (~+8h):** `published_at` was saved without a timezone and got interpreted as UTC (shifts day buckets). Fix: shift `published_at` back by 8 hours.
+- **True future drift:** `published_at` is far ahead of `inserted_at`. Fix: set `published_at = inserted_at`.
+
+Linux / bash:
+
+```bash
+# Dry run (recommended first)
+./fix_published_at.sh 7 --dry-run
+
+# Apply fixes
+./fix_published_at.sh 7 --apply
+```
+
+Windows / PowerShell:
+
+```powershell
+# Dry run (recommended first)
+.\fix_published_at.ps1 -Days 7 -DryRun
+
+# Apply fixes
+.\fix_published_at.ps1 -Days 7 -Apply
+```
+
 ## Why Scrapers Sometimes “Wait” After `docker compose up -d`
 
 By default, scrapers are scheduled by Celery Beat on intervals, so the **first automatic run** can be delayed until the interval is due:
@@ -199,11 +257,7 @@ By default, scrapers are scheduled by Celery Beat on intervals, so the **first a
 - `manila_times`: every 5112s (1h 25m 12s)
 - `sunstar`: every 5400s (1h 30m 00s)
 
-This repo also enables an optional “kickoff” so scrapes run immediately on startup (configured in `docker-compose.yml`):
-- A one-shot `kickoff` service queues the jobs and then exits.
-- You can control it via:
-  - `SCRAPE_ON_STARTUP=true`
-  - `SCRAPE_ON_STARTUP_SOURCES=inquirer,gma,philstar,manila_bulletin,rappler,sunstar,manila_times`
+If you want scrapes to run immediately, use the manual `POST /scrape/run` commands above or run `backend/scripts/pipeline_test.py`.
 
 ## Legacy Root Tools (Archived)
 

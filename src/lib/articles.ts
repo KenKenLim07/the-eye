@@ -104,8 +104,10 @@ export async function fetchAllArticles(limit: number = 10): Promise<Record<strin
       return {};
     }
 
-    // Use optimized single-query endpoint instead of 7 separate queries
-    const response = await fetch(`${backendUrl}/articles/home-optimized?limit_per_source=${limit}`, {
+    // Use optimized single-query endpoint instead of 7 separate queries.
+    // In local dev, bypass Redis caching so hotfixes (e.g. published_at corrections) reflect immediately.
+    const refreshQS = process.env.NODE_ENV === "development" ? "&refresh=true" : "";
+    const response = await fetch(`${backendUrl}/articles/home-optimized?limit_per_source=${limit}${refreshQS}`, {
       cache: 'no-store' 
     });
     

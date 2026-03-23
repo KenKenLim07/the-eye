@@ -10,6 +10,7 @@ from app.pipeline.normalize import build_article, NormalizedArticle
 import httpx
 from app.scrapers.utils import resolve_category_pair
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 import re
 from app.core.supabase import get_supabase
 # Feature flags (env-driven) for gradual rollout
@@ -122,6 +123,10 @@ class ManilaTimesScraper:
             return None
         
         try:
+            cleaned = date_str.strip()
+            # Manila Times sometimes includes a timezone abbreviation without an offset.
+            cleaned = re.sub(r"\b(PHT|PST)\b", "", cleaned, flags=re.IGNORECASE).strip()
+
             # Try common date formats
             formats = [
                 "%Y-%m-%dT%H:%M:%S%z",
@@ -136,10 +141,11 @@ class ManilaTimesScraper:
             
             for fmt in formats:
                 try:
-                    dt = datetime.strptime(date_str.strip(), fmt)
+                    dt = datetime.strptime(cleaned, fmt)
                     if dt.tzinfo is None:
-                        dt = dt.replace(tzinfo=timezone.utc)
-                    return dt.isoformat()
+                        # Manila Times is PH-local; if there's no offset, assume Asia/Manila.
+                        dt = dt.replace(tzinfo=ZoneInfo("Asia/Manila"))
+                    return dt.astimezone(timezone.utc).isoformat()
                 except ValueError:
                     continue
             

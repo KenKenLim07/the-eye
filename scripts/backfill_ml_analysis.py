@@ -24,11 +24,43 @@ from typing import Iterable
 # Allow running from repo root while importing backend package.
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "backend"))
 
-from app.core.supabase import get_supabase  # noqa: E402
-from app.workers.ml_tasks import analyze_articles_task  # noqa: E402
+try:
+    from app.workers.celery_app import celery as celery_app  # noqa: E402
+    from app.core.supabase import get_supabase  # noqa: E402
+    from app.workers.ml_tasks import analyze_articles_task  # noqa: E402
+except ModuleNotFoundError as e:
+    missing = getattr(e, "name", None) or str(e)
+    raise SystemExit(
+        "\n".join(
+            [
+                f"Missing Python dependency: {missing}",
+                "",
+                "This script is intended to run either:",
+                "  1) Inside Docker (recommended):",
+                "     bash backfill.sh 7 200",
+                "     # or directly:",
+                "     docker compose exec worker_ml python /app/scripts/backfill_ml_analysis.py --days 7 --batch-size 200",
+                "",
+                "  2) Locally in a virtualenv:",
+                "     python3 -m venv .venv && source .venv/bin/activate",
+                "     pip install -r backend/requirements.txt",
+                "     python3 scripts/backfill_ml_analysis.py --days 7 --batch-size 200",
+                "",
+            ]
+        )
+    ) from e
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Ensure `@shared_task` resolves to the configured Celery app (and its routing),
+# even when this script is executed outside of the Celery worker process.
+try:
+    celery_app.set_current()
+    celery_app.set_default()
+except Exception:
+    # Best-effort; if this fails, we still force the queue on apply_async below.
+    pass
 
 
 def _chunked(items: list[int], size: int) -> Iterable[list[int]]:
@@ -36,13 +68,32 @@ def _chunked(items: list[int], size: int) -> Iterable[list[int]]:
         yield items[i : i + size]
 
 
+def _execute_with_retry(fn, *, attempts: int = 3, base_sleep_s: float = 2.0):
+    """
+    Best-effort retry for transient DNS/network failures when talking to Supabase.
+    """
+    import time
+
+    last_err: Exception | None = None
+    for i in range(attempts):
+        try:
+            return fn()
+        except Exception as e:
+            last_err = e
+            if i == attempts - 1:
+                break
+            time.sleep(base_sleep_s * (2**i))
+    assert last_err is not None
+    raise last_err
+
+
 def _fetch_all_ids_recent_articles(since_iso: str, page_size: int = 1000) -> list[int]:
     sb = get_supabase()
     out: list[int] = []
     offset = 0
     while True:
-        res = (
-            sb.table("articles")
+        res = _execute_with_retry(
+            lambda: sb.table("articles")
             .select("id")
             .gte("published_at", since_iso)
             .order("published_at", desc=True)
@@ -70,8 +121,8 @@ def _fetch_all_sentiment_analyzed_article_ids(since_iso: str, page_size: int = 1
     out: set[int] = set()
     offset = 0
     while True:
-        res = (
-            sb.table("bias_analysis")
+        res = _execute_with_retry(
+            lambda: sb.table("bias_analysis")
             .select("article_id")
             .eq("model_type", "sentiment")
             .gte("created_at", since_iso)
@@ -102,7 +153,22 @@ def find_articles_missing_sentiment(since_days: int = 7) -> list[int]:
     if not all_article_ids:
         return []
 
-    analyzed_ids = _fetch_all_sentiment_analyzed_article_ids(since_date)
+    # Accuracy > cleverness: check sentiment coverage for these specific articles.
+    # This avoids edge-cases where `created_at` falls outside the lookback window.
+    sb = get_supabase()
+    analyzed_ids: set[int] = set()
+    for batch in _chunked(all_article_ids, 500):
+        res = _execute_with_retry(
+            lambda b=batch: sb.table("bias_analysis")
+            .select("article_id")
+            .eq("model_type", "sentiment")
+            .in_("article_id", b)
+            .execute()
+        )
+        for r in (res.data or []):
+            aid = r.get("article_id")
+            if aid is not None:
+                analyzed_ids.add(int(aid))
 
     missing = [aid for aid in all_article_ids if aid not in analyzed_ids]
     logger.info("Found %d articles missing sentiment since %s.", len(missing), since_date)
@@ -119,7 +185,11 @@ def backfill_analysis(article_ids: list[int], batch_size: int = 50) -> dict:
 
     for idx, batch in enumerate(_chunked(article_ids, batch_size), start=1):
         try:
-            task = analyze_articles_task.delay(batch)
+            # Explicitly target the `ml` queue so it is picked up by `worker_ml`
+            # (which runs with `-Q ml`). Relying on routing here is fragile when
+            # called from a standalone script because `@shared_task` may bind to
+            # the default Celery app.
+            task = analyze_articles_task.apply_async(args=[batch], queue="ml")
             queued += len(batch)
             logger.info("Queued batch %d: %d articles (task: %s)", idx, len(batch), getattr(task, "id", "n/a"))
         except Exception as e:
@@ -141,7 +211,22 @@ def main(argv: list[str]) -> int:
     args = parser.parse_args(argv[1:])
 
     logger.info("Scanning for articles missing sentiment analysis in the last %d days...", args.days)
-    missing_ids = find_articles_missing_sentiment(args.days)
+    try:
+        missing_ids = find_articles_missing_sentiment(args.days)
+    except Exception as e:
+        raise SystemExit(
+            "\n".join(
+                [
+                    f"Failed to reach Supabase: {e}",
+                    "",
+                    "Common fixes:",
+                    "  - Ensure you have internet access on the host",
+                    "  - Restart containers: docker compose restart api worker_ml",
+                    "  - Re-run from the ML worker container (recommended):",
+                    "      docker compose exec worker_ml python /app/scripts/backfill_ml_analysis.py --days 7 --batch-size 200",
+                ]
+            )
+        ) from e
 
     if not missing_ids:
         logger.info("No missing sentiment analysis found.")

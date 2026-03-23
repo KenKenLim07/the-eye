@@ -21,10 +21,9 @@ if ($Linux -and (Test-Path "docker-compose.linux.yml")) {
 }
 
 Write-Host "🚀 Starting PH Eye (Docker Compose)..."
-& $compose @files up -d redis api worker beat
+& $compose @files up -d
 
 Write-Host ""
 Write-Host "✅ Services started"
 Write-Host "🌐 API: http://localhost:8000"
 Write-Host "📱 Frontend: http://localhost:3000 (run npm run dev)"
-

@@ -2,6 +2,8 @@ from typing import Callable, List, TypeVar
 import re
 import time
 import random
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from app.core.supabase import get_supabase
 from .normalize import NormalizedArticle
 from app.scrapers.utils import normalize_source, normalize_category
@@ -10,6 +12,27 @@ from urllib.parse import urlparse, urlunparse
 
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
+PH_TZ = ZoneInfo("Asia/Manila")
+
+
+def _normalize_published_at(raw: str | None) -> str:
+    """
+    Ensure `published_at` is a timezone-aware UTC ISO string.
+
+    Many PH sites expose timestamps without an explicit offset (local time). If we insert those
+    directly into a `timestamptz` column, Postgres interprets them as UTC, causing a consistent
+    +8 hour skew in Trends/day bucketing. Fix by assuming Asia/Manila when the offset is missing.
+    """
+    if not raw:
+        return datetime.now(timezone.utc).isoformat()
+    s = str(raw).strip()
+    try:
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=PH_TZ)
+        return dt.astimezone(timezone.utc).isoformat()
+    except Exception:
+        return datetime.now(timezone.utc).isoformat()
 
 
 def _canonicalize_url(raw_url: str) -> str:
@@ -81,17 +104,29 @@ def insert_articles(articles: List[NormalizedArticle]) -> dict:
     # Filter out articles without URL (optional, but keeps DB clean)
     to_check = [a.url for a in articles if a.url]
     existing_urls: set[str] = set()
+    existing_ids_by_url: dict[str, int] = {}
+    existing_ids: list[int] = []
     
     # FIXED: Re-enable duplicate check with proper error handling
     duplicate_check_failed = False
     if to_check:
         try:
             res = _with_retries(
-                lambda: sb.table('articles').select('url').in_('url', to_check).execute(),
+                lambda: sb.table('articles').select('id,url').in_('url', to_check).execute(),
                 op_name="duplicate_check",
                 retries=3,
             )
-            existing_urls = set((row.get('url') for row in (res.data or []) if row.get('url')))
+            for row in (res.data or []):
+                url = row.get("url")
+                rid = row.get("id")
+                if not url:
+                    continue
+                existing_urls.add(url)
+                if rid is not None:
+                    try:
+                        existing_ids_by_url[url] = int(rid)
+                    except Exception:
+                        pass
             logger.info(f'Duplicate check: {len(existing_urls)} existing URLs found out of {len(to_check)} checked')
         except Exception as e:
             duplicate_check_failed = True
@@ -110,6 +145,9 @@ def insert_articles(articles: List[NormalizedArticle]) -> dict:
             continue
         if a.url in existing_urls:
             logger.info(f"Skip reason: duplicate_url | url={a.url}")
+            existing_id = existing_ids_by_url.get(a.url)
+            if existing_id is not None:
+                existing_ids.append(existing_id)
             skipped += 1
             continue
 
@@ -120,7 +158,7 @@ def insert_articles(articles: List[NormalizedArticle]) -> dict:
             'title': a.title,
             'url': a.url,
             'content': a.content,
-            'published_at': a.published_at,
+            'published_at': _normalize_published_at(a.published_at),
         })
 
     inserted = 0
@@ -160,6 +198,9 @@ def insert_articles(articles: List[NormalizedArticle]) -> dict:
         'skipped': skipped,
         'inserted': inserted,
         'inserted_ids': inserted_ids,
+        # IDs of articles that already existed (duplicate URL) in this scrape batch.
+        # Useful for backfilling sentiment when some older articles lack analysis.
+        'existing_ids': existing_ids,
     }
     
     if error_msg:

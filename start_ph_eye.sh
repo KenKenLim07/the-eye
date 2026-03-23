@@ -39,7 +39,7 @@ if [[ "$include_linux_overrides" == "true" && -f docker-compose.linux.yml ]]; th
 fi
 
 echo "🚀 Starting PH Eye (Docker Compose)..."
-compose "${files[@]}" up -d redis api worker beat
+compose "${files[@]}" up -d
 
 echo ""
 echo "✅ Services started"

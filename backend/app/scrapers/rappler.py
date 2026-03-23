@@ -8,12 +8,14 @@ from playwright.sync_api import Browser
 from bs4 import BeautifulSoup
 from app.pipeline.normalize import build_article, NormalizedArticle
 from app.scrapers.base import launch_browser
-from datetime import datetime
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 import re
 import urllib.request
 import json
 import httpx
 from app.scrapers.utils import resolve_category_pair
+from email.utils import parsedate_to_datetime
 
 # Feature flags (env-driven) for gradual rollout
 import os
@@ -376,14 +378,116 @@ class RapplerScraper:
             return None
             
         try:
-            # Try to find ISO format
-            if re.search(r'\d{4}-\d{2}-\d{2}', raw_date):
-                return raw_date
-            
-            # Fallback to current time if parsing fails
-            return datetime.utcnow().isoformat()
+            s = str(raw_date).strip()
+
+            # 0) RFC822 / RSS style dates: "Tue, 23 Mar 2026 12:10:00 +0800"
+            try:
+                if "," in s and re.search(r"\s[+-]\d{4}\b", s):
+                    dt_rfc = parsedate_to_datetime(s)
+                    if dt_rfc is not None:
+                        if dt_rfc.tzinfo is None:
+                            dt_rfc = dt_rfc.replace(tzinfo=timezone.utc)
+                        return dt_rfc.astimezone(timezone.utc).isoformat()
+            except Exception:
+                pass
+
+            # 1) ISO-ish strings (prefer this; Rappler JSON-LD often includes +08:00)
+            if re.search(r"\d{4}-\d{2}-\d{2}", s):
+                try:
+                    dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+                    if dt.tzinfo is None:
+                        # Rappler's displayed times are PH local; assume Asia/Manila when offset is missing.
+                        dt = dt.replace(tzinfo=ZoneInfo("Asia/Manila"))
+                    return dt.astimezone(timezone.utc).isoformat()
+                except Exception:
+                    # If it's an unparseable ISO-like string, fall through to other patterns.
+                    pass
+
+            # 2) Display format: "Mar 23, 2026 8:10 PM PHT" (or full month name)
+            cleaned = re.sub(r"\b(PHT|PST)\b", "", s, flags=re.IGNORECASE).strip()
+            for fmt in ("%b %d, %Y %I:%M %p", "%B %d, %Y %I:%M %p", "%b %d, %Y", "%B %d, %Y"):
+                try:
+                    dt_naive = datetime.strptime(cleaned, fmt)
+                    dt = dt_naive.replace(tzinfo=ZoneInfo("Asia/Manila"))
+                    return dt.astimezone(timezone.utc).isoformat()
+                except Exception:
+                    continue
+
+            # 3) Final fallback: use an aware UTC timestamp (avoid naive utcnow()).
+            return datetime.now(timezone.utc).isoformat()
         except Exception:
             return None
+
+    def _extract_published_date_from_html(self, soup: BeautifulSoup) -> Optional[str]:
+        """
+        Extract the most trustworthy published date string from the rendered HTML.
+
+        Prefer explicit machine-readable attributes (e.g. time[datetime], meta tags),
+        then fall back to visible text.
+        """
+        try:
+            time_el = soup.select_one("time[datetime]")
+            if time_el:
+                # Some Rappler pages expose a PH-local *display* string that is more trustworthy than the
+                # datetime attribute (which can occasionally be ambiguous). If we see a human string, use it.
+                text = time_el.get_text(" ", strip=True)
+                if text and (re.search(r"\b(PHT|PST)\b", text, flags=re.IGNORECASE) or re.search(r"\d{1,2}:\d{2}", text)):
+                    return text
+
+                dt_attr = (time_el.get("datetime") or "").strip()
+                if dt_attr:
+                    return dt_attr
+                if text:
+                    return text
+        except Exception:
+            pass
+
+        # Common meta tags used by news sites
+        meta_selectors = [
+            "meta[property='article:published_time']",
+            "meta[property='og:published_time']",
+            "meta[name='pubdate']",
+            "meta[name='publish-date']",
+            "meta[name='publish_date']",
+        ]
+        for sel in meta_selectors:
+            try:
+                el = soup.select_one(sel)
+                if not el:
+                    continue
+                content = (el.get("content") or "").strip()
+                if content:
+                    return content
+            except Exception:
+                continue
+
+        # Visible-text fallback using existing selector list
+        try:
+            return self._extract_with_fallbacks(soup, self.SELECTORS["published_date"])
+        except Exception:
+            return None
+
+    def _choose_raw_published_date(self, html_raw: Optional[str], ld_raw: Optional[str]) -> Optional[str]:
+        """
+        Choose between HTML-derived and JSON-LD-derived raw dates.
+
+        Rappler pages sometimes expose a PH-local display time (e.g. "… PM PHT") alongside
+        structured data. When the structured value is ambiguous, prefer the HTML signal.
+        """
+        if html_raw:
+            h = str(html_raw)
+            # If HTML explicitly signals PH time, always trust it.
+            if re.search(r"\b(PHT|PST)\b", h, flags=re.IGNORECASE) or "+08" in h or "GMT+8" in h.upper():
+                return html_raw
+            # If HTML contains a time-of-day and JSON-LD is missing, use HTML.
+            if (re.search(r"\d{1,2}:\d{2}", h) or re.search(r"\b(AM|PM)\b", h, flags=re.IGNORECASE)) and not ld_raw:
+                return html_raw
+            # If JSON-LD looks like a date-only value, prefer HTML.
+            if ld_raw and not re.search(r"\d{1,2}:\d{2}", str(ld_raw)):
+                return html_raw
+            # Otherwise keep JSON-LD if it exists; fall back to HTML.
+            return ld_raw or html_raw
+        return ld_raw
 
     def _extract_json_ld(self, soup: BeautifulSoup) -> Dict[str, Any]:
         """Extract structured data from JSON-LD."""
@@ -392,15 +496,30 @@ class RapplerScraper:
             for script in soup.select('script[type="application/ld+json"]'):
                 try:
                     payload = json.loads(script.get_text(strip=True))
+
+                    # Payloads can be dict, list, or dict with @graph.
+                    candidates = []
                     if isinstance(payload, dict):
-                        if payload.get("@type") in ["NewsArticle", "Article", "BlogPosting"]:
-                            data["headline"] = payload.get("headline")
-                            data["datePublished"] = payload.get("datePublished")
-                            data["articleBody"] = payload.get("articleBody")
-                            break
+                        if isinstance(payload.get("@graph"), list):
+                            candidates.extend([x for x in payload.get("@graph") if isinstance(x, dict)])
+                        else:
+                            candidates.append(payload)
+                    elif isinstance(payload, list):
+                        candidates.extend([x for x in payload if isinstance(x, dict)])
+
+                    for obj in candidates:
+                        t = obj.get("@type")
+                        types = [t] if isinstance(t, str) else (t if isinstance(t, list) else [])
+                        if any(x in {"NewsArticle", "Article", "BlogPosting"} for x in types):
+                            data["headline"] = obj.get("headline")
+                            data["datePublished"] = obj.get("datePublished")
+                            data["articleBody"] = obj.get("articleBody")
+                            raise StopIteration
                 except Exception:
                     continue
         except Exception:
+            pass
+        except StopIteration:
             pass
         return data
 
@@ -1047,8 +1166,10 @@ class RapplerScraper:
                 return None
             
             raw_date = (
-                json_ld.get("datePublished") or 
-                self._extract_with_fallbacks(soup, self.SELECTORS["published_date"])
+                self._choose_raw_published_date(
+                    self._extract_published_date_from_html(soup),
+                    json_ld.get("datePublished"),
+                )
             )
             published_at = self._parse_published_date(raw_date)
             
