@@ -4,7 +4,6 @@ from app.workers.celery_app import celery
 from celery.result import AsyncResult
 
 from app.workers.tasks import (
-    scrape_abs_cbn_task,
     scrape_gma_task,
     scrape_inquirer_task,
     scrape_manila_bulletin_task,
@@ -33,9 +32,6 @@ async def run_scrape(payload: dict = Body(default={})):
         if s == "inquirer":
             job = scrape_inquirer_task.delay()
             jobs.append({"source": s, "task_id": str(job)})
-        elif s in ["abs_cbn", "abs-cbn", "abscbn"]:
-            job = scrape_abs_cbn_task.delay()
-            jobs.append({"source": "abs_cbn", "task_id": str(job)})
         elif s in ["gma", "gma_news", "gma-news"]:
             job = scrape_gma_task.delay()
             jobs.append({"source": "gma", "task_id": str(job)})
@@ -70,4 +66,3 @@ async def get_scrape_status(task_id: str):
             return {"status": "pending"}
     except Exception as e:
         return {"status": "error", "error": str(e)}
-

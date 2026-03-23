@@ -200,8 +200,10 @@ By default, scrapers are scheduled by Celery Beat on intervals, so the **first a
 - `sunstar`: every 5400s (1h 30m 00s)
 
 This repo also enables an optional “kickoff” so scrapes run immediately on startup (configured in `docker-compose.yml`):
-- `SCRAPE_ON_STARTUP=true`
-- `SCRAPE_ON_STARTUP_SOURCES=inquirer,gma,philstar,manila_bulletin,rappler,sunstar,manila_times`
+- A one-shot `kickoff` service queues the jobs and then exits.
+- You can control it via:
+  - `SCRAPE_ON_STARTUP=true`
+  - `SCRAPE_ON_STARTUP_SOURCES=inquirer,gma,philstar,manila_bulletin,rappler,sunstar,manila_times`
 
 ## Legacy Root Tools (Archived)
 

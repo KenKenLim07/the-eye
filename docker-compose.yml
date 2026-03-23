@@ -59,27 +59,14 @@ services:
       - 1.1.1.1
     dns_search: []
 
-  beat:
+  kickoff:
     build:
       context: .
       dockerfile: backend/Dockerfile
-    container_name: ph-eye-beat
-    restart: unless-stopped
+    container_name: ph-eye-kickoff
+    restart: "no"
     working_dir: /app/backend
-    command: >
-      sh -c "
-      if [ \"${SCRAPE_ON_STARTUP:-false}\" = \"true\" ]; then
-        echo \"[beat] kickoff scrapes: ${SCRAPE_ON_STARTUP_SOURCES:-}\" &&
-        python -m app.workers.kickoff || true ;
-      fi &&
-      rm -f celerybeat-schedule* &&
-      celery -A app.workers.celery_app:celery beat
-        --loglevel=info
-        --scheduler=celery.beat:PersistentScheduler
-        --schedule=/app/backend/celerybeat-schedule
-        --pidfile=
-        --max-interval=60
-      "
+    command: python -m app.workers.kickoff
     env_file: backend/.env
     environment:
       - CELERY_BROKER_URL=redis://redis:6379/0
@@ -93,6 +80,38 @@ services:
     depends_on:
       - redis
       - worker
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+
+  beat:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: ph-eye-beat
+    restart: unless-stopped
+    working_dir: /app/backend
+    command: >
+      sh -c "
+      rm -f celerybeat-schedule*;
+      exec celery -A app.workers.celery_app:celery beat
+        --loglevel=info
+        --scheduler=celery.beat:PersistentScheduler
+        --schedule=/app/backend/celerybeat-schedule
+        --pidfile=
+        --max-interval=60
+      "
+    env_file: backend/.env
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+    volumes:
+      - ./backend:/app/backend
+      - ./:/app
+    depends_on:
+      - redis
+      - worker
+      - kickoff
     shm_size: "1gb"
     dns:
       - 8.8.8.8

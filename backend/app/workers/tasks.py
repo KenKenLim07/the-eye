@@ -7,8 +7,6 @@ from app.observability.logs import start_run, finalize_run
 from app.workers.ml_tasks import analyze_articles_task
 from app.workers.scrape_pipeline import run_scrape_task
 
-# ABS-CBN scraper (requires PLAYWRIGHT_HEADLESS=false in dev, or xvfb in prod)
-from app.scrapers.abs_cbn import ABSCBNScraper
 # New import for GMA
 from app.scrapers.gma import GMAScraper
 # New import for Philstar
@@ -65,51 +63,6 @@ def scrape_inquirer_task(self):
         scrape_fn=lambda: scraper.scrape_latest(max_articles=10),
         retry_base_seconds=60,
     )
-
-# ABS-CBN task (requires headed mode or xvfb for Akamai bypass)
-@shared_task(bind=True, max_retries=2, default_retry_delay=120)
-def scrape_abs_cbn_task(self):
-    """ABS-CBN scraper - requires PLAYWRIGHT_HEADLESS=false in dev or xvfb-run in prod."""
-    task_id = self.request.id
-    logger.info(f"Starting ABS-CBN scraping task {task_id}")
-    log = start_run("abs_cbn")
-    try:
-        scraper = ABSCBNScraper()
-        result = scraper.scrape_latest(max_articles=10)
-        logger.info(f"Task {task_id} - ABS-CBN scraped {len(result.articles)} articles, {len(result.errors)} errors")
-        if result.articles:
-            from app.pipeline.store import insert_articles
-            store_result = insert_articles(result.articles)
-            logger.info(f"Task {task_id} - ABS-CBN storage result: {store_result}")
-            # Keep ABS-CBN behavior unchanged (custom retry style).
-            storage_error = (store_result or {}).get("error")
-            if storage_error:
-                logger.error("Task %s - ABS-CBN storage failed: %s", task_id, storage_error)
-                finalize_run(log["id"], status="error", articles_scraped=len(result.articles), error_message=f"storage_error: {storage_error}")
-                return {"ok": False, "task_id": task_id, "error": f"storage_failed: {storage_error}", "storage": store_result}
-            inserted_ids = store_result.get("inserted_ids") or []
-            if inserted_ids:
-                analyze_articles_task.delay(inserted_ids)
-            finalize_run(log["id"], status="success", articles_scraped=len(result.articles))
-            return {
-                "ok": True,
-                "task_id": task_id,
-                "scraping": {
-                    "articles_found": len(result.articles),
-                    "errors": result.errors,
-                    "performance": result.performance,
-                    "metadata": result.metadata
-                },
-                "storage": store_result
-            }
-        else:
-            logger.warning(f"Task {task_id} - ABS-CBN: No articles found")
-            finalize_run(log["id"], status="success", articles_scraped=0)
-            return {"ok": True, "task_id": task_id, "scraping": {"articles_found": 0, "errors": result.errors}}
-    except Exception as e:
-        logger.error(f"Task {task_id} - ABS-CBN critical error: {e}")
-        finalize_run(log["id"], status="error", error_message=str(e))
-        raise self.retry(exc=e)
 
 # New GMA task
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
@@ -197,4 +150,3 @@ def scrape_manila_times_task(self):
         scrape_fn=lambda: scraper.scrape_latest(max_articles=10),
         retry_base_seconds=60,
     )
-

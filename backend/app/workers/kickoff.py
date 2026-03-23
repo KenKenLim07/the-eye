@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import argparse
 import os
-from typing import Callable
+import time
 
-from app.workers import tasks
+from app.workers.celery_app import celery
 
 
 def _parse_sources(raw: str | None) -> list[str]:
@@ -16,16 +16,17 @@ def _parse_sources(raw: str | None) -> list[str]:
 
 
 def kickoff_scrapes(sources: list[str]) -> list[dict[str, str]]:
-    mapping: dict[str, Callable[[], object]] = {
-        "inquirer": tasks.scrape_inquirer_task.delay,
-        "gma": tasks.scrape_gma_task.delay,
-        "philstar": tasks.scrape_philstar_task.delay,
-        "manila_bulletin": tasks.scrape_manila_bulletin_task.delay,
-        "rappler": tasks.scrape_rappler_task.delay,
-        "sunstar": tasks.scrape_sunstar_task.delay,
-        "manila_times": tasks.scrape_manila_times_task.delay,
-        # Keep abs_cbn supported for anyone who still uses it.
-        "abs_cbn": tasks.scrape_abs_cbn_task.delay,
+    # Use `celery.send_task(...)` (instead of `task.delay()`) so this script always
+    # publishes to the same broker/backend configured in `app.workers.celery_app`,
+    # even when run outside a Celery worker process.
+    mapping: dict[str, str] = {
+        "inquirer": "app.workers.tasks.scrape_inquirer_task",
+        "gma": "app.workers.tasks.scrape_gma_task",
+        "philstar": "app.workers.tasks.scrape_philstar_task",
+        "manila_bulletin": "app.workers.tasks.scrape_manila_bulletin_task",
+        "rappler": "app.workers.tasks.scrape_rappler_task",
+        "sunstar": "app.workers.tasks.scrape_sunstar_task",
+        "manila_times": "app.workers.tasks.scrape_manila_times_task",
     }
 
     jobs: list[dict[str, str]] = []
@@ -33,13 +34,28 @@ def kickoff_scrapes(sources: list[str]) -> list[dict[str, str]]:
         key = source.strip()
         if not key:
             continue
-        fn = mapping.get(key)
-        if not fn:
+        task_name = mapping.get(key)
+        if not task_name:
             print(f"[kickoff] skip unknown source: {key}")
             continue
-        job = fn()
-        jobs.append({"source": key, "task_id": str(job)})
-        print(f"[kickoff] queued {key} task_id={job}")
+        # Retry publishing in case Redis is still coming up.
+        last_err: Exception | None = None
+        for attempt in range(1, 11):
+            try:
+                async_result = celery.send_task(task_name)
+                task_id = str(async_result.id)
+                jobs.append({"source": key, "task_id": task_id})
+                print(f"[kickoff] queued {key} task_id={task_id}")
+                last_err = None
+                break
+            except Exception as e:
+                last_err = e
+                sleep_s = min(5, attempt)
+                print(f"[kickoff] publish failed (source={key}, attempt={attempt}/10): {e} (sleep {sleep_s}s)")
+                time.sleep(sleep_s)
+
+        if last_err is not None:
+            raise RuntimeError(f"Failed to publish task for source={key}: {last_err}") from last_err
     return jobs
 
 
@@ -73,4 +89,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
