@@ -5,6 +5,9 @@ import type { AnalysisRow, Article } from "@/lib/types";
 import { supabaseServer, supabaseServerUntyped } from "@/lib/supabase/server";
 import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
+import HomeControlBar from "@/components/home/control-bar";
+import LatestFeed from "@/components/home/latest-feed";
+import SentimentSplitCard from "@/components/home/sentiment-split-card";
 
 // In production we often run without a deployed backend; force dynamic so Supabase reads happen at request-time
 // instead of being snapshotted during build (which can result in a "blank" homepage until the next revalidate).
@@ -282,6 +285,21 @@ export default async function Home() {
       return { ...article, sentiment };
     });
   }
+
+  const visibleArticles: Article[] = Object.values(enrichedBySource).flat();
+  const sentimentSplit = visibleArticles.reduce(
+    (acc, a) => {
+      const s = (a.sentiment || "").toLowerCase();
+      if (s === "positive") acc.positive += 1;
+      else if (s === "negative") acc.negative += 1;
+      else if (s === "neutral") acc.neutral += 1;
+      else acc.unlabeled += 1;
+      return acc;
+    },
+    { positive: 0, neutral: 0, negative: 0, unlabeled: 0 }
+  );
+
+  const coveragePct = typeof stats.coverage_7d === "number" ? Math.round(stats.coverage_7d * 100) : null;
   const t1 = Date.now();
   console.log("Home debug: timings ms", {
     optimizedFetch: tAfterOptimized - t0,
@@ -300,30 +318,8 @@ export default async function Home() {
           </p>
         </div>
 
-        <div className="max-w-3xl mx-auto">
-          <form className="flex flex-col md:flex-row items-stretch gap-2" action="/search" method="get">
-            <select
-              name="source"
-              defaultValue="all"
-              className="border rounded-md px-3 py-2 text-sm md:w-56 bg-card"
-            >
-              <option value="all">All Sources</option>
-              <option value="GMA">GMA</option>
-              <option value="Rappler">Rappler</option>
-              <option value="Inquirer">Inquirer</option>
-              <option value="Manila Times">Manila Times</option>
-              <option value="Philstar">Philstar</option>
-              <option value="Sunstar">Sunstar</option>
-              <option value="Manila Bulletin">Manila Bulletin</option>
-            </select>
-            <input
-              type="text"
-              name="q"
-              placeholder="Search headlines or summaries..."
-              className="flex-1 border rounded-md px-3 py-2 text-sm bg-card"
-            />
-            <button className="text-sm border rounded-md px-4 py-2 bg-card hover:bg-accent/5 transition-colors">Search</button>
-          </form>
+        <div className="max-w-4xl mx-auto">
+          <HomeControlBar sources={canonicalOrder} lastUpdated={stats.last_updated} />
           <div className="text-xs text-muted-foreground mt-2 text-center">
             Tip: use <Link className="underline" href="/search">Advanced search</Link> for pagination.
           </div>
@@ -343,7 +339,7 @@ export default async function Home() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3">
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-2 sm:gap-3">
             <Card>
               <CardContent className="p-3 sm:p-4">
                 <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">Total</div>
@@ -367,51 +363,79 @@ export default async function Home() {
             </Card>
             <Card>
               <CardContent className="p-3 sm:p-4">
-                <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">Coverage (7d)</div>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">Coverage (7d)</div>
+                  <span
+                    className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground"
+                    title="Percent of last-7d articles that have rows in article_sentiment_public (public VADER sentiment cache)."
+                    aria-label="Coverage info"
+                  >
+                    i
+                  </span>
+                </div>
                 <div className="u-serif text-2xl sm:text-3xl font-semibold tabular-nums">
-                  {typeof stats.coverage_7d === "number" ? `${Math.round(stats.coverage_7d * 100)}%` : "—"}
+                  {typeof coveragePct === "number" ? `${coveragePct}%` : "—"}
+                </div>
+                <div className="mt-2 h-2 w-full rounded-full overflow-hidden border bg-muted" aria-label="Coverage progress bar">
+                  <div className="h-full bg-accent" style={{ width: `${coveragePct ?? 0}%` }} />
                 </div>
                 <div className="hidden sm:block text-xs text-muted-foreground mt-1">Articles with VADER sentiment rows</div>
               </CardContent>
             </Card>
+
+            <SentimentSplitCard
+              positive={sentimentSplit.positive}
+              neutral={sentimentSplit.neutral}
+              negative={sentimentSplit.negative}
+              unlabeled={sentimentSplit.unlabeled}
+            />
           </div>
         </div>
+
+        <LatestFeed articles={visibleArticles} limit={24} />
 
         <div className="space-y-8">
           <ArticleRowServer 
             articles={enrichedBySource["GMA"] || []} 
             title="GMA News" 
             sourceValue="GMA" 
+            collapsible
           />
           <ArticleRowServer 
             articles={enrichedBySource["Rappler"] || []} 
             title="Rappler" 
             sourceValue="Rappler" 
+            collapsible
           />
           <ArticleRowServer 
             articles={enrichedBySource["Inquirer"] || []} 
             title="Inquirer" 
             sourceValue="Inquirer" 
+            collapsible
           />
           <ArticleRowServer 
             articles={enrichedBySource["Manila Times"] || []} 
             title="Manila Times" 
             sourceValue="Manila Times"
+            collapsible
           />
           <ArticleRowServer 
             articles={enrichedBySource["Philstar"] || []} 
             title="Philstar" 
             sourceValue="Philstar" 
+            collapsible
           />
           <ArticleRowServer 
             articles={enrichedBySource["Sunstar"] || []} 
             title="Sunstar" 
             sourceValue="Sunstar" 
+            collapsible
           />
           <ArticleRowServer 
             articles={enrichedBySource["Manila Bulletin"] || []} 
             title="Manila Bulletin" 
             sourceValue="Manila Bulletin" 
+            collapsible
           />
         </div>
       </div>

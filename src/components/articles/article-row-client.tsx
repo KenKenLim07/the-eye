@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { formatDate } from "@/lib/utils/date";
 import { Badge } from "@/components/ui/badge";
 import { ArticleCardsInteractive } from "./article-cards-interactive";
 
