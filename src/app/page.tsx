@@ -328,7 +328,6 @@ export default async function Home() {
         <div className="space-y-4">
           <div className="flex items-end justify-between gap-3">
             <div className="space-y-1">
-              <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">At a glance</div>
               <div className="u-serif text-xl sm:text-2xl font-semibold tracking-tight">Today’s pulse</div>
               <div className="sm:hidden text-xs text-muted-foreground">
                 {stats.last_updated ? `Updated ${new Date(stats.last_updated).toLocaleString()}` : ""}

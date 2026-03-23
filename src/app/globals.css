@@ -126,16 +126,10 @@
   
   body {
     @apply bg-background text-foreground;
-    /* Paper texture: subtle lines + soft vignette. */
+    /* Paper texture: soft vignette (avoid visible scanlines behind skeleton loaders). */
     background-image:
       radial-gradient(800px 400px at 20% 0%, color-mix(in oklab, var(--accent) 12%, transparent) 0%, transparent 60%),
-      radial-gradient(900px 600px at 80% 10%, color-mix(in oklab, var(--foreground) 6%, transparent) 0%, transparent 65%),
-      repeating-linear-gradient(
-        0deg,
-        color-mix(in oklab, var(--foreground) 2%, transparent) 0px,
-        transparent 2px,
-        transparent 24px
-      );
+      radial-gradient(900px 600px at 80% 10%, color-mix(in oklab, var(--foreground) 6%, transparent) 0%, transparent 65%);
     background-attachment: fixed;
     opacity: 0;
     animation: fadeIn 0.15s ease-out forwards;
