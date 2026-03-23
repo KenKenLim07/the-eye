@@ -1,55 +1,88 @@
 import Link from "next/link";
 
 export default function Footer() {
+  const year = new Date().getFullYear();
   return (
     <footer className="border-t bg-background/75 backdrop-blur supports-[backdrop-filter]:bg-background/55">
-      <div className="container mx-auto px-4 sm:px-6 lg:px-8">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="py-10 space-y-8">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            <div className="space-y-2">
-              <div className="u-serif text-lg font-semibold tracking-tight">PH-Eye</div>
-              <p className="text-sm text-muted-foreground leading-6">
-                Philippine news aggregation with lightweight sentiment and entity snapshots for analytics pages.
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-8">
+            <div className="md:col-span-5 space-y-3">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="u-serif text-xl font-semibold tracking-tight">PH‑Eye</div>
+                  <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+                    Editorial analytics
+                  </div>
+                </div>
+                <div className="hidden sm:flex items-center gap-2">
+                  <span className="inline-flex h-2 w-2 rounded-full bg-primary" aria-hidden="true" />
+                  <span className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+                    Live-ish
+                  </span>
+                </div>
+              </div>
+
+              <p className="text-sm text-muted-foreground leading-6 max-w-md">
+                A Philippine news aggregator with lightweight sentiment + entity snapshots to support the Trends,
+                Correlation, and Entities views.
               </p>
             </div>
 
-            <div className="space-y-3">
+            <div className="md:col-span-3 space-y-3">
               <h3 className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">Explore</h3>
-              <div className="space-y-2">
-                <Link href="/" className="block text-sm hover:underline">
+              <div className="grid gap-2 text-sm">
+                <Link href="/" className="hover:underline underline-offset-4">
                   Home
                 </Link>
-                <Link href="/search" className="block text-sm hover:underline">
+                <Link href="/search" className="hover:underline underline-offset-4">
                   Search
                 </Link>
-                <Link href="/entities" className="block text-sm hover:underline">
-                  Entities
-                </Link>
-                <Link href="/trends" className="block text-sm hover:underline">
+                <Link href="/trends" className="hover:underline underline-offset-4">
                   Trends
+                </Link>
+                <Link href="/correlation" className="hover:underline underline-offset-4">
+                  Correlation
+                </Link>
+                <Link href="/entities" className="hover:underline underline-offset-4">
+                  Entities
                 </Link>
               </div>
             </div>
 
-            <div className="space-y-3">
+            <div className="md:col-span-4 space-y-3">
               <h3 className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">Sources</h3>
-              <div className="grid grid-cols-2 gap-2 text-sm text-muted-foreground">
-                <span>GMA</span>
-                <span>Rappler</span>
-                <span>Inquirer</span>
-                <span>Philstar</span>
-                <span>Sunstar</span>
-                <span>Manila Bulletin</span>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  "GMA",
+                  "Rappler",
+                  "Inquirer",
+                  "Manila Times",
+                  "Philstar",
+                  "Sunstar",
+                  "Manila Bulletin",
+                ].map((source) => (
+                  <Link
+                    key={source}
+                    href={`/source/${encodeURIComponent(source)}`}
+                    className="inline-flex items-center rounded-full border bg-card px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent/5 hover:text-foreground transition-colors"
+                  >
+                    {source}
+                  </Link>
+                ))}
+              </div>
+              <div className="text-xs text-muted-foreground leading-5">
+                Some publishers show dates in PHT; timestamps are normalized for consistent analytics.
               </div>
             </div>
           </div>
 
-          <div className="pt-6 border-t flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+          <div className="pt-6 border-t flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <p className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-              (c) 2024 PH-Eye. Thesis demo build.
+              © {year} PH‑Eye • Thesis demo build
             </p>
             <p className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-              Built with Next.js + Supabase.
+              Built by Jose Marie Lim • Next.js + Supabase
             </p>
           </div>
         </div>
@@ -57,4 +90,3 @@ export default function Footer() {
     </footer>
   );
 }
-

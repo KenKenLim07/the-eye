@@ -2,11 +2,14 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { Menu, Moon, Search, Sun, X } from "lucide-react";
+import { Menu, Moon, Search, Sun } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Sheet, SheetClose, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 
 export default function Navigation() {
   const pathname = usePathname();
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [isDark, setIsDark] = useState(false);
 
@@ -21,13 +24,10 @@ export default function Navigation() {
     []
   );
 
-  const toggleMobileMenu = () => {
-    setIsMobileMenuOpen(!isMobileMenuOpen);
-  };
-
-  const closeMobileMenu = () => {
-    setIsMobileMenuOpen(false);
-  };
+  useEffect(() => {
+    // Close the sheet on route changes (safety net for non-link navigations).
+    setMobileOpen(false);
+  }, [pathname]);
 
   useEffect(() => {
     let cancelled = false;
@@ -65,102 +65,175 @@ export default function Navigation() {
 
   return (
     <nav className="sticky top-0 z-50 border-b bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex justify-between items-center h-16">
-          <div className="flex-shrink-0">
-            <Link 
-              href="/" 
-              className="flex items-center gap-3"
-              onClick={closeMobileMenu}
-            >
-              <div className="leading-none">
-                <div className="u-serif text-xl font-semibold tracking-tight">PH-Eye</div>
-                <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">Editorial analytics</div>
+      <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
+        <div className="flex h-16 items-center justify-between gap-3">
+          <Link href="/" className="flex items-center gap-3">
+            <div className="leading-none">
+              <div className="u-serif text-xl font-semibold tracking-tight">PH‑Eye</div>
+              <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+                Editorial analytics
               </div>
-            </Link>
-          </div>
+            </div>
+          </Link>
 
           {/* Desktop Navigation */}
-          <div className="hidden md:flex items-center space-x-8">
-            {navItems.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`px-1 py-2 text-sm font-medium transition-colors border-b-2 ${
-                  pathname === item.href
-                    ? "text-foreground border-primary"
-                    : "text-muted-foreground border-transparent hover:text-foreground hover:border-border"
-                }`}
-              >
-                {item.label}
-              </Link>
-            ))}
+          <div className="hidden md:flex items-center gap-6">
+            {navItems.map((item) => {
+              const active = pathname === item.href;
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={[
+                    "group relative px-1 py-2 text-sm font-medium transition-colors",
+                    active ? "text-foreground" : "text-muted-foreground hover:text-foreground",
+                  ].join(" ")}
+                >
+                  <span className="u-mono text-[12px] tracking-wide">{item.label}</span>
+                  <span
+                    aria-hidden="true"
+                    className={[
+                      "pointer-events-none absolute -bottom-px left-0 h-0.5 w-full rounded-full transition-opacity",
+                      active ? "bg-primary opacity-100" : "bg-border opacity-0 group-hover:opacity-100",
+                    ].join(" ")}
+                  />
+                </Link>
+              );
+            })}
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3">
             {lastUpdated && (
               <div className="hidden lg:block u-mono text-[10px] uppercase tracking-widest text-muted-foreground">
                 As of {lastUpdated}
               </div>
             )}
 
-            <Link
-              href="/search"
-              className="hidden md:inline-flex items-center justify-center h-9 w-9 rounded-md border bg-card hover:bg-accent/5 transition-colors"
-              aria-label="Search"
-            >
-              <Search className="h-4 w-4" />
-            </Link>
+            <Button asChild variant="outline" size="icon" className="hidden md:inline-flex">
+              <Link href="/search" aria-label="Search" title="Search">
+                <Search className="h-4 w-4" />
+              </Link>
+            </Button>
 
-            <button
+            <Button
               type="button"
               onClick={toggleTheme}
-              className="inline-flex items-center justify-center h-9 w-9 rounded-md border bg-card hover:bg-accent/5 transition-colors"
+              variant="outline"
+              size="icon"
               aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
               title={isDark ? "Light mode" : "Dark mode"}
             >
               {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-            </button>
+            </Button>
 
-            {/* Mobile menu button */}
+            {/* Mobile menu */}
             <div className="md:hidden">
-            <button
-              onClick={toggleMobileMenu}
-              className="inline-flex items-center justify-center h-10 w-10 rounded-md border bg-card hover:bg-accent/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors"
-              aria-expanded={isMobileMenuOpen}
-              aria-label="Toggle navigation menu"
-            >
-              {isMobileMenuOpen ? (
-                <X className="block h-6 w-6" aria-hidden="true" />
-              ) : (
-                <Menu className="block h-6 w-6" aria-hidden="true" />
-              )}
-            </button>
-          </div>
-          </div>
-        </div>
+              <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
+                <SheetTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="h-11 w-11"
+                    aria-label="Open menu"
+                  >
+                    <Menu className="h-5 w-5" />
+                  </Button>
+                </SheetTrigger>
 
-        {/* Mobile Navigation Menu */}
-        {isMobileMenuOpen && (
-          <div className="md:hidden">
-            <div className="px-2 pt-2 pb-3 space-y-1 sm:px-3 bg-background border-t">
-              {navItems.map((item) => (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  onClick={closeMobileMenu}
-                  className={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
-                    pathname === item.href
-                      ? "text-foreground bg-accent/10"
-                      : "text-muted-foreground hover:text-foreground hover:bg-accent/5"
-                  }`}
-                >
-                  {item.label}
-                </Link>
-              ))}
+                <SheetContent side="right" className="p-4 sm:p-5" showCloseButton>
+                  <SheetHeader className="pb-2">
+                    <SheetTitle className="u-serif text-lg">PH‑Eye</SheetTitle>
+                    {lastUpdated && (
+                      <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+                        As of {lastUpdated}
+                      </div>
+                    )}
+                  </SheetHeader>
+
+                  <form action="/search" method="get" className="mt-3 flex items-center gap-2">
+                    <Input
+                      name="q"
+                      placeholder="Search headlines…"
+                      className="h-11"
+                      aria-label="Search headlines"
+                    />
+                    <Button type="submit" className="h-11 px-3">
+                      <Search className="h-4 w-4" />
+                      <span className="sr-only">Search</span>
+                    </Button>
+                  </form>
+
+                  <div className="mt-5 space-y-2">
+                    <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+                      Navigate
+                    </div>
+                    <div className="grid gap-1">
+                      {navItems.map((item) => {
+                        const active = pathname === item.href;
+                        return (
+                          <SheetClose asChild key={item.href}>
+                            <Link
+                              href={item.href}
+                              className={[
+                                "flex items-center justify-between rounded-md px-3 py-2.5 text-sm transition-colors",
+                                active
+                                  ? "bg-accent/10 text-foreground"
+                                  : "text-muted-foreground hover:bg-accent/5 hover:text-foreground",
+                              ].join(" ")}
+                            >
+                              <span className="font-medium">{item.label}</span>
+                              {active && (
+                                <span className="u-mono text-[10px] uppercase tracking-widest text-primary">
+                                  Here
+                                </span>
+                              )}
+                            </Link>
+                          </SheetClose>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="mt-6 space-y-2">
+                    <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+                      Sources
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {[
+                        "GMA",
+                        "Rappler",
+                        "Inquirer",
+                        "Manila Times",
+                        "Philstar",
+                        "Sunstar",
+                        "Manila Bulletin",
+                      ].map((source) => (
+                        <SheetClose asChild key={source}>
+                          <Link
+                            href={`/source/${encodeURIComponent(source)}`}
+                            className="inline-flex items-center rounded-full border bg-card px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent/5 hover:text-foreground transition-colors"
+                          >
+                            {source}
+                          </Link>
+                        </SheetClose>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="mt-auto pt-6">
+                    <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+                      Tip
+                    </div>
+                    <div className="text-sm text-muted-foreground leading-6">
+                      Use Search to filter by keywords or jump into a specific source.
+                    </div>
+                  </div>
+                </SheetContent>
+              </Sheet>
             </div>
           </div>
-        )}
+        </div>
       </div>
     </nav>
   );
