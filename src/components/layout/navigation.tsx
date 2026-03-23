@@ -4,7 +4,6 @@ import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { Menu, Moon, Search, Sun } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Sheet, SheetClose, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 
 export default function Navigation() {
@@ -134,41 +133,42 @@ export default function Navigation() {
                     type="button"
                     variant="outline"
                     size="icon"
-                    className="h-11 w-11"
+                    className="h-11 w-11 hover:bg-muted hover:text-foreground"
                     aria-label="Open menu"
                   >
                     <Menu className="h-5 w-5" />
                   </Button>
                 </SheetTrigger>
 
-                <SheetContent side="right" className="p-4 sm:p-5" showCloseButton>
-                  <SheetHeader className="pb-2">
-                    <SheetTitle className="u-serif text-lg">PH‑Eye</SheetTitle>
-                    {lastUpdated && (
-                      <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-                        As of {lastUpdated}
+                <SheetContent
+                  side="bottom"
+                  className="p-4 sm:p-5 rounded-t-xl border-t max-h-[85dvh] overflow-y-auto pb-[max(1rem,env(safe-area-inset-bottom))]"
+                  showCloseButton
+                >
+                  <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-border" aria-hidden="true" />
+                  <SheetHeader className="pb-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="space-y-0.5">
+                        <SheetTitle className="u-serif text-lg">PH‑Eye</SheetTitle>
+                        <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+                          Index
+                        </div>
                       </div>
-                    )}
+
+                      <div className="flex items-center gap-2 pt-1">
+                        <span className="inline-flex h-2 w-2 rounded-full bg-primary" aria-hidden="true" />
+                        <span className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+                          Live-ish
+                        </span>
+                      </div>
+                    </div>
                   </SheetHeader>
 
-                  <form action="/search" method="get" className="mt-3 flex items-center gap-2">
-                    <Input
-                      name="q"
-                      placeholder="Search headlines…"
-                      className="h-11"
-                      aria-label="Search headlines"
-                    />
-                    <Button type="submit" className="h-11 px-3">
-                      <Search className="h-4 w-4" />
-                      <span className="sr-only">Search</span>
-                    </Button>
-                  </form>
-
-                  <div className="mt-5 space-y-2">
+                  <div className="space-y-2">
                     <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">
                       Navigate
                     </div>
-                    <div className="grid gap-1">
+                    <div className="grid gap-1.5">
                       {navItems.map((item) => {
                         const active = pathname === item.href;
                         return (
@@ -176,10 +176,9 @@ export default function Navigation() {
                             <Link
                               href={item.href}
                               className={[
-                                "flex items-center justify-between rounded-md px-3 py-2.5 text-sm transition-colors",
-                                active
-                                  ? "bg-accent/10 text-foreground"
-                                  : "text-muted-foreground hover:bg-accent/5 hover:text-foreground",
+                                "relative flex items-center justify-between rounded-md px-3 py-3 text-sm transition-colors",
+                                "border bg-card/40 hover:bg-muted",
+                                active ? "text-foreground" : "text-muted-foreground hover:text-foreground",
                               ].join(" ")}
                             >
                               <span className="font-medium">{item.label}</span>
@@ -188,6 +187,13 @@ export default function Navigation() {
                                   Here
                                 </span>
                               )}
+                              <span
+                                aria-hidden="true"
+                                className={[
+                                  "absolute left-0 top-2 bottom-2 w-0.5 rounded-full bg-primary transition-opacity",
+                                  active ? "opacity-100" : "opacity-0",
+                                ].join(" ")}
+                              />
                             </Link>
                           </SheetClose>
                         );
@@ -212,7 +218,7 @@ export default function Navigation() {
                         <SheetClose asChild key={source}>
                           <Link
                             href={`/source/${encodeURIComponent(source)}`}
-                            className="inline-flex items-center rounded-full border bg-card px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent/5 hover:text-foreground transition-colors"
+                            className="inline-flex items-center rounded-full border bg-card px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
                           >
                             {source}
                           </Link>
@@ -221,14 +227,13 @@ export default function Navigation() {
                     </div>
                   </div>
 
-                  <div className="mt-auto pt-6">
-                    <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-                      Tip
+                  {lastUpdated && (
+                    <div className="mt-6 pt-4 border-t">
+                      <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+                        As of {lastUpdated}
+                      </div>
                     </div>
-                    <div className="text-sm text-muted-foreground leading-6">
-                      Use Search to filter by keywords or jump into a specific source.
-                    </div>
-                  </div>
+                  )}
                 </SheetContent>
               </Sheet>
             </div>

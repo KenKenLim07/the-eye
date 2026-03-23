@@ -69,7 +69,7 @@ function SheetContent({
         {showCloseButton && (
           <SheetPrimitive.Close
             data-slot="sheet-close"
-            className="absolute right-3 top-3 inline-flex h-10 w-10 items-center justify-center rounded-md border bg-card/50 transition-colors hover:bg-accent/5 focus-visible:ring-2 focus-visible:ring-ring"
+            className="absolute right-3 top-3 inline-flex h-10 w-10 items-center justify-center rounded-md border bg-card/50 transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
             aria-label="Close"
           >
             <XIcon className="h-4 w-4" />
