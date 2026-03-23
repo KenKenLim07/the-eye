@@ -4,6 +4,7 @@ import type { Article } from "@/lib/types";
 import { formatDateTime } from "@/lib/utils/date";
 import { cn } from "@/lib/utils";
 import type { CSSProperties } from "react";
+import { ExternalLink } from "lucide-react";
 
 type Props = {
   articles: Article[];
@@ -39,7 +40,7 @@ function sentimentBadge(sentiment: string | null | undefined): { label: string; 
   return { label: "unlabeled", className: "bg-muted text-muted-foreground border-border" };
 }
 
-export default function LatestFeed({ articles, limit = 24 }: Props) {
+export default function LatestFeed({ articles, limit = 15 }: Props) {
   const nowMs = Date.now();
   const items = (articles || [])
     .slice()
@@ -50,12 +51,12 @@ export default function LatestFeed({ articles, limit = 24 }: Props) {
     <div className="space-y-3">
       <div className="flex items-end justify-between gap-3">
         <div className="space-y-1">
-          <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">Unified feed</div>
-          <h2 className="u-serif text-xl sm:text-2xl font-semibold tracking-tight">Latest</h2>
+          <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">Latest</div>
+          <h2 className="u-serif text-lg sm:text-2xl font-semibold tracking-tight">Latest</h2>
         </div>
         <Link
           href={{ pathname: "/search", query: { sort: "newest" } }}
-          className="text-sm border rounded-md px-3 py-2 bg-card hover:bg-accent/5 transition-colors"
+          className="text-sm border rounded-md px-3 py-2 bg-card hover:bg-accent/5 transition-colors min-h-[44px] inline-flex items-center"
         >
           View more
         </Link>
@@ -74,12 +75,12 @@ export default function LatestFeed({ articles, limit = 24 }: Props) {
               <div
                 key={`${a.source}-${a.id}`}
                 className={cn(
-                  "p-3 sm:p-4 hover:bg-accent/5 transition-colors",
+                  "px-3 py-3 sm:p-4 hover:bg-accent/5 transition-colors",
                   "u-stagger-item"
                 )}
                 style={style}
               >
-                <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start justify-between gap-2 sm:gap-3">
                   <div className="min-w-0 space-y-2">
                     <div className="flex flex-wrap items-center gap-2">
                       <Link
@@ -89,7 +90,7 @@ export default function LatestFeed({ articles, limit = 24 }: Props) {
                         {a.source}
                       </Link>
                       {a.category ? (
-                        <span className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+                        <span className="hidden sm:inline u-mono text-[10px] uppercase tracking-widest text-muted-foreground">
                           {a.category}
                         </span>
                       ) : null}
@@ -104,12 +105,12 @@ export default function LatestFeed({ articles, limit = 24 }: Props) {
                         href={a.url}
                         target="_blank"
                         rel="noreferrer"
-                        className="block u-serif text-base sm:text-lg font-semibold leading-snug tracking-tight hover:underline underline-offset-4 break-words"
+                        className="block u-serif text-sm sm:text-lg font-semibold leading-snug tracking-tight hover:underline underline-offset-4 break-words"
                       >
                         {a.title}
                       </a>
                     ) : (
-                      <div className="u-serif text-base sm:text-lg font-semibold leading-snug tracking-tight break-words">
+                      <div className="u-serif text-sm sm:text-lg font-semibold leading-snug tracking-tight break-words">
                         {a.title}
                       </div>
                     )}
@@ -120,9 +121,21 @@ export default function LatestFeed({ articles, limit = 24 }: Props) {
                       href={a.url}
                       target="_blank"
                       rel="noreferrer"
-                      className="shrink-0 text-sm underline"
+                      className="shrink-0 text-sm underline hidden sm:inline-flex"
                     >
                       Read original
+                    </a>
+                  ) : null}
+                  {a.url ? (
+                    <a
+                      href={a.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="sm:hidden inline-flex items-center justify-center min-h-[44px] min-w-[44px] rounded-md border bg-card hover:bg-accent/5 transition-colors"
+                      aria-label="Read original"
+                      title="Read original"
+                    >
+                      <ExternalLink className="h-4 w-4" />
                     </a>
                   ) : null}
                 </div>

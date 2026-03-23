@@ -17,10 +17,10 @@ export default function HomeControlBar({ sources, lastUpdated }: Props) {
           <Input
             name="q"
             placeholder="Search headlines or summaries…"
-            className="h-10 bg-card"
+            className="h-11 bg-card"
             aria-label="Search"
           />
-          <Button type="submit" className="h-10">
+          <Button type="submit" className="h-11">
             Search
           </Button>
         </form>
@@ -32,13 +32,21 @@ export default function HomeControlBar({ sources, lastUpdated }: Props) {
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
+      <div
+        className={cn(
+          "flex items-center gap-2",
+          "overflow-x-auto pb-1 -mx-1 px-1",
+          "sm:flex-wrap sm:overflow-visible sm:pb-0 sm:mx-0 sm:px-0"
+        )}
+        aria-label="Source shortcuts"
+      >
         {sources.map((s) => (
           <Link
             key={s}
             href={`/source/${encodeURIComponent(s)}`}
             className={cn(
               "inline-flex items-center gap-2 rounded-md border px-3 py-2 text-xs",
+              "min-h-[44px] shrink-0",
               "bg-card hover:bg-accent/5 transition-colors",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             )}
@@ -50,4 +58,3 @@ export default function HomeControlBar({ sources, lastUpdated }: Props) {
     </div>
   );
 }
-

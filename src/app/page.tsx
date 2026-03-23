@@ -339,23 +339,23 @@ export default async function Home() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 lg:grid-cols-5 gap-2 sm:gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 sm:gap-3">
             <Card>
               <CardContent className="p-3 sm:p-4">
                 <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">Total</div>
-                <div className="u-serif text-2xl sm:text-3xl font-semibold tabular-nums">{stats.total_articles.toLocaleString()}</div>
+                <div className="u-serif text-xl sm:text-3xl font-semibold tabular-nums">{stats.total_articles.toLocaleString()}</div>
               </CardContent>
             </Card>
             <Card>
               <CardContent className="p-3 sm:p-4">
                 <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">24h</div>
-                <div className="u-serif text-2xl sm:text-3xl font-semibold tabular-nums">{stats.articles_last_24h.toLocaleString()}</div>
+                <div className="u-serif text-xl sm:text-3xl font-semibold tabular-nums">{stats.articles_last_24h.toLocaleString()}</div>
               </CardContent>
             </Card>
             <Card>
               <CardContent className="p-3 sm:p-4">
                 <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">Sources</div>
-                <div className="u-serif text-2xl sm:text-3xl font-semibold tabular-nums">7</div>
+                <div className="u-serif text-xl sm:text-3xl font-semibold tabular-nums">7</div>
                 <div className="hidden sm:block text-xs text-muted-foreground mt-1">
                   GMA, Rappler, Inquirer, Manila Times, Philstar, Sunstar, Manila Bulletin
                 </div>
@@ -373,7 +373,7 @@ export default async function Home() {
                     i
                   </span>
                 </div>
-                <div className="u-serif text-2xl sm:text-3xl font-semibold tabular-nums">
+                <div className="u-serif text-xl sm:text-3xl font-semibold tabular-nums">
                   {typeof coveragePct === "number" ? `${coveragePct}%` : "—"}
                 </div>
                 <div className="mt-2 h-2 w-full rounded-full overflow-hidden border bg-muted" aria-label="Coverage progress bar">
@@ -382,17 +382,18 @@ export default async function Home() {
                 <div className="hidden sm:block text-xs text-muted-foreground mt-1">Articles with VADER sentiment rows</div>
               </CardContent>
             </Card>
-
-            <SentimentSplitCard
-              positive={sentimentSplit.positive}
-              neutral={sentimentSplit.neutral}
-              negative={sentimentSplit.negative}
-              unlabeled={sentimentSplit.unlabeled}
-            />
+            <div className="col-span-2 sm:col-span-1">
+              <SentimentSplitCard
+                positive={sentimentSplit.positive}
+                neutral={sentimentSplit.neutral}
+                negative={sentimentSplit.negative}
+                unlabeled={sentimentSplit.unlabeled}
+              />
+            </div>
           </div>
         </div>
 
-        <LatestFeed articles={visibleArticles} limit={24} />
+        <LatestFeed articles={visibleArticles} limit={15} />
 
         <div className="space-y-8">
           <ArticleRowServer 
