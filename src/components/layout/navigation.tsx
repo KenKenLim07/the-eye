@@ -175,18 +175,15 @@ export default function Navigation() {
                           <SheetClose asChild key={item.href}>
                             <Link
                               href={item.href}
+                              aria-current={active ? "page" : undefined}
                               className={[
                                 "relative flex items-center justify-between rounded-md px-3 py-3 text-sm transition-colors",
                                 "border bg-card/40 hover:bg-muted",
-                                active ? "text-foreground" : "text-muted-foreground hover:text-foreground",
+                                active ? "text-foreground bg-muted/70" : "text-muted-foreground hover:text-foreground",
                               ].join(" ")}
                             >
                               <span className="font-medium">{item.label}</span>
-                              {active && (
-                                <span className="u-mono text-[10px] uppercase tracking-widest text-primary">
-                                  Here
-                                </span>
-                              )}
+                              {active && <span className="h-1.5 w-1.5 rounded-full bg-primary" aria-hidden="true" />}
                               <span
                                 aria-hidden="true"
                                 className={[
