@@ -218,6 +218,37 @@ Windows / PowerShell:
 docker logs -f ph-eye-worker-ml
 ```
 
+## Fix Low “Coverage (7d)” %
+
+The homepage **Coverage (7d)** metric is:
+
+> `(# articles in last 7 days with a row in article_sentiment_public) / (total # articles in last 7 days)`
+
+If `article_sentiment_public` was added later (or was temporarily failing), you can have sentiment rows in
+`bias_analysis` but still be missing the **public cache** rows — which makes coverage look artificially low.
+
+Backfill the public cache from existing sentiment rows:
+
+Linux / bash:
+
+```bash
+# Preview what would be upserted
+./backfill_public_sentiment.sh 7 --dry-run
+
+# Apply (writes to article_sentiment_public)
+./backfill_public_sentiment.sh 7 --apply 500
+```
+
+Windows / PowerShell:
+
+```powershell
+# Preview
+.\backfill_public_sentiment.ps1 -Days 7
+
+# Apply
+.\backfill_public_sentiment.ps1 -Days 7 -Apply -BatchSize 500
+```
+
 ## Fix Wrong `published_at` (Time Drift / Dual-Boot Clock Issues)
 
 If your PC clock was wrong while scraping (common in Windows+Linux dual boot), some articles can get a `published_at` timestamp that is **in the future** relative to `inserted_at`. This breaks Trends daily bucketing.

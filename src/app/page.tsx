@@ -77,7 +77,68 @@ async function fetchHomeStatsFromSupabase(): Promise<HomeStats> {
   const last_updated = (lastUpdatedRes.data?.[0]?.published_at as string | null | undefined) ?? null;
 
   const articles_last_7d = articles7dRes.count ?? null;
-  const sentiment_rows_last_7d = sentimentCoverage7dRes.count ?? null;
+  let sentiment_rows_last_7d = sentimentCoverage7dRes.count ?? null;
+
+  // Fallback when PostgREST embedded joins aren't available (missing FK relationship).
+  // Compute coverage by fetching article IDs then counting sentiment rows for those IDs.
+  if (
+    typeof articles_last_7d === "number" &&
+    articles_last_7d > 0 &&
+    (sentiment_rows_last_7d === null || sentimentCoverage7dRes.error)
+  ) {
+    try {
+      if (sentimentCoverage7dRes.error) {
+        console.warn("Coverage join query failed; falling back to batched IN queries:", sentimentCoverage7dRes.error);
+      }
+
+      const pageSize = 1000;
+      let offset = 0;
+      const articleIds: number[] = [];
+
+      while (true) {
+        const { data, error } = await supabaseServer
+          .from("articles")
+          .select("id")
+          .gte("published_at", iso7d)
+          .order("published_at", { ascending: false })
+          .range(offset, offset + pageSize - 1);
+
+        if (error) {
+          console.warn("Coverage fallback: failed to fetch article ids:", error);
+          break;
+        }
+
+        const rows = (data as Array<{ id: number }> | null) || [];
+        for (const r of rows) articleIds.push(Number(r.id));
+
+        if (rows.length < pageSize) break;
+        offset += pageSize;
+        // Hard safety cap to keep the homepage fast in degenerate cases.
+        if (articleIds.length > 8000) break;
+      }
+
+      const chunkSize = 500;
+      let analyzed = 0;
+      for (let i = 0; i < articleIds.length; i += chunkSize) {
+        const chunk = articleIds.slice(i, i + chunkSize);
+        const { count, error } = await supabaseServerUntyped
+          .from("article_sentiment_public")
+          .select("article_id", { count: "exact", head: true })
+          .in("article_id", chunk);
+
+        if (error) {
+          console.warn("Coverage fallback: failed to count sentiment rows:", error);
+          analyzed = 0;
+          break;
+        }
+        analyzed += count ?? 0;
+      }
+
+      sentiment_rows_last_7d = analyzed;
+    } catch (e) {
+      console.warn("Coverage fallback failed:", e);
+    }
+  }
   const coverage_7d =
     typeof articles_last_7d === "number" &&
     articles_last_7d > 0 &&
