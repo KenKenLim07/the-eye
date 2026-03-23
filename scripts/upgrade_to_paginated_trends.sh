@@ -4,6 +4,17 @@
 echo "🚀 Upgrading to Paginated Trends System"
 echo "======================================"
 
+set -euo pipefail
+
+# Portable `sed -i` (GNU vs BSD/macOS).
+sedi() {
+  if sed --version >/dev/null 2>&1; then
+    sed -i "$@"
+  else
+    sed -i '' "$@"
+  fi
+}
+
 echo "�� Current trends endpoint shows:"
 current_count=$(curl -s "http://localhost:8000/ml/trends?period=7d" | grep -o '"total_articles":[0-9]*' | cut -d: -f2)
 echo "  📈 /ml/trends: $current_count articles"
@@ -19,8 +30,8 @@ echo "🔄 Replacing old trends endpoint with paginated version..."
 cp backend/app/main.py backend/app/main.py.backup-$(date +%Y%m%d-%H%M%S)
 
 # Replace the trends endpoint
-sed -i '' 's/@app\.get("\/ml\/trends")/@app.get("\/ml\/trends-old")/' backend/app/main.py
-sed -i '' 's/@app\.get("\/ml\/trends-paginated")/@app.get("\/ml\/trends")/' backend/app/main.py
+sedi 's/@app\.get("\/ml\/trends")/@app.get("\/ml\/trends-old")/' backend/app/main.py
+sedi 's/@app\.get("\/ml\/trends-paginated")/@app.get("\/ml\/trends")/' backend/app/main.py
 
 echo "✅ Endpoints swapped!"
 echo "🔄 Restarting API..."

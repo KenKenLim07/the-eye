@@ -29,8 +29,6 @@ services:
     dns:
       - 8.8.8.8
       - 8.8.4.4
-    sysctls:
-      - "net.ipv6.conf.all.disable_ipv6=1"
 
   worker:
     build:
@@ -55,16 +53,11 @@ services:
     depends_on:
       - redis
     shm_size: "1gb"
-    ipc: host
     dns:
       - 8.8.8.8
       - 8.8.4.4
       - 1.1.1.1
     dns_search: []
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    sysctls:
-      - "net.ipv6.conf.all.disable_ipv6=1"
 
   beat:
     build:
@@ -75,6 +68,10 @@ services:
     working_dir: /app/backend
     command: >
       sh -c "
+      if [ \"${SCRAPE_ON_STARTUP:-false}\" = \"true\" ]; then
+        echo \"[beat] kickoff scrapes: ${SCRAPE_ON_STARTUP_SOURCES:-}\" &&
+        python -m app.workers.kickoff || true ;
+      fi &&
       rm -f celerybeat-schedule* &&
       celery -A app.workers.celery_app:celery beat
         --loglevel=info
@@ -87,6 +84,9 @@ services:
     environment:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/1
+      # Optional: queue a one-time scrape immediately after `docker compose up -d`.
+      - SCRAPE_ON_STARTUP=true
+      - SCRAPE_ON_STARTUP_SOURCES=inquirer,gma,philstar,manila_bulletin,rappler,sunstar,manila_times
     volumes:
       - ./backend:/app/backend
       - ./:/app
@@ -94,9 +94,6 @@ services:
       - redis
       - worker
     shm_size: "1gb"
-    ipc: host
     dns:
       - 8.8.8.8
       - 8.8.4.4
-    sysctls:
-      - "net.ipv6.conf.all.disable_ipv6=1"

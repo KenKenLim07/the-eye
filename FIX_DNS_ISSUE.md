@@ -14,21 +14,33 @@ This prevents connecting to Supabase and other external services.
 1. Right-click Docker Desktop icon in system tray
 2. Click "Restart"
 3. Wait for Docker to fully restart
-4. Run: `docker-compose up -d`
+4. Run: `docker compose up -d redis api worker beat` (or `docker-compose ...` on older setups)
 
 This fixes DNS issues 90% of the time on Windows.
 
 ### Solution 2: Reset Docker Network
 ```powershell
 # Stop all containers
-docker-compose down
+docker compose down
 
 # Remove all networks
 docker network prune -f
 
 # Restart Docker Desktop (manually)
 # Then start containers again
-docker-compose up -d
+docker compose up -d redis api worker beat
+```
+
+```bash
+# Stop all containers
+docker compose down
+
+# Remove all networks
+docker network prune -f
+
+# Restart Docker Desktop (manually)
+# Then start containers again
+docker compose up -d redis api worker beat
 ```
 
 ### Solution 3: Check Windows DNS Settings

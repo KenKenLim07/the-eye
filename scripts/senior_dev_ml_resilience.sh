@@ -8,6 +8,15 @@ set -e
 echo "🚀 SENIOR DEV ML PIPELINE RESILIENCE SETUP"
 echo "=========================================="
 
+# Compose wrapper (supports both legacy `docker-compose` and modern `docker compose`).
+compose() {
+    if command -v docker-compose >/dev/null 2>&1; then
+        docker-compose "$@"
+    else
+        docker compose "$@"
+    fi
+}
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -43,7 +52,7 @@ echo "----------------------------------------"
 
 # Check Docker containers
 print_status "Checking Docker containers..."
-docker-compose ps
+compose ps
 
 # Check for syntax errors in critical files
 print_status "Validating Python syntax..."
@@ -57,15 +66,18 @@ echo "----------------------------------------------"
 
 # Stop services gracefully
 print_status "Stopping services..."
-docker-compose down
+compose down
 
-# Clean up any corrupted state
-print_status "Cleaning up corrupted state..."
-docker-compose exec -T redis redis-cli FLUSHALL || true
+# Start Redis first, then optionally clean state.
+print_status "Starting Redis..."
+compose up -d redis
+sleep 2
 
-# Start services with proper restart policies
-print_status "Starting services with resilience..."
-docker-compose up -d
+print_status "Cleaning Redis state (optional safety)..."
+compose exec -T redis redis-cli FLUSHALL || true
+
+print_status "Starting remaining services..."
+compose up -d api worker beat
 
 # Wait for services to be ready
 print_status "Waiting for services to be ready..."
@@ -73,7 +85,7 @@ sleep 10
 
 # Verify services are running
 print_status "Verifying services..."
-docker-compose ps
+compose ps
 
 print_header "3. CHECKING ML PIPELINE HEALTH"
 echo "-------------------------------------"
@@ -106,12 +118,22 @@ cat > scripts/monitor_ml_health.sh << 'EOF'
 #!/bin/bash
 # Quick ML pipeline health check
 
+set -euo pipefail
+
+compose() {
+  if command -v docker-compose >/dev/null 2>&1; then
+    docker-compose "$@"
+  else
+    docker compose "$@"
+  fi
+}
+
 echo "🔍 ML Pipeline Health Check - $(date)"
 echo "====================================="
 
 # Check container status
 echo "📦 Container Status:"
-docker-compose ps | grep -E "(worker|beat|api)"
+compose ps | grep -E "(worker|beat|api)"
 
 # Run health monitor
 echo ""
@@ -121,7 +143,7 @@ python3 scripts/ml_pipeline_monitor.py --hours 6
 # Check recent worker logs
 echo ""
 echo "📝 Recent Worker Activity:"
-docker-compose logs --tail=10 worker | grep -E "(analyze_articles_task|ERROR|WARNING)" || echo "No recent ML activity"
+compose logs --tail=10 worker | grep -E "(analyze_articles_task|ERROR|WARNING)" || echo "No recent ML activity"
 
 echo ""
 echo "✅ Health check complete"
@@ -134,31 +156,39 @@ print_status "Created monitoring script: scripts/monitor_ml_health.sh"
 print_header "6. IMPLEMENTING PERSISTENCE SOLUTIONS"
 echo "-------------------------------------------"
 
-# Enhanced Docker Compose with better persistence
-print_status "Creating enhanced docker-compose with persistence..."
+print_status "Creating docker-compose.persistence.yml (non-destructive override)..."
 
-# Backup original
-cp docker-compose.yml docker-compose.yml.backup
+cat > docker-compose.persistence.yml << 'EOF'
+# Persistence overrides (optional).
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.persistence.yml up -d redis api worker beat
 
-# Add volume persistence for Celery beat schedule
-cat >> docker-compose.yml << 'EOF'
+services:
+  redis:
+    volumes:
+      - redis_data:/data
 
-  # Enhanced persistence volumes
+  beat:
+    volumes:
+      - celery_beat_data:/var/lib/ph-eye-beat
+    command: >
+      sh -c "
+      celery -A app.workers.celery_app:celery beat
+        --loglevel=info
+        --scheduler=celery.beat:PersistentScheduler
+        --schedule=/var/lib/ph-eye-beat/celerybeat-schedule
+        --pidfile=
+        --max-interval=60
+      "
+
 volumes:
-  celery_beat_schedule:
   redis_data:
+  celery_beat_data:
 EOF
 
-# Update beat service to use persistent volume
-sed -i.bak 's/    volumes:/    volumes:\
-      - celery_beat_schedule:\/app\/celerybeat-schedule/' docker-compose.yml
-
-# Update redis service to use persistent volume  
-sed -i.bak 's/  redis:/  redis:\
-    volumes:\
-      - redis_data:\/data/' docker-compose.yml
-
-print_status "Enhanced Docker Compose with persistence volumes"
+print_status "Created: docker-compose.persistence.yml"
+print_warning "To apply persistence, restart with: docker compose -f docker-compose.yml -f docker-compose.persistence.yml up -d redis api worker beat"
 
 print_header "7. CREATING AUTOMATED RECOVERY SCRIPT"
 echo "-------------------------------------------"
@@ -167,13 +197,23 @@ cat > scripts/auto_recovery.sh << 'EOF'
 #!/bin/bash
 # Automated recovery script for ML pipeline issues
 
+set -euo pipefail
+
+compose() {
+  if command -v docker-compose >/dev/null 2>&1; then
+    docker-compose "$@"
+  else
+    docker compose "$@"
+  fi
+}
+
 echo "🔄 ML Pipeline Auto-Recovery"
 echo "============================"
 
 # Check if services are running
-if ! docker-compose ps | grep -q "Up"; then
+if ! compose ps | grep -q "Up"; then
     echo "⚠️  Services not running. Restarting..."
-    docker-compose up -d
+    compose up -d redis api worker beat
     sleep 10
 fi
 
@@ -211,7 +251,7 @@ python3 scripts/ml_pipeline_monitor.py --hours 1
 
 # Show running services
 print_status "Final service status:"
-docker-compose ps
+compose ps
 
 echo ""
 echo "🎉 SENIOR DEV ML PIPELINE RESILIENCE SETUP COMPLETE!"
@@ -229,8 +269,8 @@ echo "🛠️  USEFUL COMMANDS:"
 echo "  • Monitor health:     ./scripts/monitor_ml_health.sh"
 echo "  • Backfill analysis:  python3 scripts/backfill_ml_analysis.py --days 7"
 echo "  • Auto-recovery:      ./scripts/auto_recovery.sh"
-echo "  • Check status:       docker-compose ps"
-echo "  • View logs:          docker-compose logs -f worker"
+echo "  • Check status:       docker compose ps"
+echo "  • View logs:          docker compose logs -f worker"
 echo ""
 echo "🔄 PREVENTION MEASURES:"
 echo "  • Services auto-restart on failure (restart: unless-stopped)"
@@ -244,4 +284,3 @@ echo "  2. Run health checks regularly"
 echo "  3. Consider cloud deployment for 24/7 operation"
 echo "  4. Set up alerts for low ML coverage"
 echo ""
-

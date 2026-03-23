@@ -1,36 +1,47 @@
-#!/bin/bash
-echo "🚀 Starting PH Eye Services..."
+#!/usr/bin/env bash
+set -euo pipefail
 
-# Kill any existing processes
-pkill -f "uvicorn app.main:app"
-pkill -f "celery.*worker"
-pkill -f "celery.*beat"
+usage() {
+  cat <<'EOF'
+Usage:
+  ./start_ph_eye.sh [--prod] [--linux]
 
-# Wait a moment
-sleep 2
+Options:
+  --prod   Use docker-compose.prod.yml (no reload)
+  --linux  Also apply docker-compose.linux.yml overrides (Linux-only features)
+EOF
+}
 
-# Navigate to backend
-cd /Users/mac/ph-eye/backend
+compose() {
+  if command -v docker-compose >/dev/null 2>&1; then
+    docker-compose "$@"
+  else
+    docker compose "$@"
+  fi
+}
 
-# Activate virtual environment
-source venv/bin/activate
+compose_file="docker-compose.yml"
+include_linux_overrides=false
 
-# Start services in background with nohup
-echo "📡 Starting FastAPI server..."
-nohup uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload > api.log 2>&1 &
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --prod) compose_file="docker-compose.prod.yml" ;;
+    --linux) include_linux_overrides=true ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "Unknown arg: $1"; usage; exit 2 ;;
+  esac
+  shift
+done
 
-echo "⚙️ Starting Celery worker..."
-nohup celery -A app.celery worker --loglevel=info > worker.log 2>&1 &
+files=(-f "$compose_file")
+if [[ "$include_linux_overrides" == "true" && -f docker-compose.linux.yml ]]; then
+  files+=(-f docker-compose.linux.yml)
+fi
 
-echo "⏰ Starting Celery beat..."
-nohup celery -A app.celery beat --loglevel=info > beat.log 2>&1 &
+echo "🚀 Starting PH Eye (Docker Compose)..."
+compose "${files[@]}" up -d redis api worker beat
 
-# Wait for services to start
-sleep 3
-
-echo "✅ PH Eye services started!"
-echo "🌐 API: http://localhost:8000"
-echo "📊 Trends: http://localhost:8000/ml/trends"
-echo "📝 Logs: api.log, worker.log, beat.log"
 echo ""
-echo "To stop services: ./stop_ph_eye.sh"
+echo "✅ Services started"
+echo "🌐 API: http://localhost:8000"
+echo "📱 Frontend: http://localhost:3000 (run ./start_frontend.sh)"

@@ -17,7 +17,9 @@ else
     echo "   ./start_ph_eye.sh"
     echo ""
     echo "   Or with Docker:"
-    echo "   docker-compose up -d"
+    echo "   docker compose up -d redis api worker beat"
+    echo "   # Linux-only (optional overrides):"
+    echo "   docker compose -f docker-compose.yml -f docker-compose.linux.yml up -d redis api worker beat"
     echo ""
     read -p "Continue anyway? (y/N): " -n 1 -r
     echo

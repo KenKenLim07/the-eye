@@ -77,6 +77,13 @@ Frontend (`.env.local`):
 
 2. Start backend services (Redis + API + worker + beat)
 
+```bash
+docker compose up -d redis api worker beat
+
+# Linux-only (optional overrides):
+docker compose -f docker-compose.yml -f docker-compose.linux.yml up -d redis api worker beat
+```
+
 ```powershell
 docker compose up -d redis api worker beat
 ```
@@ -85,13 +92,20 @@ API will be on `http://localhost:8000`.
 
 For a more stable run (no FastAPI hot-reload), use:
 
+```bash
+docker compose -f docker-compose.prod.yml up -d redis api worker beat
+
+# Linux-only (optional overrides):
+docker compose -f docker-compose.prod.yml -f docker-compose.linux.yml up -d redis api worker beat
+```
+
 ```powershell
 docker compose -f docker-compose.prod.yml up -d redis api worker beat
 ```
 
 3. Start the frontend
 
-```powershell
+```bash
 npm install
 npm run dev
 ```
@@ -102,6 +116,12 @@ Frontend will be on `http://localhost:3000`.
 
 Run a minimal API sanity check suite (requires backend running):
 
+```bash
+python3 backend/scripts/smoke_test.py
+# or:
+bash backend/scripts/smoke_test.sh
+```
+
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File backend/scripts/smoke_test.ps1
 ```
@@ -110,9 +130,78 @@ powershell -NoProfile -ExecutionPolicy Bypass -File backend/scripts/smoke_test.p
 
 Runs one scrape task, polls status, then hits key API endpoints:
 
+```bash
+python3 backend/scripts/pipeline_test.py --source inquirer
+# or:
+bash backend/scripts/pipeline_test.sh --source inquirer
+```
+
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File backend/scripts/pipeline_test.ps1 -Source inquirer
 ```
+
+## Manual Scrape (Queue a Scraper Job)
+
+Supported `source` values:
+- `inquirer`
+- `gma`
+- `philstar`
+- `manila_bulletin`
+- `rappler`
+- `sunstar`
+- `manila_times`
+
+Queue a job:
+
+```bash
+curl -s -X POST "http://localhost:8000/scrape/run" \
+  -H "Content-Type: application/json" \
+  -d '{"source":"inquirer"}'
+
+# Queue multiple scrapers at once
+curl -s -X POST "http://localhost:8000/scrape/run" \
+  -H "Content-Type: application/json" \
+  -d '{"sources":["inquirer","gma","philstar","manila_bulletin","rappler","sunstar","manila_times"]}'
+```
+
+```powershell
+$run = Invoke-RestMethod "http://localhost:8000/scrape/run" `
+  -Method Post `
+  -ContentType "application/json" `
+  -Body '{"source":"inquirer"}'
+
+# Queue multiple scrapers at once
+$run = Invoke-RestMethod "http://localhost:8000/scrape/run" `
+  -Method Post `
+  -ContentType "application/json" `
+  -Body '{"sources":["inquirer","gma","philstar","manila_bulletin","rappler","sunstar","manila_times"]}'
+```
+
+Check status (from the response `jobs[0].task_id`):
+
+```bash
+curl -s "http://localhost:8000/scrape/status/<task_id>"
+```
+
+```powershell
+$taskId = $run.jobs[0].task_id
+Invoke-RestMethod "http://localhost:8000/scrape/status/$taskId"
+```
+
+## Why Scrapers Sometimes “Wait” After `docker compose up -d`
+
+By default, scrapers are scheduled by Celery Beat on intervals, so the **first automatic run** can be delayed until the interval is due:
+- `rappler`: every 3600s (1h 00m)
+- `gma`: every 3888s (1h 04m 48s)
+- `philstar`: every 4212s (1h 10m 12s)
+- `inquirer`: every 4500s (1h 15m 00s)
+- `manila_bulletin`: every 4788s (1h 19m 48s)
+- `manila_times`: every 5112s (1h 25m 12s)
+- `sunstar`: every 5400s (1h 30m 00s)
+
+This repo also enables an optional “kickoff” so scrapes run immediately on startup (configured in `docker-compose.yml`):
+- `SCRAPE_ON_STARTUP=true`
+- `SCRAPE_ON_STARTUP_SOURCES=inquirer,gma,philstar,manila_bulletin,rappler,sunstar,manila_times`
 
 ## Legacy Root Tools (Archived)
 
@@ -138,7 +227,7 @@ For thesis demos, you can deploy only the Next.js frontend to Vercel and read pr
    - `backend/scripts/create_demo_analytics_tables.sql`
 2. Keep your home PC (Docker worker) running to scrape/analyze, then write snapshots:
 
-```powershell
+```bash
 docker compose exec worker python scripts/entity_rankings_snapshot.py 7d
 docker compose exec worker python scripts/trends_snapshot.py 7d
 docker compose exec worker python scripts/correlation_snapshot.py 7d
@@ -149,6 +238,10 @@ The frontend will automatically fall back to Supabase snapshots when `NEXT_PUBLI
 ## Supabase Type Safety
 
 Generate/update types:
+
+```bash
+supabase gen types typescript --project-id <PROJECT_ID> --schema public > src/types/database.ts
+```
 
 ```powershell
 supabase gen types typescript --project-id <PROJECT_ID> --schema public | Out-File -Encoding utf8 src/types/database.ts

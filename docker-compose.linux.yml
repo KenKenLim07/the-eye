@@ -1,0 +1,24 @@
+# Linux-only Docker Compose overrides.
+#
+# Use this file only when you need host-level features that Docker Desktop
+# (Windows/macOS) does not support (e.g., `ipc: host`, `sysctls`, host-gateway).
+#
+# Example:
+#   docker compose -f docker-compose.yml -f docker-compose.linux.yml up -d redis api worker beat
+
+services:
+  api:
+    sysctls:
+      - "net.ipv6.conf.all.disable_ipv6=1"
+
+  worker:
+    ipc: host
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    sysctls:
+      - "net.ipv6.conf.all.disable_ipv6=1"
+
+  beat:
+    ipc: host
+    sysctls:
+      - "net.ipv6.conf.all.disable_ipv6=1"

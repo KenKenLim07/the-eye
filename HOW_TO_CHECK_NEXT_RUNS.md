@@ -6,7 +6,7 @@ Since you confirmed scrapers are firing, here's how to monitor when the **next**
 
 ## Method 1: Watch Beat Logs (Easiest & Most Reliable)
 
-```powershell
+```bash
 # Watch beat logs in real-time - you'll see when tasks fire
 docker logs -f ph-eye-beat
 ```
@@ -21,7 +21,7 @@ These messages appear **exactly when** beat schedules a task. The timestamp show
 
 ## Method 2: Check Redis Queue (Real-time)
 
-```powershell
+```bash
 # Check how many tasks are waiting right now
 docker exec ph-eye-redis redis-cli LLEN celery
 
@@ -38,7 +38,7 @@ docker exec -it ph-eye-redis redis-cli MONITOR
 
 The beat schedule file stores when each task last ran. To see next run times:
 
-```powershell
+```bash
 # Copy the check script into container
 docker cp archive/legacy/root_tools/check_next_runs.py ph-eye-beat:/app/backend/
 
@@ -79,7 +79,7 @@ Since you know the intervals, you can calculate:
 
 ## 🎯 Best Practice: Watch in Real-Time
 
-```powershell
+```bash
 # Terminal 1: Watch beat scheduling tasks
 docker logs -f ph-eye-beat
 
@@ -111,7 +111,9 @@ docker exec -it ph-eye-redis redis-cli MONITOR
 Since your shortest interval is **1 hour** (scrape_rappler), you should see tasks firing approximately every hour. The exact timing depends on when beat started and when each task last ran.
 
 **To verify it's working right now:**
-1. Check beat is running: `docker ps | findstr beat`
+1. Check beat is running:
+   - PowerShell: `docker ps | findstr beat`
+   - bash: `docker ps | grep beat`
 2. Check recent activity: `docker logs ph-eye-worker --tail 10`
 3. Wait and watch: `docker logs -f ph-eye-beat` (you'll see tasks fire within the hour)
 # Note (Archived Tools)

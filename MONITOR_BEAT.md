@@ -3,10 +3,16 @@
 ## Quick Status Check
 
 ### 1. **Check Next Scheduled Runs** (Most Important!)
+```bash
+# Run the monitor script
+cd backend
+python3 ../archive/legacy/root_tools/monitor_beat.py
+```
+
 ```powershell
 # Run the monitor script
 cd backend
-python archive/legacy/root_tools/monitor_beat.py
+python ..\archive\legacy\root_tools\monitor_beat.py
 ```
 
 This shows:
@@ -16,7 +22,7 @@ This shows:
 - 📈 Recent task activity
 
 ### 2. **Check Redis Queue** (Real-time)
-```powershell
+```bash
 # See how many tasks are waiting
 docker exec ph-eye-redis redis-cli LLEN celery
 
@@ -25,7 +31,7 @@ docker exec -it ph-eye-redis redis-cli MONITOR
 ```
 
 ### 3. **Watch Beat Logs** (See when tasks fire)
-```powershell
+```bash
 # Follow beat logs in real-time
 docker logs -f ph-eye-beat
 
@@ -34,7 +40,7 @@ docker logs -f ph-eye-beat
 ```
 
 ### 4. **Watch Worker Logs** (See tasks executing)
-```powershell
+```bash
 # Follow worker logs
 docker logs -f ph-eye-worker
 
@@ -57,7 +63,9 @@ Your tasks run at these intervals:
 ## What to Look For
 
 ### ✅ Beat is Working If:
-1. Beat container is running: `docker ps | findstr beat`
+1. Beat container is running:
+   - PowerShell: `docker ps | findstr beat`
+   - bash: `docker ps | grep beat`
 2. Beat logs show "Scheduler: Sending due task..." messages
 3. Worker logs show "Received task..." messages
 4. Queue has tasks (temporarily) when beat fires them
@@ -82,6 +90,17 @@ docker exec ph-eye-redis redis-cli LLEN celery
 
 # See all scheduled tasks and next run times
 cd backend && python ../archive/legacy/root_tools/monitor_beat.py
+```
+
+```bash
+# Check if beat is scheduling
+docker logs ph-eye-beat | grep "Sending"
+
+# Check queue right now
+docker exec ph-eye-redis redis-cli LLEN celery
+
+# See all scheduled tasks and next run times
+cd backend && python3 ../archive/legacy/root_tools/monitor_beat.py
 ```
 # Note (Archived Tools)
 This document references older one-off monitoring scripts that have been moved to `archive/legacy/root_tools/`.

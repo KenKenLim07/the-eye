@@ -1,10 +1,12 @@
 module.exports = {
   apps: [
     {
+      // Optional: PM2 config for non-Docker deployments.
+      // This repo’s supported dev workflow is Docker Compose; keep this file as an example only.
       name: 'ph-eye-api',
-      script: '/Users/mac/ph-eye/backend/venv/bin/uvicorn',
+      script: 'uvicorn',
       args: 'app.main:app --host 0.0.0.0 --port 8000',
-      cwd: '/Users/mac/ph-eye/backend',
+      cwd: './backend',
       autorestart: true,
       watch: false,
       max_memory_restart: '1G',
@@ -14,9 +16,9 @@ module.exports = {
     },
     {
       name: 'ph-eye-worker',
-      script: '/Users/mac/ph-eye/backend/venv/bin/celery',
-      args: '-A app.celery worker --loglevel=info',
-      cwd: '/Users/mac/ph-eye/backend',
+      script: 'celery',
+      args: '-A app.workers.celery_app:celery worker -l info -n worker1@%h -c 4 -Ofair',
+      cwd: './backend',
       autorestart: true,
       watch: false,
       env: {
@@ -25,9 +27,9 @@ module.exports = {
     },
     {
       name: 'ph-eye-beat',
-      script: '/Users/mac/ph-eye/backend/venv/bin/celery',
-      args: '-A app.celery beat --loglevel=info',
-      cwd: '/Users/mac/ph-eye/backend',
+      script: 'celery',
+      args: '-A app.workers.celery_app:celery beat --loglevel=info',
+      cwd: './backend',
       autorestart: true,
       watch: false,
       env: {
