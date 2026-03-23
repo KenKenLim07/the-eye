@@ -340,19 +340,19 @@ export default async function Home() {
 
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 sm:gap-3">
             <Card>
-              <CardContent className="p-3 sm:p-4">
+              <CardContent className="p-2.5 sm:p-4">
                 <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">Total</div>
                 <div className="u-serif text-xl sm:text-3xl font-semibold tabular-nums">{stats.total_articles.toLocaleString()}</div>
               </CardContent>
             </Card>
             <Card>
-              <CardContent className="p-3 sm:p-4">
+              <CardContent className="p-2.5 sm:p-4">
                 <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">24h</div>
                 <div className="u-serif text-xl sm:text-3xl font-semibold tabular-nums">{stats.articles_last_24h.toLocaleString()}</div>
               </CardContent>
             </Card>
             <Card>
-              <CardContent className="p-3 sm:p-4">
+              <CardContent className="p-2.5 sm:p-4">
                 <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">Sources</div>
                 <div className="u-serif text-xl sm:text-3xl font-semibold tabular-nums">7</div>
                 <div className="hidden sm:block text-xs text-muted-foreground mt-1">
@@ -361,7 +361,7 @@ export default async function Home() {
               </CardContent>
             </Card>
             <Card>
-              <CardContent className="p-3 sm:p-4">
+              <CardContent className="p-2.5 sm:p-4">
                 <div className="flex items-center justify-between gap-2">
                   <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">Coverage (7d)</div>
                   <span

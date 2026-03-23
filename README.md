@@ -112,6 +112,16 @@ npm run dev
 
 Frontend will be on `http://localhost:3000`.
 
+Optional:
+
+```bash
+# Faster dev server (Turbopack). If you get missing-chunk errors, run `npm run clean:next` then retry.
+npm run dev:turbopack
+
+# Clear Next build/dev cache
+npm run clean:next
+```
+
 ## Smoke Test (Backend)
 
 Run a minimal API sanity check suite (requires backend running):

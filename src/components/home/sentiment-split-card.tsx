@@ -22,9 +22,9 @@ export default function SentimentSplitCard({ positive, neutral, negative, unlabe
 
   return (
     <Card>
-      <CardContent className="p-3 sm:p-4 space-y-2">
+      <CardContent className="p-2.5 sm:p-4 space-y-2">
         <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">Sentiment (visible)</div>
-        <div className="u-serif text-2xl sm:text-3xl font-semibold tabular-nums">{total.toLocaleString()}</div>
+        <div className="u-serif text-xl sm:text-3xl font-semibold tabular-nums">{total.toLocaleString()}</div>
 
         <div className="h-2 w-full rounded-full overflow-hidden border bg-muted" aria-label="Sentiment split bar">
           <div className="h-full flex">
@@ -45,4 +45,3 @@ export default function SentimentSplitCard({ positive, neutral, negative, unlabe
     </Card>
   );
 }
-
