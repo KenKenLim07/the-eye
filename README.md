@@ -150,6 +150,15 @@ bash backend/scripts/pipeline_test.sh --source inquirer
 powershell -NoProfile -ExecutionPolicy Bypass -File backend/scripts/pipeline_test.ps1 -Source inquirer
 ```
 
+## Timezone Sanity Check
+
+If dates look “late/early” on some devices, verify that your DB/API is returning timezone-aware timestamps:
+
+- Open `/api/debug/env` (local and Vercel) and check:
+  - `latest_article_*_has_tz` should be `true`
+  - `intl_supports_asia_manila` should be `true` (or the UI will fall back to deterministic Manila formatting)
+- Open `/api/articles?pageSize=1` and confirm `published_at` / `inserted_at` end with `Z` or `+00:00` (not a bare `YYYY-MM-DDTHH:mm:ss`).
+
 ## Manual Scrape (Queue a Scraper Job)
 
 Supported `source` values:
