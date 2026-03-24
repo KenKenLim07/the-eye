@@ -8,6 +8,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import HomeControlBar from "@/components/home/control-bar";
 import LatestFeed from "@/components/home/latest-feed";
 import SentimentSplitCard from "@/components/home/sentiment-split-card";
+import { formatDateTime } from "@/lib/utils/date";
 
 // In production we often run without a deployed backend; force dynamic so Supabase reads happen at request-time
 // instead of being snapshotted during build (which can result in a "blank" homepage until the next revalidate).
@@ -330,11 +331,11 @@ export default async function Home() {
             <div className="space-y-1">
               <div className="u-serif text-xl sm:text-2xl font-semibold tracking-tight">Today’s pulse</div>
               <div className="sm:hidden text-xs text-muted-foreground">
-                {stats.last_updated ? `Updated ${new Date(stats.last_updated).toLocaleString()}` : ""}
+                {stats.last_updated ? `Updated ${formatDateTime(stats.last_updated)}` : ""}
               </div>
             </div>
             <div className="hidden sm:block text-xs text-muted-foreground">
-              {stats.last_updated ? `Updated ${new Date(stats.last_updated).toLocaleString()}` : ""}
+              {stats.last_updated ? `Updated ${formatDateTime(stats.last_updated)}` : ""}
             </div>
           </div>
 

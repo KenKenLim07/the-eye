@@ -66,6 +66,9 @@ export function ArticleCardsInteractive({ articles }: ArticleCardsInteractivePro
                   <Badge variant="outline" className="u-mono uppercase tracking-widest text-[10px]">{a.source}</Badge>
                   {a.category && <Badge variant="secondary" className="u-mono uppercase tracking-widest text-[10px]">{a.category}</Badge>}
                   <Badge variant="outline" className="u-mono uppercase tracking-widest text-[10px]">{formatDate(a.published_at)}</Badge>
+                  <span className="u-mono text-[10px] tracking-widest text-muted-foreground/70" title={`Article ID ${a.id}`}>
+                    #{a.id}
+                  </span>
                 </div>
               </CardHeader>
                
@@ -110,6 +113,9 @@ export function ArticleCardsInteractive({ articles }: ArticleCardsInteractivePro
                   <Badge variant="outline" className="u-mono uppercase tracking-widest text-[10px]">{a.source}</Badge>
                   {a.category && <Badge variant="secondary" className="u-mono uppercase tracking-widest text-[10px]">{a.category}</Badge>}
                   <Badge variant="outline" className="u-mono uppercase tracking-widest text-[10px]">{formatDate(a.published_at)}</Badge>
+                  <span className="u-mono text-[10px] tracking-widest text-muted-foreground/70" title={`Article ID ${a.id}`}>
+                    #{a.id}
+                  </span>
                   {sentiment && (
                     <Badge variant="outline" className={`u-mono uppercase tracking-widest text-[10px] ${sentimentClass(sentiment)}`}>
                       {sentiment}

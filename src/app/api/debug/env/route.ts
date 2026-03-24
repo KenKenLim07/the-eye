@@ -20,7 +20,7 @@ function supportsManilaTZ(): boolean {
   }
 }
 
-export async function GET() {
+export async function GET(req: Request) {
   const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "";
   const now = Date.now();
   const iso7d = new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString();
@@ -54,6 +54,11 @@ export async function GET() {
 
   return NextResponse.json({
     node_env: process.env.NODE_ENV ?? null,
+    vercel_git_commit_sha: process.env.VERCEL_GIT_COMMIT_SHA ?? null,
+    vercel_deployment_id: process.env.VERCEL_DEPLOYMENT_ID ?? null,
+    vercel_region: process.env.VERCEL_REGION ?? null,
+    request_user_agent: req.headers.get("user-agent") ?? null,
+    request_accept_language: req.headers.get("accept-language") ?? null,
     next_public_supabase_url_host: safeHost(process.env.NEXT_PUBLIC_SUPABASE_URL),
     next_public_backend_url_host: safeHost(backendUrl),
     intl_supports_asia_manila: supportsManilaTZ(),
@@ -65,4 +70,3 @@ export async function GET() {
     coverage_error,
   });
 }
-

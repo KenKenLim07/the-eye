@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Menu, Moon, Search, Sun } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetClose, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import { formatDateTime } from "@/lib/utils/date";
 
 export default function Navigation() {
   const pathname = usePathname();
@@ -31,15 +32,13 @@ export default function Navigation() {
   useEffect(() => {
     let cancelled = false;
     // Lightweight “as of” indicator for demo polish (Supabase-backed API route).
-    fetch("/api/articles?pageSize=1")
+    fetch("/api/articles?pageSize=1", { cache: "no-store" })
       .then((r) => r.json())
       .then((json) => {
         if (cancelled) return;
         const ts = json?.data?.[0]?.published_at as string | null | undefined;
         if (!ts) return;
-        const d = new Date(ts);
-        if (Number.isNaN(d.getTime())) return;
-        setLastUpdated(d.toLocaleString());
+        setLastUpdated(ts);
       })
       .catch(() => {});
     return () => {
@@ -104,7 +103,7 @@ export default function Navigation() {
           <div className="flex items-center gap-2 sm:gap-3">
             {lastUpdated && (
               <div className="hidden lg:block u-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-                As of {lastUpdated}
+                As of {formatDateTime(lastUpdated)}
               </div>
             )}
 
@@ -227,7 +226,7 @@ export default function Navigation() {
                   {lastUpdated && (
                     <div className="mt-6 pt-4 border-t">
                       <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-                        As of {lastUpdated}
+                        As of {formatDateTime(lastUpdated)}
                       </div>
                     </div>
                   )}

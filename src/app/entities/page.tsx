@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Loader2, RefreshCw } from "lucide-react";
+import { formatDateTime } from "@/lib/utils/date";
 import { supabase } from "@/lib/supabase/client";
 
 interface NerEntity {
@@ -370,7 +371,7 @@ export default function EntitiesPage() {
             <CardHeader>
             <CardTitle>Top Entities (NER + Sentiment)</CardTitle>
             <CardDescription>
-              {computedAt ? `Snapshot: ${new Date(computedAt).toLocaleString()}. ` : ""}
+              {computedAt ? `Snapshot: ${formatDateTime(computedAt)}. ` : ""}
               Sampled: {sampled} / {totalCapped ?? totalCap}
               {typeof totalAvailable === "number" ? ` (available: ${totalAvailable})` : ""}
               {sampleCap > 0 && sampled >= sampleCap && (totalCapped ?? totalCap) > sampleCap ? `, capped at ${sampleCap}` : ""}

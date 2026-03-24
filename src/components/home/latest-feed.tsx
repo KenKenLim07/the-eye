@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import type { Article } from "@/lib/types";
-import { formatDateTime } from "@/lib/utils/date";
+import { formatDateTime, toMillis } from "@/lib/utils/date";
 import { cn } from "@/lib/utils";
 import type { CSSProperties } from "react";
 import { ExternalLink } from "lucide-react";
@@ -12,12 +12,6 @@ type Props = {
 };
 
 type CSSVarProperties = CSSProperties & Record<`--${string}`, string | number>;
-
-function toMillis(s: string | null): number {
-  if (!s) return 0;
-  const d = new Date(s);
-  return Number.isNaN(d.getTime()) ? 0 : d.getTime();
-}
 
 function formatAgeShort(publishedAt: string | null, nowMs: number): string {
   const t = toMillis(publishedAt);
@@ -96,6 +90,12 @@ export default function LatestFeed({ articles, limit = 15 }: Props) {
                       ) : null}
                       <span className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground" title={abs}>
                         {age}
+                      </span>
+                      <span
+                        className="u-mono text-[10px] tracking-widest text-muted-foreground/70"
+                        title={`Article ID ${a.id}`}
+                      >
+                        #{a.id}
                       </span>
                       <Badge className={cn("capitalize", s.className)}>{s.label}</Badge>
                     </div>

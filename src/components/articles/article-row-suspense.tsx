@@ -102,7 +102,12 @@ async function ArticleRowContent({ sourceValue, title, limit = 20 }: ArticleRowS
                       {a.source} • {a.category || "Uncategorized"}
                     </CardDescription>
                   </div>
-                  <Badge variant="outline">{formatDate(a.published_at)}</Badge>
+                  <div className="flex flex-col items-end gap-1">
+                    <Badge variant="outline">{formatDate(a.published_at)}</Badge>
+                    <div className="u-mono text-[10px] tracking-widest text-muted-foreground/70" title={`Article ID ${a.id}`}>
+                      #{a.id}
+                    </div>
+                  </div>
                 </div>
               </CardHeader>
               <CardContent>
