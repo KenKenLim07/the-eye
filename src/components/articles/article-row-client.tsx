@@ -88,7 +88,7 @@ export default function ArticleRowClient({
         <div className="flex items-center gap-2">
           <Badge variant="secondary">{articles?.length ?? 0}</Badge>
           {isRefreshing && (
-            <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+            <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" aria-label="Refreshing" />
           )}
         </div>
       </div>
@@ -104,7 +104,7 @@ export default function ArticleRowClient({
               <pre className="text-xs whitespace-pre-wrap break-words">{JSON.stringify(error, null, 2)}</pre>
               <button 
                 onClick={handleRefresh}
-                className="text-sm text-blue-600 hover:text-blue-800 underline"
+                className="text-sm text-primary hover:opacity-80 underline underline-offset-4"
               >
                 Try again
               </button>
@@ -120,7 +120,7 @@ export default function ArticleRowClient({
           <CardContent>
             <button 
               onClick={handleRefresh}
-              className="text-sm text-blue-600 hover:text-blue-800 underline"
+              className="text-sm text-primary hover:opacity-80 underline underline-offset-4"
             >
               Refresh
             </button>

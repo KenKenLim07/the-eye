@@ -61,7 +61,7 @@ export default function RootLayout({
         />
       </head>
       <body
-        className={`${fontBody.variable} ${fontHead.variable} ${fontCode.variable} antialiased`}
+        className={`${fontBody.variable} ${fontHead.variable} ${fontCode.variable} antialiased font-sans`}
         suppressHydrationWarning={true}
       >
         {children}

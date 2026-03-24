@@ -45,14 +45,14 @@ export default function LatestFeed({ articles, limit = 15 }: Props) {
     <div className="space-y-3">
       <div className="flex items-end justify-between gap-3">
         <div className="space-y-1">
-          <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">Latest</div>
-          <h2 className="u-serif text-lg sm:text-2xl font-semibold tracking-tight">Latest</h2>
+          <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">Just in</div>
+          <h2 className="font-sans text-lg sm:text-2xl font-semibold tracking-tight">What’s happening now</h2>
         </div>
         <Link
           href={{ pathname: "/search", query: { sort: "newest" } }}
           className="text-sm border rounded-md px-3 py-2 bg-card hover:bg-accent/5 transition-colors min-h-[44px] inline-flex items-center"
         >
-          View more
+          Browse all
         </Link>
       </div>
 

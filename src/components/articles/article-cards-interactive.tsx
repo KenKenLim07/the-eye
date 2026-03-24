@@ -28,10 +28,20 @@ export function ArticleCardsInteractive({ articles }: ArticleCardsInteractivePro
   const items = useMemo(() => articles ?? [], [articles]);
   type StaggerStyle = CSSProperties & { ["--i"]?: number };
 
-  const sentimentClass = (s: string) => {
-    if (s === "positive") return "bg-emerald-600 text-white border-transparent";
-    if (s === "negative") return "bg-primary text-primary-foreground border-transparent";
-    return "bg-muted text-foreground border-transparent";
+  const sentimentLabelShort = (s: string) => {
+    const v = (s || "").toLowerCase();
+    if (v === "positive") return "POS";
+    if (v === "negative") return "NEG";
+    if (v === "neutral") return "NEU";
+    return "UNK";
+  };
+
+  const sentimentClass = (s: string | null | undefined) => {
+    const v = (s || "").toLowerCase();
+    if (v === "positive") return "bg-emerald-600 text-white border-transparent";
+    if (v === "negative") return "bg-primary text-primary-foreground border-transparent";
+    if (v === "neutral") return "bg-slate-700 text-white border-transparent dark:bg-slate-500";
+    return "bg-muted text-muted-foreground border-border";
   };
 
   return (
@@ -39,36 +49,63 @@ export function ArticleCardsInteractive({ articles }: ArticleCardsInteractivePro
       {items.map((a, idx) => {
         const numericId = Number(a.id);
         const sentiment = a.sentiment;
+        const sentimentFullLabel = sentiment || "unlabeled";
         const staggerStyle: StaggerStyle = { ["--i"]: idx };
 
         return (
-          <div key={a.id} className="group u-stagger-item" style={staggerStyle}>
-            <Card className="transition-[transform,box-shadow,border-color] duration-200 hover:shadow-md hover:-translate-y-[1px] border-border/70">
+          <div
+            key={a.id}
+            className="group u-stagger-item flex-none w-[280px] sm:w-[320px] lg:w-[360px]"
+            style={staggerStyle}
+          >
+            <Card className="h-full transition-[transform,box-shadow,border-color] duration-200 hover:shadow-md hover:-translate-y-[1px] border-border/70">
               <CardHeader className="pb-3">
-                <div className="flex items-start justify-between gap-2">
-                  <CardTitle className="u-serif text-lg leading-tight line-clamp-2 group-hover:text-accent transition-colors flex-1">
-                    {a.title}
-                  </CardTitle>
-                   
-                  {/* VADER sentiment badge in top right */}
-                  {sentiment && (
-                    <Badge 
-                      variant="outline"
-                      className={`shrink-0 text-[10px] u-mono uppercase tracking-widest ${sentimentClass(sentiment)}`}
+                <div className="flex items-start justify-between gap-2 min-w-0">
+                  <div className="min-w-0 flex-1 space-y-2">
+                    {/* Metadata badges */}
+                    <div className="flex items-center gap-2 flex-wrap text-xs text-muted-foreground">
+                      <Badge variant="outline" className="u-mono uppercase tracking-widest text-[10px]">
+                        {a.source}
+                      </Badge>
+                      {a.category && (
+                        <Badge variant="secondary" className="u-mono uppercase tracking-widest text-[10px]">
+                          {a.category}
+                        </Badge>
+                      )}
+                      <Badge variant="outline" className="u-mono uppercase tracking-widest text-[10px]">
+                        {formatDate(a.published_at)}
+                      </Badge>
+                      <span className="u-mono text-[10px] tracking-widest text-muted-foreground/70" title={`Article ID ${a.id}`}>
+                        #{a.id}
+                      </span>
+                    </div>
+
+                    <CardTitle
+                      className={[
+                        "u-serif text-[15px] sm:text-lg leading-tight",
+                        "line-clamp-3 sm:line-clamp-2",
+                        "break-words hyphens-auto",
+                        "group-hover:text-accent transition-colors",
+                      ].join(" ")}
+                      title={a.title}
                     >
-                      {sentiment}
-                    </Badge>
-                  )}
-                </div>
-                
-                {/* Metadata badges below title */}
-                <div className="flex items-center gap-2 flex-wrap text-xs text-muted-foreground">
-                  <Badge variant="outline" className="u-mono uppercase tracking-widest text-[10px]">{a.source}</Badge>
-                  {a.category && <Badge variant="secondary" className="u-mono uppercase tracking-widest text-[10px]">{a.category}</Badge>}
-                  <Badge variant="outline" className="u-mono uppercase tracking-widest text-[10px]">{formatDate(a.published_at)}</Badge>
-                  <span className="u-mono text-[10px] tracking-widest text-muted-foreground/70" title={`Article ID ${a.id}`}>
-                    #{a.id}
-                  </span>
+                      {a.title}
+                    </CardTitle>
+                  </div>
+
+                  {/* VADER sentiment badge */}
+                  <Badge
+                    variant="outline"
+                    className={[
+                      "shrink-0 text-[10px] u-mono uppercase",
+                      "tracking-wide px-2 py-0.5",
+                      sentimentClass(sentiment),
+                    ].join(" ")}
+                    title={`VADER sentiment: ${sentimentFullLabel}`}
+                    aria-label={`VADER sentiment ${sentimentFullLabel}`}
+                  >
+                    {sentimentLabelShort(sentimentFullLabel)}
+                  </Badge>
                 </div>
               </CardHeader>
                
@@ -117,7 +154,11 @@ export function ArticleCardsInteractive({ articles }: ArticleCardsInteractivePro
                     #{a.id}
                   </span>
                   {sentiment && (
-                    <Badge variant="outline" className={`u-mono uppercase tracking-widest text-[10px] ${sentimentClass(sentiment)}`}>
+                    <Badge
+                      variant="outline"
+                      className={`u-mono uppercase tracking-wide text-[10px] ${sentimentClass(sentiment)}`}
+                      title={`VADER sentiment: ${sentiment}`}
+                    >
                       {sentiment}
                     </Badge>
                   )}

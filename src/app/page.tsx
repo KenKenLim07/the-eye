@@ -313,12 +313,14 @@ export default async function Home() {
   return (
     <MainLayout>
       <div className="space-y-8 mt-10">
-        <div className="text-center space-y-2">
-          <h1 className="u-serif text-4xl font-semibold tracking-tight">Philippine News</h1>
-          <p className="text-sm text-muted-foreground">
-            Latest headlines aggregated from top PH news sources
+        <header className="max-w-4xl mx-auto px-1">
+          <h1 className="u-serif text-4xl sm:text-6xl font-bold tracking-tight leading-[1.02]">
+            Today in the Philippines
+          </h1>
+          <p className="text-sm sm:text-base text-muted-foreground mt-2 max-w-prose">
+            Headlines from top PH news sources—updated continuously, with sentiment and trends.
           </p>
-        </div>
+        </header>
 
         <div className="max-w-4xl mx-auto">
           <HomeControlBar sources={canonicalOrder} lastUpdated={stats.last_updated} />
@@ -330,7 +332,8 @@ export default async function Home() {
         <div className="space-y-4">
           <div className="flex items-end justify-between gap-3">
             <div className="space-y-1">
-              <div className="u-serif text-xl sm:text-2xl font-semibold tracking-tight">Today’s pulse</div>
+              <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">Snapshot</div>
+              <div className="font-sans text-xl sm:text-2xl font-semibold tracking-tight">Today’s pulse</div>
               <div className="sm:hidden text-xs text-muted-foreground">
                 {stats.last_updated ? `Updated ${formatDateTime(stats.last_updated)}` : ""}
               </div>
