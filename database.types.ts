@@ -224,27 +224,7 @@ export type Database = {
       }
     }
     Views: {
-      mv_sentiment_daily: {
-        Row: {
-          articles: number | null
-          avg_sentiment: number | null
-          day: string | null
-          neg: number | null
-          neu: number | null
-          pos: number | null
-          source: string | null
-        }
-        Relationships: []
-      }
-      v_article_counts_weekly: {
-        Row: {
-          category: string | null
-          n: number | null
-          source: string | null
-          week: string | null
-        }
-        Relationships: []
-      }
+      [_ in never]: never
     }
     Functions: {
       [_ in never]: never

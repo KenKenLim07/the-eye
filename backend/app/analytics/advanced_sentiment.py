@@ -8,6 +8,7 @@ import pandas as pd
 from typing import Dict, List, Any, Tuple, Optional
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 import json
 import re
 from collections import defaultdict, Counter
@@ -16,6 +17,8 @@ from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_squared_error, r2_score
 import warnings
 warnings.filterwarnings('ignore')
+
+PH_TZ = ZoneInfo("Asia/Manila")
 
 @dataclass
 class SentimentPrediction:
@@ -128,7 +131,7 @@ class AdvancedSentimentAnalyzer:
         # Next week forecast
         next_week_forecast = {}
         for i, pred in enumerate(predictions):
-            day_name = (datetime.now() + timedelta(days=i+1)).strftime('%A')
+            day_name = (datetime.now(PH_TZ) + timedelta(days=i+1)).strftime('%A')
             next_week_forecast[day_name] = float(pred)
         
         # Key factors analysis
@@ -583,4 +586,3 @@ class AdvancedSentimentAnalyzer:
             return 0.80  # Medium power
         else:
             return 0.50  # Low power
-

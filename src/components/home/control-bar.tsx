@@ -27,7 +27,7 @@ export default function HomeControlBar({ sources, lastUpdated }: Props) {
 
         <div className="flex items-center justify-between md:justify-end gap-3">
           <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-            {lastUpdated ? `As of ${formatDateTime(lastUpdated)}` : ""}
+            {lastUpdated ? `Updated ${formatDateTime(lastUpdated)}` : ""}
           </div>
         </div>
       </div>

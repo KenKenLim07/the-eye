@@ -36,7 +36,9 @@ export default function Navigation() {
       .then((r) => r.json())
       .then((json) => {
         if (cancelled) return;
-        const ts = json?.data?.[0]?.published_at as string | null | undefined;
+        // Use ingestion time (inserted_at) for “freshness” so it reflects scraper activity,
+        // not just when the source claims it was published.
+        const ts = json?.data?.[0]?.inserted_at as string | null | undefined;
         if (!ts) return;
         setLastUpdated(ts);
       })
@@ -103,7 +105,7 @@ export default function Navigation() {
           <div className="flex items-center gap-2 sm:gap-3">
             {lastUpdated && (
               <div className="hidden lg:block u-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-                As of {formatDateTime(lastUpdated)}
+                Updated {formatDateTime(lastUpdated)}
               </div>
             )}
 
@@ -226,7 +228,7 @@ export default function Navigation() {
                   {lastUpdated && (
                     <div className="mt-6 pt-4 border-t">
                       <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-                        As of {formatDateTime(lastUpdated)}
+                        Updated {formatDateTime(lastUpdated)}
                       </div>
                     </div>
                   )}

@@ -8,7 +8,7 @@ from playwright.sync_api import Browser
 from bs4 import BeautifulSoup
 from app.pipeline.normalize import build_article, NormalizedArticle
 from app.scrapers.base import launch_browser
-from datetime import datetime
+from datetime import datetime, timezone
 import re
 import urllib.request
 import json
@@ -273,7 +273,7 @@ class SunstarScraper:
                             from email.utils import parsedate_to_datetime
                             published_at = parsedate_to_datetime(pub_date_elem.text).isoformat()
                         except:
-                            published_at = datetime.now().isoformat()
+                            published_at = datetime.now(timezone.utc).isoformat()
 
                     # Prefer URL-derived category; fall back to RSS-provided category
                     rss_category = None
@@ -523,7 +523,7 @@ class SunstarScraper:
         
         metadata = {
             "source": "Sunstar",
-            "scraped_at": datetime.now().isoformat(),
+            "scraped_at": datetime.now(timezone.utc).isoformat(),
             "total_articles_found": len(all_articles),
             "unique_articles": len(final_articles),
             "rss_articles": len(rss_articles),

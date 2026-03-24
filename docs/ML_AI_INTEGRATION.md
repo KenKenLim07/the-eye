@@ -78,10 +78,16 @@ CREATE INDEX IF NOT EXISTS idx_pred_scope ON pattern_predictions(scope_type, sco
 CREATE INDEX IF NOT EXISTS idx_pred_horizon ON pattern_predictions(horizon);
 ```
 
-Optional view to avoid client-side aggregation loops:
+Optional view to avoid client-side aggregation loops (legacy):
+
+Note: views/materialized views that depend on `articles.published_at` will block schema migrations
+(e.g., converting `published_at` from `timestamp` → `timestamptz`). Drop dependent views before
+altering the column type, then recreate if you still need them.
+
+If `published_at` is `timestamptz` and you want “PH week” bucketing, truncate in Asia/Manila:
 ```sql
 CREATE OR REPLACE VIEW v_article_counts_weekly AS
-SELECT DATE_TRUNC('week', published_at) AS week,
+SELECT DATE_TRUNC('week', timezone('Asia/Manila', published_at)) AS week_pht,
        source,
        category,
        COUNT(*) AS n

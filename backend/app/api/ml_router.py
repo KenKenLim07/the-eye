@@ -2,7 +2,7 @@ import json
 import os
 import subprocess
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo
 
@@ -381,7 +381,8 @@ async def ner_sample(
     """
     try:
         sb = get_supabase()
-        end_dt = datetime.now()
+        # Use aware UTC timestamps so PostgREST/Postgres interpret bounds consistently.
+        end_dt = datetime.now(timezone.utc)
         start_dt = end_dt - timedelta(days=days_back)
         q = (
             sb.table("articles")

@@ -66,7 +66,8 @@ async function fetchHomeStatsFromSupabase(): Promise<HomeStats> {
   ] = await Promise.all([
     supabaseServer.from("articles").select("id", { count: "exact", head: true }),
     supabaseServer.from("articles").select("id", { count: "exact", head: true }).gte("published_at", iso24h),
-    supabaseServer.from("articles").select("published_at").order("published_at", { ascending: false }).limit(1),
+    // For “freshness”, prefer ingestion time over source-reported publish time.
+    supabaseServer.from("articles").select("inserted_at").order("inserted_at", { ascending: false }).limit(1),
     supabaseServer.from("articles").select("id", { count: "exact", head: true }).gte("published_at", iso7d),
     // `bias_analysis` is not publicly readable under typical Supabase RLS, so compute
     // coverage using the public per-article sentiment cache table.
@@ -78,7 +79,7 @@ async function fetchHomeStatsFromSupabase(): Promise<HomeStats> {
 
   const total_articles = totalRes.count ?? 0;
   const articles_last_24h = last24hRes.count ?? 0;
-  const last_updated = (lastUpdatedRes.data?.[0]?.published_at as string | null | undefined) ?? null;
+  const last_updated = (lastUpdatedRes.data?.[0]?.inserted_at as string | null | undefined) ?? null;
 
   const articles_last_7d = articles7dRes.count ?? null;
   let sentiment_rows_last_7d = sentimentCoverage7dRes.count ?? null;
