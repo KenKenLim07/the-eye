@@ -4,6 +4,7 @@ import { supabaseServer, supabaseServerUntyped } from "@/lib/supabase/server";
 import { ArticleCardsInteractive } from "@/components/articles/article-cards-interactive";
 import MainLayout from "@/components/layout/main-layout";
 import { SearchHeader } from "@/components/search/search-header";
+import type { Article } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -115,9 +116,9 @@ export default async function SearchPage({ searchParams }: { searchParams: Searc
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   // Enrich with demo-mode sentiment badges (public table) for nicer UI on Vercel.
-  const rows = (data as Array<{ id: number | string }> | null) || [];
-  let enriched = rows || [];
-  if (rows && rows.length > 0) {
+  const rows = ((data as Article[] | null) || []) as Article[];
+  let enriched: Article[] = rows;
+  if (rows.length > 0) {
     try {
       const ids = rows.map((a) => Number(a.id)).filter(Boolean);
       const sentimentById: Record<number, string | null> = {};

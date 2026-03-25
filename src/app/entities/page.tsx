@@ -320,7 +320,7 @@ export default function EntitiesPage() {
         </div>
 
         <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
-          <div className="flex gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full sm:w-auto">
             <div className="flex flex-col gap-2">
               <label className="text-sm font-medium">Source</label>
               <Select
@@ -328,7 +328,7 @@ export default function EntitiesPage() {
                 onValueChange={(v) => startTransition(() => setSelectedSource(v))}
                 disabled={loading || isPending || useSnapshots}
               >
-                <SelectTrigger className="w-[180px]">
+                <SelectTrigger className="w-full sm:w-[180px]">
                   <SelectValue placeholder="Select source" />
                 </SelectTrigger>
                 <SelectContent>
@@ -347,7 +347,7 @@ export default function EntitiesPage() {
                 onValueChange={(v) => startTransition(() => setSelectedPeriod(v))}
                 disabled={loading || isPending}
               >
-                <SelectTrigger className="w-[180px]">
+                <SelectTrigger className="w-full sm:w-[180px]">
                   <SelectValue placeholder="Select period" />
                 </SelectTrigger>
                 <SelectContent>
@@ -361,7 +361,7 @@ export default function EntitiesPage() {
             </div>
           </div>
 
-          <Button onClick={() => load(true)} variant="outline" size="sm" disabled={loading || refreshing}>
+          <Button onClick={() => load(true)} variant="outline" size="sm" disabled={loading || refreshing} className="w-full sm:w-auto">
             {(loading || refreshing) ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
             Refresh
           </Button>
@@ -370,7 +370,7 @@ export default function EntitiesPage() {
         <Card>
             <CardHeader>
             <CardTitle>Top Entities (NER + Sentiment)</CardTitle>
-            <CardDescription>
+            <CardDescription className="break-words">
               {computedAt ? `Snapshot: ${formatDateTime(computedAt)}. ` : ""}
               Sampled: {sampled} / {totalCapped ?? totalCap}
               {typeof totalAvailable === "number" ? ` (available: ${totalAvailable})` : ""}
@@ -387,25 +387,30 @@ export default function EntitiesPage() {
             ) : rows.length === 0 ? (
               <div className="text-sm text-muted-foreground py-6">No entity data available for the selected filter.</div>
             ) : (
-              <div className="overflow-auto">
-                <table className="min-w-full text-sm">
+              <div className="overflow-x-auto -mx-2 px-2 sm:mx-0 sm:px-0">
+                <table className="w-full text-sm">
                   <thead className="sticky top-0 bg-card/90 backdrop-blur border-b">
                     <tr>
-                      <th className="text-left p-2 u-mono text-[10px] uppercase tracking-widest text-muted-foreground">Rank</th>
+                      <th className="text-left p-2 u-mono text-[10px] uppercase tracking-widest text-muted-foreground w-14">Rank</th>
                       <th className="text-left p-2 u-mono text-[10px] uppercase tracking-widest text-muted-foreground">Entity</th>
-                      <th className="text-left p-2 u-mono text-[10px] uppercase tracking-widest text-muted-foreground">Type</th>
-                      <th className="text-right p-2 u-mono text-[10px] uppercase tracking-widest text-muted-foreground">Mentions</th>
-                      <th className="text-right p-2 u-mono text-[10px] uppercase tracking-widest text-muted-foreground">Avg</th>
+                      <th className="hidden sm:table-cell text-left p-2 u-mono text-[10px] uppercase tracking-widest text-muted-foreground w-24">Type</th>
+                      <th className="text-right p-2 u-mono text-[10px] uppercase tracking-widest text-muted-foreground w-24">Mentions</th>
+                      <th className="hidden sm:table-cell text-right p-2 u-mono text-[10px] uppercase tracking-widest text-muted-foreground w-24">Avg</th>
                     </tr>
                   </thead>
                   <tbody>
                     {rows.map((e, idx) => (
                       <tr key={`${e.text}:${e.type}:${idx}`} className={`border-t ${idx % 2 === 0 ? "bg-transparent" : "bg-muted/30"}`}>
                         <td className="p-2 u-mono text-[11px] text-muted-foreground">{idx + 1}</td>
-                        <td className="p-2 font-medium">{e.text}</td>
-                        <td className="p-2 text-muted-foreground u-mono text-[11px] uppercase tracking-widest">{e.type}</td>
+                        <td className="p-2 font-medium break-words">
+                          <div>{e.text}</div>
+                          <div className="sm:hidden mt-0.5 u-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+                            {e.type}
+                          </div>
+                        </td>
+                        <td className="hidden sm:table-cell p-2 text-muted-foreground u-mono text-[11px] uppercase tracking-widest">{e.type}</td>
                         <td className="p-2 text-right u-mono text-[11px]">{e.mentions}</td>
-                        <td className="p-2 text-right u-mono text-[11px] text-muted-foreground">
+                        <td className="hidden sm:table-cell p-2 text-right u-mono text-[11px] text-muted-foreground">
                           {typeof e.avg_sentiment === "number" ? e.avg_sentiment.toFixed(3) : "-"}
                         </td>
                       </tr>

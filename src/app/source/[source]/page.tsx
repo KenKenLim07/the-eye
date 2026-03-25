@@ -5,6 +5,7 @@ import { supabaseServer, supabaseServerUntyped } from "@/lib/supabase/server";
 import { ArticleCardsInteractive } from "@/components/articles/article-cards-interactive";
 import MainLayout from "@/components/layout/main-layout";
 import { SearchHeader } from "@/components/search/search-header";
+import type { Article } from "@/lib/types";
 
 interface PageProps {
   params: Promise<{ source: string }>;
@@ -94,9 +95,9 @@ export default async function SourcePage({ params, searchParams }: PageProps) {
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   // Enrich with demo-mode sentiment badges (public table). Non-fatal.
-  const rows = (data as Array<{ id: number | string }> | null) || [];
-  let articlesWithSentiment = rows || [];
-  if (rows && rows.length > 0) {
+  const rows = ((data as Article[] | null) || []) as Article[];
+  let articlesWithSentiment: Article[] = rows;
+  if (rows.length > 0) {
     try {
       const ids = rows.map((a) => Number(a.id)).filter(Boolean);
       const sentimentById: Record<number, string | null> = {};

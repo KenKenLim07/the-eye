@@ -393,11 +393,11 @@ export default function TrendsPage() {
         </div>
 
         <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
-          <div className="flex gap-4">
-              <div className="flex flex-col gap-2">
-                <label className="text-sm font-medium">Source</label>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full sm:w-auto">
+            <div className="flex flex-col gap-2">
+              <label className="text-sm font-medium">Source</label>
               <Select value={selectedSource} onValueChange={handleSourceChange} disabled={isFilterLoading || useSnapshots}>
-                <SelectTrigger className="w-[180px]">
+                <SelectTrigger className="w-full sm:w-[180px]">
                   <SelectValue placeholder="Select source" />
                 </SelectTrigger>
                 <SelectContent>
@@ -413,7 +413,7 @@ export default function TrendsPage() {
             <div className="flex flex-col gap-2">
               <label className="text-sm font-medium">Period</label>
               <Select value={selectedPeriod} onValueChange={handlePeriodChange} disabled={isFilterLoading}>
-                <SelectTrigger className="w-[180px]">
+                <SelectTrigger className="w-full sm:w-[180px]">
                   <SelectValue placeholder="Select period" />
                 </SelectTrigger>
                 <SelectContent>
@@ -427,7 +427,7 @@ export default function TrendsPage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 justify-start sm:justify-end w-full sm:w-auto">
             <Button asChild variant="outline" size="sm">
               <Link href="/correlation">Correlation</Link>
             </Button>
@@ -443,7 +443,12 @@ export default function TrendsPage() {
               Refresh
             </Button>
             {lastUpdated && (
-              <span className="text-xs text-muted-foreground">Last updated: {lastUpdated.toLocaleTimeString()}</span>
+              <span
+                className="basis-full sm:basis-auto text-[10px] u-mono uppercase tracking-widest text-muted-foreground truncate max-w-full sm:max-w-[220px]"
+                title={lastUpdated.toLocaleString()}
+              >
+                Updated {lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+              </span>
             )}
           </div>
         </div>

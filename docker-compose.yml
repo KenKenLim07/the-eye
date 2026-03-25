@@ -85,6 +85,14 @@ services:
       - DISTILBERT_MAX_LENGTH=512
       - DISTILBERT_MAX_CHARS=2000
       - DISTILBERT_NEUTRAL_MIN_CONF=0.60
+      # Reduce CPU thrash on small machines (esp. Torch/OpenMP)
+      - TOKENIZERS_PARALLELISM=false
+      - OMP_NUM_THREADS=1
+      - MKL_NUM_THREADS=1
+      - OPENBLAS_NUM_THREADS=1
+      - NUMEXPR_NUM_THREADS=1
+      - TORCH_NUM_THREADS=1
+      - TORCH_NUM_INTEROP_THREADS=1
       # Hybrid routing threshold (Tagalog signal ratio)
       - TAGALOG_SIGNAL_THRESHOLD=0.15
       # Wider neutral zone for news (tune via gold set; e.g. 0.16)
@@ -92,6 +100,10 @@ services:
       # Avoid over-polarizing mixed "X pero Y" news sentences
       - VADER_TL_BUT_WORDS=0
       - VADER_TL_BUT_NORMALIZE=0
+      # Make Supabase requests smaller + show progress in logs
+      - ML_FETCH_CHUNK_SIZE=50
+      - ML_UPSERT_CHUNK_SIZE=500
+      - ML_PROGRESS_EVERY=25
       # Persist HF weights/cache across restarts
       - HF_HOME=/root/.cache/huggingface
       # Reduce SST-2 over-polarization on news-style reporting prefaces
