@@ -8,6 +8,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Loader2, RefreshCw } from "lucide-react";
 import { formatDateTime } from "@/lib/utils/date";
 import { supabase } from "@/lib/supabase/client";
+import AnalyticsFiltersSheet from "@/components/analytics/analytics-filters-sheet";
+import ActiveFilters from "@/components/analytics/active-filters";
 
 interface NerEntity {
   text: string;
@@ -319,52 +321,81 @@ export default function EntitiesPage() {
           </p>
         </div>
 
-        <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full sm:w-auto">
-            <div className="flex flex-col gap-2">
-              <label className="text-sm font-medium">Source</label>
-              <Select
-                value={selectedSource}
-                onValueChange={(v) => startTransition(() => setSelectedSource(v))}
-                disabled={loading || isPending || useSnapshots}
-              >
-                <SelectTrigger className="w-full sm:w-[180px]">
-                  <SelectValue placeholder="Select source" />
-                </SelectTrigger>
-                <SelectContent>
-                  {(useSnapshots ? SOURCES.slice(0, 1) : SOURCES).map((s) => (
-                    <SelectItem key={s.value} value={s.value}>
-                      {s.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+        <div className="space-y-3">
+          <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
+            <div className="hidden sm:grid grid-cols-2 gap-4">
+              <div className="flex flex-col gap-2">
+                <label className="text-sm font-medium">Source</label>
+                <Select
+                  value={selectedSource}
+                  onValueChange={(v) => startTransition(() => setSelectedSource(v))}
+                  disabled={loading || isPending || useSnapshots}
+                >
+                  <SelectTrigger className="w-[180px]">
+                    <SelectValue placeholder="Select source" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(useSnapshots ? SOURCES.slice(0, 1) : SOURCES).map((s) => (
+                      <SelectItem key={s.value} value={s.value}>
+                        {s.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex flex-col gap-2">
+                <label className="text-sm font-medium">Period</label>
+                <Select
+                  value={selectedPeriod}
+                  onValueChange={(v) => startTransition(() => setSelectedPeriod(v))}
+                  disabled={loading || isPending}
+                >
+                  <SelectTrigger className="w-[180px]">
+                    <SelectValue placeholder="Select period" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PERIODS.map((p) => (
+                      <SelectItem key={p.value} value={p.value}>
+                        {p.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
-            <div className="flex flex-col gap-2">
-              <label className="text-sm font-medium">Period</label>
-              <Select
-                value={selectedPeriod}
-                onValueChange={(v) => startTransition(() => setSelectedPeriod(v))}
-                disabled={loading || isPending}
-              >
-                <SelectTrigger className="w-full sm:w-[180px]">
-                  <SelectValue placeholder="Select period" />
-                </SelectTrigger>
-                <SelectContent>
-                  {PERIODS.map((p) => (
-                    <SelectItem key={p.value} value={p.value}>
-                      {p.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+
+            <div className="flex flex-wrap items-center gap-2 justify-start sm:justify-end w-full sm:w-auto">
+              <div className="sm:hidden">
+                <AnalyticsFiltersSheet
+                  title="Entity filters"
+                  source={selectedSource}
+                  period={selectedPeriod}
+                  sources={useSnapshots ? SOURCES.slice(0, 1) : SOURCES}
+                  periods={PERIODS}
+                  disableSource={useSnapshots}
+                  onApply={({ source, period }) => {
+                    startTransition(() => setSelectedSource(source));
+                    startTransition(() => setSelectedPeriod(period));
+                  }}
+                />
+              </div>
+
+              <Button onClick={() => load(true)} variant="outline" className="h-11 w-full sm:w-auto" disabled={loading || refreshing}>
+                {(loading || refreshing) ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+                Refresh
+              </Button>
             </div>
           </div>
 
-          <Button onClick={() => load(true)} variant="outline" size="sm" disabled={loading || refreshing} className="w-full sm:w-auto">
-            {(loading || refreshing) ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
-            Refresh
-          </Button>
+          <div className="sm:hidden space-y-2">
+            <ActiveFilters
+              items={[
+                { label: "source", value: (SOURCES.find((s) => s.value === selectedSource)?.label ?? selectedSource) },
+                { label: "period", value: (PERIODS.find((p) => p.value === selectedPeriod)?.label ?? selectedPeriod) },
+                ...(computedAt ? [{ label: "snapshot", value: formatDateTime(computedAt) }] : []),
+              ]}
+            />
+          </div>
         </div>
 
         <Card>

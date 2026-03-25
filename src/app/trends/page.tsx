@@ -11,6 +11,8 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsi
 import { Skeleton } from "@/components/ui/skeleton";
 import MainLayout from "@/components/layout/main-layout";
 import { supabaseUntyped } from "@/lib/supabase/client";
+import AnalyticsFiltersSheet from "@/components/analytics/analytics-filters-sheet";
+import ActiveFilters from "@/components/analytics/active-filters";
 
 interface TrendsData {
   ok: boolean;
@@ -392,64 +394,85 @@ export default function TrendsPage() {
           <p className="text-muted-foreground">Analyzing sentiment patterns across Philippine news sources</p>
         </div>
 
-        <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full sm:w-auto">
-            <div className="flex flex-col gap-2">
-              <label className="text-sm font-medium">Source</label>
-              <Select value={selectedSource} onValueChange={handleSourceChange} disabled={isFilterLoading || useSnapshots}>
-                <SelectTrigger className="w-full sm:w-[180px]">
-                  <SelectValue placeholder="Select source" />
-                </SelectTrigger>
-                <SelectContent>
-                  {(useSnapshots ? SOURCES.slice(0, 1) : SOURCES).map((source) => (
-                    <SelectItem key={source.value} value={source.value}>
-                      {source.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+        <div className="space-y-3">
+          <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
+            <div className="hidden sm:grid grid-cols-2 gap-4">
+              <div className="flex flex-col gap-2">
+                <label className="text-sm font-medium">Source</label>
+                <Select value={selectedSource} onValueChange={handleSourceChange} disabled={isFilterLoading || useSnapshots}>
+                  <SelectTrigger className="w-[180px]">
+                    <SelectValue placeholder="Select source" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(useSnapshots ? SOURCES.slice(0, 1) : SOURCES).map((source) => (
+                      <SelectItem key={source.value} value={source.value}>
+                        {source.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <label className="text-sm font-medium">Period</label>
+                <Select value={selectedPeriod} onValueChange={handlePeriodChange} disabled={isFilterLoading}>
+                  <SelectTrigger className="w-[180px]">
+                    <SelectValue placeholder="Select period" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PERIODS.map((period) => (
+                      <SelectItem key={period.value} value={period.value}>
+                        {period.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
-            <div className="flex flex-col gap-2">
-              <label className="text-sm font-medium">Period</label>
-              <Select value={selectedPeriod} onValueChange={handlePeriodChange} disabled={isFilterLoading}>
-                <SelectTrigger className="w-full sm:w-[180px]">
-                  <SelectValue placeholder="Select period" />
-                </SelectTrigger>
-                <SelectContent>
-                  {PERIODS.map((period) => (
-                    <SelectItem key={period.value} value={period.value}>
-                      {period.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <div className="flex flex-wrap items-center gap-2 justify-start sm:justify-end w-full sm:w-auto">
+              <div className="sm:hidden">
+                <AnalyticsFiltersSheet
+                  title="Trend filters"
+                  source={selectedSource}
+                  period={selectedPeriod}
+                  sources={useSnapshots ? SOURCES.slice(0, 1) : SOURCES}
+                  periods={PERIODS}
+                  disableSource={useSnapshots}
+                  onApply={({ source, period }) => {
+                    handleSourceChange(source);
+                    handlePeriodChange(period);
+                  }}
+                />
+              </div>
+
+              <Button asChild variant="outline" className="h-11">
+                <Link href="/correlation">Correlation</Link>
+              </Button>
+              <Button asChild variant="outline" className="h-11">
+                <Link href="/entities">Entities</Link>
+              </Button>
+              <Button onClick={handleRefresh} variant="outline" className="h-11" disabled={isRefreshing || isFilterLoading}>
+                {(isRefreshing || isFilterLoading) ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                )}
+                Refresh
+              </Button>
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 justify-start sm:justify-end w-full sm:w-auto">
-            <Button asChild variant="outline" size="sm">
-              <Link href="/correlation">Correlation</Link>
-            </Button>
-            <Button asChild variant="outline" size="sm">
-              <Link href="/entities">Entity Ranking</Link>
-            </Button>
-            <Button onClick={handleRefresh} variant="outline" size="sm" disabled={isRefreshing || isFilterLoading}>
-              {(isRefreshing || isFilterLoading) ? (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              ) : (
-                <RefreshCw className="h-4 w-4 mr-2" />
-              )}
-              Refresh
-            </Button>
-            {lastUpdated && (
-              <span
-                className="basis-full sm:basis-auto text-[10px] u-mono uppercase tracking-widest text-muted-foreground truncate max-w-full sm:max-w-[220px]"
-                title={lastUpdated.toLocaleString()}
-              >
-                Updated {lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-              </span>
-            )}
+          <div className="sm:hidden space-y-2">
+            <ActiveFilters
+              items={[
+                { label: "source", value: (SOURCES.find((s) => s.value === selectedSource)?.label ?? selectedSource) },
+                { label: "period", value: (PERIODS.find((p) => p.value === selectedPeriod)?.label ?? selectedPeriod) },
+                ...(lastUpdated
+                  ? [{ label: "updated", value: lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) }]
+                  : []),
+              ]}
+            />
           </div>
         </div>
 
