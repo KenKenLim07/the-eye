@@ -12,6 +12,10 @@ Why:
 Run inside Docker (recommended):
   docker compose exec worker_ml python /app/scripts/backfill_article_sentiment_public.py --days 7 --dry-run
   docker compose exec worker_ml python /app/scripts/backfill_article_sentiment_public.py --days 7 --apply
+
+If you hit transient HTTP/2 stream resets (RemoteProtocolError / PROTOCOL_ERROR),
+re-run with a smaller batch size:
+  docker compose exec worker_ml python /app/scripts/backfill_article_sentiment_public.py --days 7 --apply --batch-size 200
 """
 
 from __future__ import annotations
@@ -50,6 +54,91 @@ logger = logging.getLogger(__name__)
 def _chunked(items: list[int], size: int) -> Iterable[list[int]]:
     for i in range(0, len(items), size):
         yield items[i : i + size]
+
+
+def _is_transient_network_error(e: Exception) -> bool:
+    """
+    Supabase/PostgREST calls go through httpx/httpcore.
+    We treat common transport/protocol failures as transient.
+    """
+    name = type(e).__name__
+    msg = str(e).lower()
+    transient_names = {
+        "RemoteProtocolError",
+        "ReadTimeout",
+        "ConnectTimeout",
+        "PoolTimeout",
+        "ConnectError",
+        "ReadError",
+        "WriteError",
+        "ProtocolError",
+        "TransportError",
+        "HTTPError",
+    }
+    if name in transient_names:
+        return True
+    if "streamreset" in msg or "protocol_error" in msg or "connection reset" in msg:
+        return True
+    if "http2" in msg and "reset" in msg:
+        return True
+    return False
+
+
+def _sleep_with_backoff(attempt: int, base_sleep_s: float = 1.0) -> None:
+    # Exponential backoff: 1s, 2s, 4s, 8s, 16s...
+    delay = base_sleep_s * (2**attempt)
+    time.sleep(delay)
+
+
+def _upsert_public_rows_with_retry(
+    *,
+    sb,
+    payload: list[dict],
+    retries: int,
+    sleep_ms: int,
+    min_payload: int = 50,
+) -> int:
+    """
+    Upsert payload with retries; if still failing and payload is large, split into
+    smaller requests to reduce transport/protocol flakiness.
+    """
+    if not payload:
+        return 0
+
+    last_err: Exception | None = None
+    for attempt in range(retries):
+        try:
+            sb.table("article_sentiment_public").upsert(payload, on_conflict="article_id").execute()
+            if sleep_ms > 0:
+                time.sleep(sleep_ms / 1000.0)
+            return len(payload)
+        except Exception as e:
+            last_err = e
+            if not _is_transient_network_error(e):
+                raise
+            if attempt < retries - 1:
+                _sleep_with_backoff(attempt, base_sleep_s=1.0)
+                continue
+
+    # Still failing: split payload to reduce request size (best-effort).
+    if len(payload) > min_payload:
+        mid = len(payload) // 2
+        return _upsert_public_rows_with_retry(
+            sb=sb,
+            payload=payload[:mid],
+            retries=retries,
+            sleep_ms=sleep_ms,
+            min_payload=min_payload,
+        ) + _upsert_public_rows_with_retry(
+            sb=sb,
+            payload=payload[mid:],
+            retries=retries,
+            sleep_ms=sleep_ms,
+            min_payload=min_payload,
+        )
+
+    assert last_err is not None
+    raise last_err
 
 
 @dataclass(frozen=True)
@@ -140,7 +229,7 @@ def _count_public_rows(article_ids: list[int]) -> int:
     return total
 
 
-def backfill(*, days: int, apply: bool, batch_size: int) -> int:
+def backfill(*, days: int, apply: bool, batch_size: int, retries: int, sleep_ms: int) -> int:
     since_iso = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     all_ids = _fetch_article_ids_since(since_iso)
     if not all_ids:
@@ -172,8 +261,12 @@ def backfill(*, days: int, apply: bool, batch_size: int) -> int:
         if not apply:
             upserted += len(payload)
             continue
-        sb.table("article_sentiment_public").upsert(payload, on_conflict="article_id").execute()
-        upserted += len(payload)
+        upserted += _upsert_public_rows_with_retry(
+            sb=sb,
+            payload=payload,
+            retries=retries,
+            sleep_ms=sleep_ms,
+        )
         if idx % 10 == 0:
             logger.info("Progress: processed %d batches...", idx)
         time.sleep(0.02)
@@ -190,6 +283,8 @@ def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description="Backfill article_sentiment_public from bias_analysis")
     parser.add_argument("--days", type=int, default=7, help="Look back by published_at (default: 7)")
     parser.add_argument("--batch-size", type=int, default=500, help="Batch size for Supabase queries (default: 500)")
+    parser.add_argument("--retries", type=int, default=5, help="Retries for transient network/protocol errors (default: 5)")
+    parser.add_argument("--sleep-ms", type=int, default=0, help="Sleep after each upsert request (default: 0)")
     parser.add_argument("--dry-run", action="store_true", help="Print what would happen without writing")
     parser.add_argument("--apply", action="store_true", help="Apply upserts to article_sentiment_public")
     args = parser.parse_args(argv[1:])
@@ -197,10 +292,15 @@ def main(argv: list[str]) -> int:
     if not args.dry_run and not args.apply:
         args.dry_run = True
 
-    backfill(days=args.days, apply=bool(args.apply), batch_size=args.batch_size)
+    backfill(
+        days=args.days,
+        apply=bool(args.apply),
+        batch_size=args.batch_size,
+        retries=max(1, int(args.retries)),
+        sleep_ms=max(0, int(args.sleep_ms)),
+    )
     return 0
 
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv))
-

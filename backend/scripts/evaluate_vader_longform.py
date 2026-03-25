@@ -4,19 +4,30 @@ Compare legacy single-pass VADER vs new long-form weighted VADER on real article
 
 Usage:
   cd backend
-  python scripts/evaluate_vader_longform.py --days 30 --limit 300
+  # Baseline (no PH patch)
+  python scripts/evaluate_vader_longform.py --days 30 --limit 300 --ph-patch off
+
+  # Patched (Taglish lexicon enabled)
+  python scripts/evaluate_vader_longform.py --days 30 --limit 300 --ph-patch on
 """
 
 from __future__ import annotations
 
 import argparse
+import os
+import sys
 from collections import Counter, defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from statistics import mean
 from typing import Any
 
+# Ensure `import app...` works when executed as a script (e.g., in Docker).
+BACKEND_ROOT = Path(__file__).resolve().parents[1]
+if str(BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(BACKEND_ROOT))
+
 from app.core.supabase import get_supabase
-from app.ml.bias import analyze_sentiment_vader_detailed, _ensure_vader
 
 
 def label_from_compound(compound: float, pos_threshold: float = 0.05, neg_threshold: float = -0.05) -> str:
@@ -29,7 +40,7 @@ def label_from_compound(compound: float, pos_threshold: float = 0.05, neg_thresh
 
 def fetch_recent_articles(days: int, limit: int, source: str | None) -> list[dict[str, Any]]:
     sb = get_supabase()
-    start = (datetime.now() - timedelta(days=days)).isoformat()
+    start = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     q = (
         sb.table("articles")
         .select("id,title,content,source,published_at")
@@ -49,7 +60,21 @@ def main() -> None:
     parser.add_argument("--limit", type=int, default=300, help="Max articles to sample (default: 300)")
     parser.add_argument("--source", type=str, default=None, help="Optional source filter (e.g., Rappler)")
     parser.add_argument("--top", type=int, default=10, help="Top changed examples to print")
+    parser.add_argument(
+        "--ph-patch",
+        choices=["auto", "on", "off"],
+        default="auto",
+        help="Control Taglish VADER patch via env var (default: auto/respect VADER_PH_PATCH).",
+    )
     args = parser.parse_args()
+
+    if args.ph_patch == "on":
+        os.environ["VADER_PH_PATCH"] = "1"
+    elif args.ph_patch == "off":
+        os.environ["VADER_PH_PATCH"] = "0"
+
+    # Import after setting env so VADER is initialized with the intended patch state.
+    from app.ml.bias import analyze_sentiment_vader_detailed, _ensure_vader  # noqa: WPS433
 
     rows = fetch_recent_articles(days=args.days, limit=args.limit, source=args.source)
     if not rows:
@@ -66,6 +91,7 @@ def main() -> None:
     new_labels = Counter()
     confusion: dict[tuple[str, str], int] = defaultdict(int)
     changed_examples: list[dict[str, Any]] = []
+    patch_meta_sample: dict[str, Any] | None = None
 
     for r in rows:
         title = str(r.get("title") or "").strip()
@@ -79,6 +105,17 @@ def main() -> None:
         # New path: title/body-aware weighted aggregation.
         upgraded_text = f"{title}\n\n{content}".strip()
         new_compound, new_label, _, details = analyze_sentiment_vader_detailed(upgraded_text)
+        if patch_meta_sample is None:
+            patch_meta_sample = {
+                "ph_patch_enabled": details.get("ph_patch_enabled"),
+                "ph_patch_applied": details.get("ph_patch_applied"),
+                "ph_patch_version": details.get("ph_patch_version"),
+                "ph_lexicon_terms_added": details.get("ph_lexicon_terms_added"),
+                "ph_lexicon_overrides": details.get("ph_lexicon_overrides"),
+                "ph_lexicon_skipped_existing": details.get("ph_lexicon_skipped_existing"),
+                "ph_phrases_enabled": details.get("ph_phrases_enabled"),
+                "ph_patch_error": details.get("ph_patch_error"),
+            }
 
         old_scores.append(old_compound)
         new_scores.append(new_compound)
@@ -110,6 +147,20 @@ def main() -> None:
     print(f"Window: last {args.days} days")
     print(f"Source: {args.source or 'ALL'}")
     print(f"Sampled articles: {total}")
+    if patch_meta_sample is not None:
+        print()
+        print("PH patch status (sample)")
+        for k in (
+            "ph_patch_enabled",
+            "ph_patch_applied",
+            "ph_patch_version",
+            "ph_lexicon_terms_added",
+            "ph_lexicon_overrides",
+            "ph_lexicon_skipped_existing",
+            "ph_phrases_enabled",
+            "ph_patch_error",
+        ):
+            print(f"- {k}: {patch_meta_sample.get(k)}")
     print()
     print("Score drift")
     print(f"- Mean old score: {mean(old_scores):.4f}")

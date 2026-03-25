@@ -3,9 +3,268 @@ from typing import Tuple, Dict, Any
 import json
 import os
 import re
+import logging
 
 # Lazy NLTK/VADER import and resource bootstrap
 _vader = None
+_VADER_PH_PATCH_CACHE: dict[str, Any] | None = None
+_VADER_PH_PATCH_APPLIED: bool = False
+_VADER_PH_PATCH_ERROR: str | None = None
+_VADER_PH_PATCH_STATUS_CACHE: dict[str, Any] | None = None
+
+logger = logging.getLogger(__name__)
+
+_LABEL_THRESHOLDS_CACHE: tuple[float, float] | None = None
+
+
+def _truthy_env(name: str) -> bool:
+    v = (os.getenv(name) or "").strip().lower()
+    return v in {"1", "true", "t", "yes", "y", "on"}
+
+
+def _load_vader_ph_patch() -> dict[str, Any]:
+    global _VADER_PH_PATCH_CACHE
+    if _VADER_PH_PATCH_CACHE is not None:
+        return _VADER_PH_PATCH_CACHE
+    path = os.path.join(os.path.dirname(__file__), "vader_ph_lexicon.v1.json")
+    with open(path, "r", encoding="utf-8") as f:
+        _VADER_PH_PATCH_CACHE = json.load(f) or {}
+    return _VADER_PH_PATCH_CACHE
+
+
+def _compile_phrase_patterns(phrases: dict[str, Any]) -> list[tuple[re.Pattern[str], str]]:
+    """
+    Return a list of (regex_pattern, replacement_token) pairs.
+    We match phrases case-insensitively with conservative word-ish boundaries.
+    """
+    compiled: list[tuple[re.Pattern[str], str]] = []
+    if not phrases:
+        return compiled
+
+    # Replace longer phrases first to avoid partial overlaps.
+    for phrase in sorted(phrases.keys(), key=lambda s: len(s), reverse=True):
+        meta = phrases.get(phrase) or {}
+        token = str(meta.get("token") or "").strip()
+        if not phrase or not token:
+            continue
+        # Phrase boundaries: avoid replacing inside alphanumeric runs.
+        pat = re.compile(rf"(?<!\w){re.escape(phrase)}(?!\w)", re.IGNORECASE)
+        compiled.append((pat, token))
+    return compiled
+
+
+def _preprocess_for_vader(text: str) -> str:
+    """
+    Minimal deterministic preprocessing:
+    - Apply configured multi-word phrase substitutions (e.g. "sana all" -> "sanaall")
+    - Normalize Tagalog contrast words (e.g. "pero") to English "but" so VADER's
+      built-in contrast weighting reliably triggers.
+    This runs only when the PH patch is enabled and loaded.
+    """
+    raw = text or ""
+    if not raw:
+        return raw
+    try:
+        patch = _load_vader_ph_patch()
+        phrases = patch.get("phrases") or {}
+        patterns = patch.get("_compiled_phrase_patterns")  # cached on patch dict
+        if patterns is None:
+            patterns = _compile_phrase_patterns(phrases)
+            patch["_compiled_phrase_patterns"] = patterns
+        for pat, token in patterns:
+            raw = pat.sub(token, raw)
+
+        # Normalize Tagalog contrast conjunctions to "but" (word-boundary match).
+        # Even if we also patch VADER's BUT_WORDS, this makes behavior consistent.
+        but_words = patch.get("but_words") or []
+        contrast_pat = patch.get("_compiled_contrast_pattern")
+        if contrast_pat is None and but_words:
+            ws = [re.escape(str(w).strip()) for w in but_words if str(w).strip()]
+            if ws:
+                contrast_pat = re.compile(rf"(?<!\w)({'|'.join(ws)})(?!\w)", re.IGNORECASE)
+                patch["_compiled_contrast_pattern"] = contrast_pat
+            else:
+                patch["_compiled_contrast_pattern"] = False
+                contrast_pat = None
+        if contrast_pat:
+            raw = contrast_pat.sub("but", raw)
+        return raw
+    except Exception:
+        # Fail closed: keep original text on patch issues.
+        return raw
+
+
+def _get_label_thresholds(
+    *, default_pos: float = 0.05, default_neg: float = -0.05
+) -> tuple[float, float]:
+    """
+    Allow tuning sentiment label thresholds without changing code.
+
+    Env:
+      - VADER_NEUTRAL_BAND: numeric, e.g. 0.12 => pos>=0.12, neg<=-0.12
+    """
+    global _LABEL_THRESHOLDS_CACHE
+    if _LABEL_THRESHOLDS_CACHE is not None:
+        return _LABEL_THRESHOLDS_CACHE
+
+    pos, neg = float(default_pos), float(default_neg)
+    try:
+        band_raw = (os.getenv("VADER_NEUTRAL_BAND") or "").strip()
+        if band_raw:
+            band = abs(float(band_raw))
+            if band > 0:
+                pos, neg = band, -band
+    except Exception:
+        pos, neg = float(default_pos), float(default_neg)
+
+    _LABEL_THRESHOLDS_CACHE = (pos, neg)
+    return _LABEL_THRESHOLDS_CACHE
+
+
+def _apply_vader_ph_patch(sia: Any) -> dict[str, Any]:
+    """
+    Best-effort Taglish patch for VADER.
+    Applies once per process when VADER_PH_PATCH is truthy.
+    Returns patch status info for metadata.
+    """
+    global _VADER_PH_PATCH_APPLIED, _VADER_PH_PATCH_ERROR, _VADER_PH_PATCH_STATUS_CACHE
+    enabled = _truthy_env("VADER_PH_PATCH")
+    status: dict[str, Any] = {
+        "ph_patch_enabled": enabled,
+        "ph_patch_applied": False,
+        "ph_patch_version": None,
+        "ph_lexicon_terms_added": 0,  # number of NEW tokens added (not overrides)
+        "ph_lexicon_overrides": 0,  # number of tokens that replaced existing VADER entries (allowlisted only)
+        "ph_lexicon_skipped_existing": 0,  # collisions skipped because not allowlisted
+        "ph_negations_added": 0,
+        "ph_boosters_added": 0,
+        "ph_but_words_added": 0,
+        "ph_phrases_enabled": 0,
+        "ph_patch_error": None,
+    }
+
+    if not enabled:
+        return status
+
+    if _VADER_PH_PATCH_APPLIED:
+        # Already applied in this process; return cached status so metadata stays stable.
+        if _VADER_PH_PATCH_STATUS_CACHE is not None:
+            return dict(_VADER_PH_PATCH_STATUS_CACHE)
+        status["ph_patch_applied"] = True
+        status["ph_patch_error"] = _VADER_PH_PATCH_ERROR
+        try:
+            patch = _load_vader_ph_patch()
+            status["ph_patch_version"] = patch.get("version")
+            phrases = patch.get("phrases") or {}
+            status["ph_phrases_enabled"] = len(phrases)
+        except Exception:
+            pass
+        return status
+
+    try:
+        patch = _load_vader_ph_patch()
+        status["ph_patch_version"] = patch.get("version")
+
+        lexicon = patch.get("lexicon") or {}
+        phrases = patch.get("phrases") or {}
+        negations = patch.get("negations") or []
+        boosters = patch.get("boosters") or {}
+        but_words = patch.get("but_words") or []
+        override_existing_allowlist = patch.get("override_existing_allowlist") or []
+        allow_override_set = {str(x).strip().lower() for x in override_existing_allowlist if str(x).strip()}
+
+        # Phrase tokens must be present in the lexicon for VADER to score them.
+        phrase_lex = {}
+        for _phrase, meta in phrases.items():
+            token = str((meta or {}).get("token") or "").strip()
+            val = (meta or {}).get("valence")
+            if token and isinstance(val, (int, float)):
+                phrase_lex[token] = float(val)
+
+        merged_lex = {}
+        for k, v in {**lexicon, **phrase_lex}.items():
+            if isinstance(k, str) and k and isinstance(v, (int, float)):
+                merged_lex[k] = float(v)
+
+        if merged_lex:
+            base_lex = getattr(sia, "lexicon", {}) or {}
+            filtered: dict[str, float] = {}
+            additions = 0
+            overrides = 0
+            skipped = 0
+            for token, val in merged_lex.items():
+                token_l = token.lower()
+                if token in base_lex and token_l not in allow_override_set:
+                    skipped += 1
+                    continue
+                filtered[token] = float(val)
+                if token in base_lex:
+                    overrides += 1
+                else:
+                    additions += 1
+
+            if filtered:
+                sia.lexicon.update(filtered)
+
+            status["ph_lexicon_terms_added"] = additions
+            status["ph_lexicon_overrides"] = overrides
+            status["ph_lexicon_skipped_existing"] = skipped
+
+        status["ph_phrases_enabled"] = len(phrases)
+
+        # Optional VADER constant tweaks (guarded; NLTK internals may change).
+        constants = getattr(sia, "constants", None)
+        if constants is not None:
+            # Negations
+            if hasattr(constants, "NEGATE") and isinstance(negations, list):
+                before = len(constants.NEGATE)
+                constants.NEGATE.update({str(x).strip().lower() for x in negations if str(x).strip()})
+                status["ph_negations_added"] = max(0, len(constants.NEGATE) - before)
+
+            # Boosters/dampeners
+            if hasattr(constants, "BOOSTER_DICT") and isinstance(boosters, dict):
+                before = len(constants.BOOSTER_DICT)
+                for k, v in boosters.items():
+                    if not isinstance(k, str) or not k.strip() or not isinstance(v, (int, float)):
+                        continue
+                    constants.BOOSTER_DICT[k.strip().lower()] = float(v)
+                status["ph_boosters_added"] = max(0, len(constants.BOOSTER_DICT) - before)
+
+            # "but" equivalents (Tagalog)
+            if hasattr(constants, "BUT_WORDS") and isinstance(but_words, list) and but_words:
+                try:
+                    before = len(constants.BUT_WORDS)
+                except Exception:
+                    before = 0
+                to_add = {str(x).strip().lower() for x in but_words if str(x).strip()}
+                if to_add and isinstance(constants.BUT_WORDS, (set, list, tuple)):
+                    try:
+                        if isinstance(constants.BUT_WORDS, set):
+                            constants.BUT_WORDS.update(to_add)
+                        else:
+                            bw = set(constants.BUT_WORDS)
+                            bw.update(to_add)
+                            constants.BUT_WORDS = list(bw)
+                    except Exception:
+                        pass
+                try:
+                    status["ph_but_words_added"] = max(0, len(constants.BUT_WORDS) - before)
+                except Exception:
+                    status["ph_but_words_added"] = 0
+
+        _VADER_PH_PATCH_APPLIED = True
+        _VADER_PH_PATCH_ERROR = None
+        status["ph_patch_applied"] = True
+        _VADER_PH_PATCH_STATUS_CACHE = dict(status)
+        return status
+
+    except Exception as e:
+        _VADER_PH_PATCH_APPLIED = True  # prevent repeated attempts spamming logs
+        _VADER_PH_PATCH_ERROR = str(e)
+        status["ph_patch_error"] = str(e)
+        _VADER_PH_PATCH_STATUS_CACHE = dict(status)
+        logger.warning("VADER PH patch failed; continuing without patch: %s", e)
+        return status
 
 
 def _ensure_vader():
@@ -17,54 +276,24 @@ def _ensure_vader():
         try:
             # Try to construct; if lexicon missing, download
             _vader = SentimentIntensityAnalyzer()
+            _apply_vader_ph_patch(_vader)
             return _vader
         except Exception:
             import nltk
             nltk.download('vader_lexicon', quiet=True)
             _vader = SentimentIntensityAnalyzer()
+            _apply_vader_ph_patch(_vader)
             return _vader
     except Exception as e:
         raise RuntimeError(f"Failed to initialize VADER: {e}")
 
 
-# ----------------------------------------------------------------------------
-# Externalized Philippine political keywords
-# ----------------------------------------------------------------------------
-_POLITICAL_CFG_CACHE: Dict[str, Any] = {}
-
-
-def _load_political_keywords() -> Dict[str, Any]:
-    """Load political keyword config from JSON; fallback to embedded defaults."""
-    global _POLITICAL_CFG_CACHE
-    if _POLITICAL_CFG_CACHE:
-        return _POLITICAL_CFG_CACHE
-    cfg_path = os.path.join(os.path.dirname(__file__), 'keywords_ph.json')
-    defaults = {
-        "version": "embedded",
-        "keywords": {},
-        "weights": {}
-    }
-    try:
-        with open(cfg_path, 'r', encoding='utf-8') as f:
-            cfg = json.load(f)
-            _POLITICAL_CFG_CACHE = cfg or defaults
-            return _POLITICAL_CFG_CACHE
-    except Exception:
-        _POLITICAL_CFG_CACHE = defaults
-        return _POLITICAL_CFG_CACHE
-
-
-def get_political_keywords_and_weights() -> Tuple[Dict[str, Any], Dict[str, float], str]:
-    cfg = _load_political_keywords()
-    keywords = cfg.get('keywords') or {}
-    weights = cfg.get('weights') or {}
-    version = cfg.get('version') or 'embedded'
-    return keywords, weights, version
-
-
 # Existing sentiment analysis
 
 def _label_from_compound(compound: float, pos_threshold: float = 0.05, neg_threshold: float = -0.05) -> str:
+    # If the caller uses defaults, allow env-driven tuning.
+    if pos_threshold == 0.05 and neg_threshold == -0.05:
+        pos_threshold, neg_threshold = _get_label_thresholds(default_pos=pos_threshold, default_neg=neg_threshold)
     if compound >= pos_threshold:
         return "positive"
     if compound <= neg_threshold:
@@ -118,8 +347,11 @@ def analyze_sentiment_vader_detailed(text: str) -> Tuple[float, str, float, Dict
     """
     start = time.time()
     sia = _ensure_vader()
+    patch_status = _apply_vader_ph_patch(sia)
+    pos_th, neg_th = _get_label_thresholds()
 
-    title, chunks = _split_long_text_chunks(text)
+    processed = _preprocess_for_vader(text) if patch_status.get("ph_patch_enabled") else (text or "")
+    title, chunks = _split_long_text_chunks(processed)
     raw_text = (text or "").strip()
 
     if not raw_text:
@@ -130,14 +362,15 @@ def analyze_sentiment_vader_detailed(text: str) -> Tuple[float, str, float, Dict
             "chunks_analyzed": 0,
             "title_present": False,
             "weights": {"title": 0.25, "lead": 0.35, "body": 0.40},
-            "threshold_pos": 0.05,
-            "threshold_neg": -0.05,
+            "threshold_pos": pos_th,
+            "threshold_neg": neg_th,
+            **patch_status,
         }
 
     # Fallback for short content: standard VADER on full text.
     if len(raw_text) < 350:
-        score = float(sia.polarity_scores(raw_text).get("compound", 0.0))
-        label = _label_from_compound(score)
+        score = float(sia.polarity_scores(processed).get("compound", 0.0))
+        label = _label_from_compound(score, pos_threshold=pos_th, neg_threshold=neg_th)
         elapsed_ms = (time.time() - start) * 1000.0
         return score, label, elapsed_ms, {
             "library": "nltk-vader",
@@ -145,8 +378,9 @@ def analyze_sentiment_vader_detailed(text: str) -> Tuple[float, str, float, Dict
             "chunks_analyzed": 1,
             "title_present": bool(title),
             "weights": {"full_text": 1.0},
-            "threshold_pos": 0.05,
-            "threshold_neg": -0.05,
+            "threshold_pos": pos_th,
+            "threshold_neg": neg_th,
+            **patch_status,
         }
 
     title_score = float(sia.polarity_scores(title).get("compound", 0.0)) if title else None
@@ -167,7 +401,7 @@ def analyze_sentiment_vader_detailed(text: str) -> Tuple[float, str, float, Dict
         w_title, w_lead, w_body = 0.0, 0.45, 0.55
 
     compound = (w_title * (title_score or 0.0)) + (w_lead * lead_avg) + (w_body * body_avg)
-    label = _label_from_compound(compound)
+    label = _label_from_compound(compound, pos_threshold=pos_th, neg_threshold=neg_th)
     elapsed_ms = (time.time() - start) * 1000.0
     metadata = {
         "library": "nltk-vader",
@@ -178,8 +412,9 @@ def analyze_sentiment_vader_detailed(text: str) -> Tuple[float, str, float, Dict
         "title_score": title_score,
         "lead_avg_score": lead_avg,
         "body_avg_score": body_avg,
-        "threshold_pos": 0.05,
-        "threshold_neg": -0.05,
+        "threshold_pos": pos_th,
+        "threshold_neg": neg_th,
+        **patch_status,
     }
     return compound, label, elapsed_ms, metadata
 
@@ -193,176 +428,6 @@ def analyze_sentiment_vader(text: str) -> Tuple[float, str, float]:
     compound, label, elapsed_ms, _ = analyze_sentiment_vader_detailed(text)
     return compound, label, elapsed_ms
 
-
-# ============================================================================
-# PHILIPPINE POLITICAL BIAS ANALYSIS SYSTEM
-# ============================================================================
-
-# Fallback embedded keyword sets (will be overridden if JSON is present)
-POLITICAL_KEYWORDS = {
-    # Pro-Government Keywords
-    "pro_gov_current_admin": [
-        "marcos", "bbm", "bongbong marcos", "sara duterte", "administration",
-        "government success", "progress", "development", "infrastructure"
-    ],
-    "pro_gov_administration": [
-        "president", "administration", "cabinet", "executive", "leadership",
-        "government", "official", "policy", "program", "initiative"
-    ],
-    "pro_gov_policies": [
-        "build build build", "infrastructure", "economic growth", "job creation",
-        "poverty reduction", "healthcare reform", "education reform"
-    ],
-    "pro_gov_positive_terms": [
-        "successful", "effective", "efficient", "progress", "achievement",
-        "improvement", "beneficial", "positive", "good governance"
-    ],
-    # Opposition Keywords
-    "pro_opp_opposition_figures": [
-        "leni robredo", "opposition", "liberal party", "critics", "activists",
-        "human rights groups", "civil society"
-    ],
-    "pro_opp_criticism": [
-        "corruption", "incompetence", "failure", "scandal", "controversy",
-        "investigation", "accountability", "transparency"
-    ],
-    "pro_opp_protest": [
-        "protest", "rally", "demonstration", "activism", "dissent",
-        "opposition", "criticism", "resistance"
-    ],
-    "pro_opp_negative_terms": [
-        "failed", "corrupt", "ineffective", "problematic", "controversial",
-        "criticized", "questioned", "disputed"
-    ],
-    # Neutral Keywords
-    "neutral_general": [
-        "philippines", "filipino", "manila", "cebu", "davao", "news",
-        "report", "statement", "announcement", "conference"
-    ],
-    "neutral_process": [
-        "congress", "senate", "house", "legislation", "bill", "law",
-        "committee", "hearing", "session", "vote"
-    ],
-    "neutral_institutional": [
-        "supreme court", "comelec", "doj", "dilg", "dof", "doh",
-        "deped", "dti", "da", "denr"
-    ]
-}
-
-
-def analyze_political_bias_philippine(text: str) -> Tuple[float, str, float, Dict[str, Any]]:
-    """
-    Analyze political bias in Philippine news articles.
-    Returns: (bias_score, direction, elapsed_ms, metadata)
-    """
-    start = time.time()
-    text_lower = (text or "").lower()
-
-    # Prefer external keywords/weights when available
-    kw_cfg, weights, version = get_political_keywords_and_weights()
-    keywords = kw_cfg if kw_cfg else POLITICAL_KEYWORDS
-    
-    # Count keyword matches
-    keyword_matches = {}
-    total_matches = 0
-    for category, terms in keywords.items():
-        count = 0
-        # Match multi-word terms first
-        sorted_terms = sorted(terms, key=len, reverse=True)
-        for term in sorted_terms:
-            term_l = term.lower().strip()
-            if not term_l:
-                continue
-            if ' ' in term_l:
-                count += 1 if term_l in text_lower else 0
-            else:
-                # word-boundary match for single words
-                import re as _re
-                if _re.search(rf"\b{_re.escape(term_l)}\b", text_lower):
-                    count += 1
-        keyword_matches[category] = count
-        total_matches += count
-    
-    # Compute component scores using configured weights when present
-    w = lambda k, d: float(weights.get(k, d))
-    pro_gov_score = (
-        keyword_matches.get("pro_gov_current_admin", 0) * w("pro_gov_current_admin", 0.4) +
-        keyword_matches.get("pro_gov_administration", 0) * w("pro_gov_administration", 0.3) +
-        keyword_matches.get("pro_gov_policies", 0) * w("pro_gov_policies", 0.2) +
-        keyword_matches.get("pro_gov_positive_terms", 0) * w("pro_gov_positive_terms", 0.1)
-    )
-    pro_opp_score = (
-        keyword_matches.get("pro_opp_opposition_figures", 0) * w("pro_opp_opposition_figures", 0.3) +
-        keyword_matches.get("pro_opp_criticism", 0) * w("pro_opp_criticism", 0.3) +
-        keyword_matches.get("pro_opp_protest", 0) * w("pro_opp_protest", 0.2) +
-        keyword_matches.get("pro_opp_negative_terms", 0) * w("pro_opp_negative_terms", 0.2)
-    )
-    neutral_score = (
-        keyword_matches.get("neutral_general", 0) * w("neutral_general", 0.4) +
-        keyword_matches.get("neutral_process", 0) * w("neutral_process", 0.3) +
-        keyword_matches.get("neutral_institutional", 0) * w("neutral_institutional", 0.3)
-    )
-    
-    # Calculate keyword-based score (0-1)
-    if total_matches == 0:
-        keyword_score = 0.0
-    else:
-        keyword_score = max(pro_gov_score, pro_opp_score) / max(total_matches, 1)
-    
-    # Source pattern analysis (simplified)
-    source_pattern = 0.1 if any(word in text_lower for word in ["government", "official"]) else 0.0
-    
-    # Language patterns (simplified sentiment context)
-    compound, _, _ = analyze_sentiment_vader(text)
-    sentiment_context = abs(compound) if abs(compound) > 0.3 else 0.0
-    
-    formal_indicators = ["according to", "stated", "announced", "reported", "confirmed"]
-    informal_indicators = ["slammed", "blasted", "hit back", "fired back"]
-    formal_count = sum(1 for indicator in formal_indicators if indicator in text_lower)
-    informal_count = sum(1 for indicator in informal_indicators if indicator in text_lower)
-    if informal_count > formal_count:
-        language_patterns = 0.2
-    elif formal_count > informal_count:
-        language_patterns = -0.1
-    else:
-        language_patterns = 0.0
-    
-    analysis_components = {
-        "keyword_score": keyword_score,
-        "source_pattern": source_pattern,
-        "language_patterns": language_patterns,
-        "sentiment_context": sentiment_context,
-        "version": version
-    }
-    bias_score = (
-        keyword_score * 0.6 +
-        source_pattern * 0.1 +
-        abs(language_patterns) * 0.1 +
-        sentiment_context * 0.2
-    )
-
-    # Require political entities to consider non-neutral directions
-    has_gov_entity = keyword_matches.get("pro_gov_current_admin", 0) > 0
-    has_opp_entity = keyword_matches.get("pro_opp_opposition_figures", 0) > 0
-    has_political_entity = has_gov_entity or has_opp_entity
-
-    if has_political_entity and pro_gov_score > pro_opp_score and bias_score > 0.1:
-        direction = "pro_government"
-    elif has_political_entity and pro_opp_score > pro_gov_score and bias_score > 0.1:
-        direction = "pro_opposition"
-    else:
-        direction = "neutral"
-    confidence_score = min(1.0, bias_score + (total_matches / 20.0))
-    elapsed_ms = (time.time() - start) * 1000.0
-    metadata = {
-        "direction": direction,
-        "keyword_matches": keyword_matches,
-        "processing_time_ms": int(elapsed_ms),
-        "analysis_components": analysis_components
-    }
-    return bias_score, direction, elapsed_ms, metadata
-
-
 def build_bias_row_for_vader(article_id: int, text: str) -> Dict[str, Any]:
     compound, label, elapsed_ms, details = analyze_sentiment_vader_detailed(text)
     return {
@@ -374,27 +439,6 @@ def build_bias_row_for_vader(article_id: int, text: str) -> Dict[str, Any]:
         "confidence_score": None,
         "processing_time_ms": int(elapsed_ms),
         "model_metadata": details,
-    }
-
-
-def build_bias_row_for_philippine_political(article_id: int, text: str) -> Dict[str, Any]:
-    """Build a bias analysis row for Philippine political bias analysis."""
-    bias_score, direction, elapsed_ms, metadata = analyze_political_bias_philippine(text)
-    # Calculate confidence based on keyword matches and analysis strength
-    total_keywords = sum(metadata["keyword_matches"].values())
-    confidence_score = min(1.0, bias_score + (total_keywords / 10.0))
-    return {
-        "article_id": article_id,
-        "model_version": "philippine_bias_v1",
-        "model_type": "political_bias",
-        "sentiment_score": None,
-        "sentiment_label": None,
-        "political_bias_score": bias_score,
-        "toxicity_score": None,
-        "confidence_score": confidence_score,
-        "processing_time_ms": int(elapsed_ms),
-        
-        "model_metadata": metadata,
     }
 
 

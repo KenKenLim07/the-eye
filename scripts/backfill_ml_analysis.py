@@ -207,12 +207,31 @@ def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description="Backfill sentiment analysis for missed articles")
     parser.add_argument("--days", type=int, default=7, help="Days to look back (default: 7)")
     parser.add_argument("--batch-size", type=int, default=50, help="Batch size for queuing (default: 50)")
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Rescore ALL articles in the lookback window (overwrites existing sentiment via upsert).",
+    )
+    parser.add_argument(
+        "--max-articles",
+        type=int,
+        default=0,
+        help="Optional cap for --force mode (0 = no cap).",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Show what would be processed without queuing")
     args = parser.parse_args(argv[1:])
 
-    logger.info("Scanning for articles missing sentiment analysis in the last %d days...", args.days)
     try:
-        missing_ids = find_articles_missing_sentiment(args.days)
+        if args.force:
+            logger.info("FORCE mode: enqueueing rescore for ALL articles in the last %d days...", args.days)
+            since_date = (datetime.now(timezone.utc) - timedelta(days=args.days)).isoformat()
+            all_ids = _fetch_all_ids_recent_articles(since_date)
+            if args.max_articles and args.max_articles > 0:
+                all_ids = all_ids[: args.max_articles]
+            missing_ids = all_ids
+        else:
+            logger.info("Scanning for articles missing sentiment analysis in the last %d days...", args.days)
+            missing_ids = find_articles_missing_sentiment(args.days)
     except Exception as e:
         raise SystemExit(
             "\n".join(
@@ -229,10 +248,10 @@ def main(argv: list[str]) -> int:
         ) from e
 
     if not missing_ids:
-        logger.info("No missing sentiment analysis found.")
+        logger.info("No articles to process.")
         return 0
 
-    logger.info("Found %d articles missing sentiment analysis.", len(missing_ids))
+    logger.info("Articles to process: %d", len(missing_ids))
     if args.dry_run:
         for i, aid in enumerate(missing_ids[:10], start=1):
             logger.info("  %d. Article ID: %d", i, aid)

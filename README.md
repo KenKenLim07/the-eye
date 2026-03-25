@@ -237,6 +237,24 @@ Windows / PowerShell:
 docker logs -f ph-eye-worker-ml
 ```
 
+## Evaluate Taglish VADER Patch
+
+Two evaluation modes:
+- **Gold set (offline):** checks accuracy against `backend/app/ml/vader_ph_eval.v1.json`.
+- **Long-form comparison (real articles):** compares legacy single-pass VADER vs the long-form weighted VADER on recent Supabase articles (helps you measure drift on your actual news domain).
+
+```bash
+# Optional: restart so the running Celery worker picks up env/config changes
+docker compose restart worker_ml
+
+# Gold set (patched). Optional neutral band widens "neutral" to reduce over-positive labels.
+docker compose exec -e VADER_NEUTRAL_BAND=0.12 worker_ml sh -lc "cd /app/backend && python scripts/evaluate_vader_ph_gold.py --ph-patch on"
+
+# Long-form comparison on real news (baseline vs patched; run both to compare)
+docker compose exec worker_ml sh -lc "cd /app/backend && python scripts/evaluate_vader_longform.py --days 7 --limit 300 --ph-patch off"
+docker compose exec worker_ml sh -lc "cd /app/backend && python scripts/evaluate_vader_longform.py --days 7 --limit 300 --ph-patch on"
+```
+
 ## Fix Low “Coverage (7d)” %
 
 The homepage **Coverage (7d)** metric is:
