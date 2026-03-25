@@ -125,16 +125,20 @@ async def get_sentiment_correlation(
     all_analysis = []
     batch_size = 250
     i = 0
+    active_model_version = (os.getenv("SENTIMENT_ACTIVE_MODEL_VERSION") or "").strip() or None
     while i < len(article_ids):
         batch_ids = article_ids[i : i + batch_size]
         try:
-            res = (
+            q = (
                 sb.table("bias_analysis")
-                .select("article_id,sentiment_score,model_type")
+                .select("article_id,sentiment_score,model_type,model_version,created_at")
                 .in_("article_id", batch_ids)
                 .eq("model_type", "sentiment")
-                .execute()
+                .order("created_at", desc=True)
             )
+            if active_model_version:
+                q = q.eq("model_version", active_model_version)
+            res = q.execute()
             all_analysis.extend(res.data or [])
             i += len(batch_ids)
         except Exception:
@@ -143,12 +147,31 @@ async def get_sentiment_correlation(
                 continue
             raise
 
+    # Deduplicate to latest sentiment row per article (prevents skew if multiple model versions exist).
+    latest_by_article: dict[int, dict] = {}
+    for row in all_analysis:
+        aid = row.get("article_id")
+        if aid is None:
+            continue
+        try:
+            aid_int = int(aid)
+        except Exception:
+            continue
+        created_at = str(row.get("created_at") or "")
+        existing = latest_by_article.get(aid_int)
+        if existing is None:
+            latest_by_article[aid_int] = row
+            continue
+        existing_created = str(existing.get("created_at") or "")
+        if created_at and (not existing_created or created_at > existing_created):
+            latest_by_article[aid_int] = row
+
     id_to_meta = {}
     for a in all_articles:
         id_to_meta[a["id"]] = ((a.get("source") or "unknown"), to_ph_date_str(a.get("published_at", "")))
 
     per_source_date_scores = _dd(lambda: _dd(list))
-    for row in all_analysis:
+    for row in latest_by_article.values():
         aid = row.get("article_id")
         score = row.get("sentiment_score")
         if aid not in article_id_set or score is None:
@@ -325,16 +348,19 @@ async def get_top_entities(
         # Keep chunks small to avoid PostgREST row limits silently truncating results.
         all_analysis = []
         batch_size = 250
+        active_model_version = (os.getenv("SENTIMENT_ACTIVE_MODEL_VERSION") or "").strip() or None
         for i in range(0, len(article_ids), batch_size):
             batch_ids = article_ids[i : i + batch_size]
-            res = (
+            q = (
                 sb.table("bias_analysis")
-                .select("article_id,sentiment_score,created_at")
+                .select("article_id,sentiment_score,created_at,model_version")
                 .in_("article_id", batch_ids)
                 .eq("model_type", "sentiment")
                 .order("created_at", desc=True)
-                .execute()
             )
+            if active_model_version:
+                q = q.eq("model_version", active_model_version)
+            res = q.execute()
             all_analysis.extend(res.data or [])
 
         # Deduplicate to latest sentiment per article.
@@ -593,17 +619,20 @@ async def get_trends(period: str = "7d", source: Optional[str] = None, include_t
         all_analysis = []
         batch_size = 250
         i = 0
+        active_model_version = (os.getenv("SENTIMENT_ACTIVE_MODEL_VERSION") or "").strip() or None
         while i < len(article_ids):
             batch_ids = article_ids[i : i + batch_size]
             try:
-                analysis_result = (
+                q = (
                     sb.table("bias_analysis")
-                    .select("article_id,sentiment_label,sentiment_score,created_at")
+                    .select("article_id,sentiment_label,sentiment_score,created_at,model_version")
                     .in_("article_id", batch_ids)
                     .eq("model_type", "sentiment")
                     .order("created_at", desc=True)
-                    .execute()
                 )
+                if active_model_version:
+                    q = q.eq("model_version", active_model_version)
+                analysis_result = q.execute()
                 all_analysis.extend(analysis_result.data or [])
                 i += len(batch_ids)
             except Exception:

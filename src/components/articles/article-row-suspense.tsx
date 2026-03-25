@@ -18,7 +18,7 @@ function ArticleRowSkeleton({ title }: { title: string }) {
         <h2 className="text-lg font-semibold tracking-tight">{title}</h2>
         <Skeleton className="h-6 w-8" />
       </div>
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto -mx-2 px-2 sm:mx-0 sm:px-0">
         <div className="flex gap-4 pr-4">
           {Array.from({ length: 3 }).map((_, i) => (
             <Card key={i} className="min-w-[280px] max-w-[320px]">
@@ -90,7 +90,7 @@ async function ArticleRowContent({ sourceValue, title, limit = 20 }: ArticleRowS
         <h2 className="text-lg font-semibold tracking-tight">{title}</h2>
         <Badge variant="secondary">{articles.length}</Badge>
       </div>
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto -mx-2 px-2 sm:mx-0 sm:px-0">
         <div className="flex gap-4 pr-4">
           {articles.map((a) => (
             <Card key={a.id} className="min-w-[280px] max-w-[320px]">

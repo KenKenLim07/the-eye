@@ -41,7 +41,7 @@ export default async function ArticleRowServer({ articles, title, sourceValue, c
           </Link>
         </div>
       </div>
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto -mx-2 px-2 sm:mx-0 sm:px-0">
         <div className="flex gap-4 pr-4">
           {safeArticles.length > 0 ? (
             <ArticleCardsInteractive articles={safeArticles} />
@@ -76,7 +76,7 @@ export default async function ArticleRowServer({ articles, title, sourceValue, c
         </div>
       </summary>
       <div className="px-3 pb-3 sm:px-4 sm:pb-4">
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto -mx-2 px-2 sm:mx-0 sm:px-0">
           <div className="flex gap-4 pr-4">
             {safeArticles.length > 0 ? (
               <ArticleCardsInteractive articles={safeArticles} />

@@ -15,6 +15,10 @@ const PAGE_SIZE = 20;
 
 export const dynamic = "force-dynamic";
 
+function escapeForIlike(input: string): string {
+  return input.replace(/([%_\\])/g, "\\$1");
+}
+
 export default async function SourcePage({ params, searchParams }: PageProps) {
   const resolvedParams = await params;
   const resolvedSearchParams = await searchParams;
@@ -27,18 +31,37 @@ export default async function SourcePage({ params, searchParams }: PageProps) {
   const from = (page - 1) * PAGE_SIZE;
   const to = from + PAGE_SIZE - 1;
 
-  let queryBuilder = supabaseServer
-    .from("articles")
-    .select("id,title,url,content,published_at,source,category", { count: "exact" })
-    .eq("source", sourceParam)
-    .order("published_at", { ascending: false })
-    .range(from, to);
+  const buildBase = () => {
+    return supabaseServerUntyped
+      .from("articles")
+      .select("id,title,url,content,published_at,source,category", { count: "exact" })
+      .eq("source", sourceParam)
+      .order("published_at", { ascending: false })
+      .range(from, to);
+  };
+
+  let data: unknown[] | null = null;
+  let error: unknown | null = null;
+  let count: number | null = null;
 
   if (query) {
-    queryBuilder = queryBuilder.or(`title.ilike.%${query}%,content.ilike.%${query}%`);
+    const fts = await buildBase().textSearch("search_tsv", query, { type: "websearch", config: "simple" });
+    if (!fts.error) {
+      data = fts.data ?? null;
+      count = (fts.count as number | null | undefined) ?? null;
+    } else {
+      const escaped = escapeForIlike(query);
+      const ilike = await buildBase().or(`title.ilike.%${escaped}%,content.ilike.%${escaped}%`);
+      data = ilike.data ?? null;
+      count = (ilike.count as number | null | undefined) ?? null;
+      error = ilike.error ?? fts.error;
+    }
+  } else {
+    const res = await buildBase();
+    data = res.data ?? null;
+    count = (res.count as number | null | undefined) ?? null;
+    error = res.error ?? null;
   }
-
-  const { data, error, count } = await queryBuilder;
 
   if (error) {
     return (
@@ -71,10 +94,11 @@ export default async function SourcePage({ params, searchParams }: PageProps) {
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   // Enrich with demo-mode sentiment badges (public table). Non-fatal.
-  let articlesWithSentiment = data || [];
-  if (data && data.length > 0) {
+  const rows = (data as Array<{ id: number | string }> | null) || [];
+  let articlesWithSentiment = rows || [];
+  if (rows && rows.length > 0) {
     try {
-      const ids = data.map((a) => Number(a.id)).filter(Boolean);
+      const ids = rows.map((a) => Number(a.id)).filter(Boolean);
       const sentimentById: Record<number, string | null> = {};
       const batchSize = 250;
       for (let i = 0; i < ids.length; i += batchSize) {
@@ -88,7 +112,7 @@ export default async function SourcePage({ params, searchParams }: PageProps) {
           sentimentById[Number(r.article_id)] = (r.sentiment_label as string | null | undefined) ?? null;
         }
       }
-      articlesWithSentiment = data.map((article) => ({
+      articlesWithSentiment = rows.map((article) => ({
         ...article,
         sentiment: sentimentById[Number(article.id)] ?? null,
       }));
@@ -119,7 +143,7 @@ export default async function SourcePage({ params, searchParams }: PageProps) {
           </Card>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            <ArticleCardsInteractive articles={articlesWithSentiment} />
+            <ArticleCardsInteractive articles={articlesWithSentiment} layout="grid" />
           </div>
         )}
 

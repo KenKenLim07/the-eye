@@ -21,9 +21,10 @@ interface Article {
 
 interface ArticleCardsInteractiveProps {
   articles: Article[];
+  layout?: "carousel" | "grid";
 }
 
-export function ArticleCardsInteractive({ articles }: ArticleCardsInteractiveProps) {
+export function ArticleCardsInteractive({ articles, layout = "carousel" }: ArticleCardsInteractiveProps) {
   const [openId, setOpenId] = useState<number | null>(null);
   const items = useMemo(() => articles ?? [], [articles]);
   type StaggerStyle = CSSProperties & { ["--i"]?: number };
@@ -39,7 +40,7 @@ export function ArticleCardsInteractive({ articles }: ArticleCardsInteractivePro
   const sentimentClass = (s: string | null | undefined) => {
     const v = (s || "").toLowerCase();
     if (v === "positive") return "bg-emerald-600 text-white border-transparent";
-    if (v === "negative") return "bg-primary text-primary-foreground border-transparent";
+    if (v === "negative") return "bg-red-600 text-white border-transparent dark:bg-red-500";
     if (v === "neutral") return "bg-slate-700 text-white border-transparent dark:bg-slate-500";
     return "bg-muted text-muted-foreground border-border";
   };
@@ -55,7 +56,10 @@ export function ArticleCardsInteractive({ articles }: ArticleCardsInteractivePro
         return (
           <div
             key={a.id}
-            className="group u-stagger-item flex-none w-[280px] sm:w-[320px] lg:w-[360px]"
+            className={[
+              "group u-stagger-item min-w-0",
+              layout === "grid" ? "w-full" : "flex-none w-[280px] sm:w-[320px] lg:w-[360px]",
+            ].join(" ")}
             style={staggerStyle}
           >
             <Card className="h-full transition-[transform,box-shadow,border-color] duration-200 hover:shadow-md hover:-translate-y-[1px] border-border/70">

@@ -12,6 +12,7 @@ playwright==1.46.0
 playwright-stealth==2.0.0
 supabase==2.6.0
 nltk==3.8.1
+vaderSentiment==3.3.2
 scikit-learn==1.5.1
 pandas==2.2.2
 numpy==1.26.4
@@ -21,3 +22,7 @@ scipy==1.13.1
 # NLP (spaCy)
 spacy==3.7.4
 spacy-loggers==1.0.5
+
+# NLP (Transformers)
+transformers==4.39.3
+torch==2.2.2

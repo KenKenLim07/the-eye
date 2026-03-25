@@ -77,9 +77,29 @@ services:
       - CELERYD_PREFETCH_MULTIPLIER=1
       # Taglish sentiment patch (VADER lexicon extension)
       - VADER_PH_PATCH=1
+      # Active sentiment engine (vader|distilbert|hybrid)
+      - SENTIMENT_MODEL=hybrid
+      - SENTIMENT_MODEL_VERSION=sentiment_hybrid_v1
+      # DistilBERT (CPU) settings
+      - DISTILBERT_MODEL_ID=distilbert-base-uncased-finetuned-sst-2-english
+      - DISTILBERT_MAX_LENGTH=512
+      - DISTILBERT_MAX_CHARS=2000
+      - DISTILBERT_NEUTRAL_MIN_CONF=0.60
+      # Hybrid routing threshold (Tagalog signal ratio)
+      - TAGALOG_SIGNAL_THRESHOLD=0.15
+      # Wider neutral zone for news (tune via gold set; e.g. 0.16)
+      - VADER_NEUTRAL_BAND=0.16
+      # Avoid over-polarizing mixed "X pero Y" news sentences
+      - VADER_TL_BUT_WORDS=0
+      - VADER_TL_BUT_NORMALIZE=0
+      # Persist HF weights/cache across restarts
+      - HF_HOME=/root/.cache/huggingface
+      # Reduce SST-2 over-polarization on news-style reporting prefaces
+      - DISTILBERT_NEUTRALIZE_REPORTING=1
     volumes:
       - ./backend:/app/backend
       - ./:/app
+      - ${HOME}/.cache/huggingface:/root/.cache/huggingface
     depends_on:
       - redis
     dns:

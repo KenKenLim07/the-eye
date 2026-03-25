@@ -78,14 +78,14 @@ Frontend (`.env.local`):
 2. Start backend services (Redis + API + worker + beat)
 
 ```bash
-docker compose up -d
+docker compose up -d redis api worker beat
 
 # Linux-only (optional overrides):
-docker compose -f docker-compose.yml -f docker-compose.linux.yml up -d
+docker compose -f docker-compose.yml -f docker-compose.linux.yml up -d redis api worker beat
 ```
 
 ```powershell
-docker compose up -d
+docker compose up -d redis api worker beat
 ```
 
 API will be on `http://localhost:8000`.
@@ -93,14 +93,14 @@ API will be on `http://localhost:8000`.
 For a more stable run (no FastAPI hot-reload), use:
 
 ```bash
-docker compose -f docker-compose.prod.yml up -d
+docker compose -f docker-compose.prod.yml up -d redis api worker beat
 
 # Linux-only (optional overrides):
-docker compose -f docker-compose.prod.yml -f docker-compose.linux.yml up -d
+docker compose -f docker-compose.prod.yml -f docker-compose.linux.yml up -d redis api worker beat
 ```
 
 ```powershell
-docker compose -f docker-compose.prod.yml up -d
+docker compose -f docker-compose.prod.yml up -d redis api worker beat
 ```
 
 3. Start the frontend
@@ -111,16 +111,6 @@ npm run dev
 ```
 
 Frontend will be on `http://localhost:3000`.
-
-Optional:
-
-```bash
-# Faster dev server (Turbopack). If you get missing-chunk errors, run `npm run clean:next` then retry.
-npm run dev:turbopack
-
-# Clear Next build/dev cache
-npm run clean:next
-```
 
 ## Smoke Test (Backend)
 
@@ -150,19 +140,11 @@ bash backend/scripts/pipeline_test.sh --source inquirer
 powershell -NoProfile -ExecutionPolicy Bypass -File backend/scripts/pipeline_test.ps1 -Source inquirer
 ```
 
-## Timezone Sanity Check
-
-If dates look “late/early” on some devices, verify that your DB/API is returning timezone-aware timestamps:
-
-- Open `/api/debug/env` (local and Vercel) and check:
-  - `latest_article_*_has_tz` should be `true`
-  - `intl_supports_asia_manila` should be `true` (or the UI will fall back to deterministic Manila formatting)
-- Open `/api/articles?pageSize=1` and confirm `published_at` / `inserted_at` end with `Z` or `+00:00` (not a bare `YYYY-MM-DDTHH:mm:ss`).
-
 ## Manual Scrape (Queue a Scraper Job)
 
 Supported `source` values:
 - `inquirer`
+- `abs_cbn`
 - `gma`
 - `philstar`
 - `manila_bulletin`
@@ -173,7 +155,7 @@ Supported `source` values:
 Queue a job:
 
 ```bash
-curl -s -X POST "http://localhost:8000/scrape/run" \
+curl -sS -X POST "http://localhost:8000/scrape/run" \
   -H "Content-Type: application/json" \
   -d '{"source":"inquirer"}'
 
@@ -207,126 +189,6 @@ $taskId = $run.jobs[0].task_id
 Invoke-RestMethod "http://localhost:8000/scrape/status/$taskId"
 ```
 
-## ML Backfill (Fix Missing Sentiment Labels)
-
-Sometimes articles exist in Supabase but are missing sentiment rows (so the UI shows unlabeled items). This backfill scans for missing sentiment and queues ML analysis jobs to fill `bias_analysis` + `article_sentiment_public`.
-
-Linux / bash:
-
-```bash
-# Real run (queues ML tasks)
-./backfill.sh 30 200
-
-# Dry run (no tasks queued; only prints missing IDs)
-./backfill.sh 30 200 --dry-run
-
-# Watch progress
-sudo docker logs -f ph-eye-worker-ml
-```
-
-Windows / PowerShell:
-
-```powershell
-# Real run (queues ML tasks)
-.\backfill.ps1 -Days 30 -BatchSize 200
-
-# Dry run (no tasks queued; only prints missing IDs)
-.\backfill.ps1 -Days 30 -BatchSize 200 -DryRun
-
-# Watch progress
-docker logs -f ph-eye-worker-ml
-```
-
-## Evaluate Taglish VADER Patch
-
-Two evaluation modes:
-- **Gold set (offline):** checks accuracy against `backend/app/ml/vader_ph_eval.v1.json`.
-- **Long-form comparison (real articles):** compares legacy single-pass VADER vs the long-form weighted VADER on recent Supabase articles (helps you measure drift on your actual news domain).
-
-```bash
-# Optional: restart so the running Celery worker picks up env/config changes
-docker compose restart worker_ml
-
-# Gold set (patched). Optional neutral band widens "neutral" to reduce over-positive labels.
-docker compose exec -e VADER_NEUTRAL_BAND=0.12 worker_ml sh -lc "cd /app/backend && python scripts/evaluate_vader_ph_gold.py --ph-patch on"
-
-# Long-form comparison on real news (baseline vs patched; run both to compare)
-docker compose exec worker_ml sh -lc "cd /app/backend && python scripts/evaluate_vader_longform.py --days 7 --limit 300 --ph-patch off"
-docker compose exec worker_ml sh -lc "cd /app/backend && python scripts/evaluate_vader_longform.py --days 7 --limit 300 --ph-patch on"
-```
-
-## Fix Low “Coverage (7d)” %
-
-The homepage **Coverage (7d)** metric is:
-
-> `(# articles in last 7 days with a row in article_sentiment_public) / (total # articles in last 7 days)`
-
-If `article_sentiment_public` was added later (or was temporarily failing), you can have sentiment rows in
-`bias_analysis` but still be missing the **public cache** rows — which makes coverage look artificially low.
-
-Backfill the public cache from existing sentiment rows:
-
-Linux / bash:
-
-```bash
-# Preview what would be upserted
-./backfill_public_sentiment.sh 7 --dry-run
-
-# Apply (writes to article_sentiment_public)
-./backfill_public_sentiment.sh 7 --apply 500
-```
-
-Windows / PowerShell:
-
-```powershell
-# Preview
-.\backfill_public_sentiment.ps1 -Days 7
-
-# Apply
-.\backfill_public_sentiment.ps1 -Days 7 -Apply -BatchSize 500
-```
-
-## Fix Wrong `published_at` (Time Drift / Dual-Boot Clock Issues)
-
-If your PC clock was wrong while scraping (common in Windows+Linux dual boot), some articles can get a `published_at` timestamp that is **in the future** relative to `inserted_at`. This breaks Trends daily bucketing.
-
-This helper scans recent rows and fixes the two most common issues:
-- **Timezone skew (~+8h):** `published_at` was saved without a timezone and got interpreted as UTC (shifts day buckets). Fix: shift `published_at` back by 8 hours.
-- **True future drift:** `published_at` is far ahead of `inserted_at`. Fix: set `published_at = inserted_at`.
-
-Linux / bash:
-
-```bash
-# Dry run (recommended first)
-./fix_published_at.sh 7 --dry-run
-
-# Apply fixes
-./fix_published_at.sh 7 --apply
-```
-
-Windows / PowerShell:
-
-```powershell
-# Dry run (recommended first)
-.\fix_published_at.ps1 -Days 7 -DryRun
-
-# Apply fixes
-.\fix_published_at.ps1 -Days 7 -Apply
-```
-
-## Why Scrapers Sometimes “Wait” After `docker compose up -d`
-
-By default, scrapers are scheduled by Celery Beat on intervals, so the **first automatic run** can be delayed until the interval is due:
-- `rappler`: every 3600s (1h 00m)
-- `gma`: every 3888s (1h 04m 48s)
-- `philstar`: every 4212s (1h 10m 12s)
-- `inquirer`: every 4500s (1h 15m 00s)
-- `manila_bulletin`: every 4788s (1h 19m 48s)
-- `manila_times`: every 5112s (1h 25m 12s)
-- `sunstar`: every 5400s (1h 30m 00s)
-
-If you want scrapes to run immediately, use the manual `POST /scrape/run` commands above or run `backend/scripts/pipeline_test.py`.
-
 ## Legacy Root Tools (Archived)
 
 Older one-off scripts (tests, beat monitors, etc.) were moved out of the repo root into `archive/legacy/root_tools/` to keep the root clean. The supported verification flow is `backend/scripts/smoke_test.ps1` and `backend/scripts/pipeline_test.ps1`.
@@ -336,6 +198,17 @@ Older one-off scripts (tests, beat monitors, etc.) were moved out of the repo ro
 - Health: `GET /`, `GET /health`
 - Scraping: `POST /scrape/run`, `GET /scrape/status/{task_id}`
 - Articles: `GET /articles`, `GET /articles/home-optimized`, `GET /articles/{article_id}`, `GET /articles/{article_id}/analysis`
+
+## Search Performance (Supabase)
+
+The server-rendered Search (`/search`) and Source pages (`/source/[source]`) can time out if the database must scan
+large `content` text fields using `ILIKE %query%` (Postgres error code `57014` / "statement timeout").
+
+Preferred long-term fix: add a full-text search (FTS) tsvector + GIN index, then the frontend will automatically
+use `.textSearch("search_tsv", ...)` when available.
+
+- Apply FTS: run `backend/scripts/create_article_search_fts.sql` in Supabase SQL Editor.
+- Alternative: run trigram indexes for faster substring `ILIKE` search via `backend/scripts/create_article_search_trgm.sql` (bigger indexes).
 - Analytics:
   - `GET /ml/trends?period=7d|30d&source=...`
   - `GET /ml/correlation?period=7d|30d`

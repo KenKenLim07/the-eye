@@ -47,14 +47,14 @@
 
 :root {
   --radius: 0.625rem;
-  /* UI UX Pro Max reference: keep Breaking red + link blue, but use a neutral “paper” background (less pink). */
+  /* Neutral editorial theme: keep red for destructive/negative; use ink as primary. */
   --background: #FFFBF5;
   --foreground: #111827;
   --card: #FFFFFF;
   --card-foreground: #111827;
   --popover: #FFFFFF;
   --popover-foreground: #111827;
-  --primary: #DC2626;
+  --primary: #111827;
   --primary-foreground: #FFFFFF;
   --secondary: #F1F5F9;
   --secondary-foreground: #0F172A;
@@ -65,7 +65,7 @@
   --destructive: #DC2626;
   --border: #E7E5E4;
   --input: #E7E5E4;
-  --ring: #DC2626;
+  --ring: #111827;
   --chart-1: oklch(0.646 0.222 41.116);
   --chart-2: oklch(0.6 0.118 184.704);
   --chart-3: oklch(0.398 0.07 227.392);
@@ -88,7 +88,7 @@
   --card-foreground: #F8FAFC;
   --popover: #111214;
   --popover-foreground: #F8FAFC;
-  --primary: #EF4444;
+  --primary: #E5E7EB;
   --primary-foreground: #0B0A0A;
   --secondary: #1F2937;
   --secondary-foreground: #F8FAFC;
@@ -99,7 +99,7 @@
   --destructive: #EF4444;
   --border: #232425;
   --input: #232425;
-  --ring: #EF4444;
+  --ring: #E5E7EB;
   --chart-1: oklch(0.488 0.243 264.376);
   --chart-2: oklch(0.696 0.17 162.48);
   --chart-3: oklch(0.769 0.188 70.08);

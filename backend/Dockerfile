@@ -9,8 +9,12 @@ COPY backend/requirements.txt /app/backend/requirements.txt
 
 # Install Python deps (Playwright and browsers already in base image).
 # BuildKit pip cache makes rebuilds much faster on flaky/slow networks.
+ARG PIP_INDEX_URL=https://pypi.org/simple
+ARG TORCH_CPU_EXTRA_INDEX_URL=https://download.pytorch.org/whl/cpu
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --no-cache-dir -r /app/backend/requirements.txt && \
+    pip install --no-cache-dir --retries 5 --timeout 120 \
+      --index-url ${PIP_INDEX_URL} --extra-index-url ${TORCH_CPU_EXTRA_INDEX_URL} \
+      -r /app/backend/requirements.txt && \
     python -c "print('Enhanced regex analytics ready')" && \
     python -c "print('Advanced sentiment analytics ready')" && \
     python -c "import spacy, pkgutil; print('spaCy installed:', bool(pkgutil.find_loader('spacy')))"

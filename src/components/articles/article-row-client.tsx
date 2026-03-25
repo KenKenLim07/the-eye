@@ -127,7 +127,7 @@ export default function ArticleRowClient({
           </CardContent>
         </Card>
       ) : (
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto -mx-2 px-2 sm:mx-0 sm:px-0">
           <div className="flex gap-4 pr-4">
             <ArticleCardsInteractive articles={articles} />
           </div>

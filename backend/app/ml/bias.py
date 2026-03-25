@@ -7,6 +7,7 @@ import logging
 
 # Lazy NLTK/VADER import and resource bootstrap
 _vader = None
+_vader_library = "nltk-vader"
 _VADER_PH_PATCH_CACHE: dict[str, Any] | None = None
 _VADER_PH_PATCH_APPLIED: bool = False
 _VADER_PH_PATCH_ERROR: str | None = None
@@ -74,9 +75,12 @@ def _preprocess_for_vader(text: str) -> str:
         for pat, token in patterns:
             raw = pat.sub(token, raw)
 
-        # Normalize Tagalog contrast conjunctions to "but" (word-boundary match).
-        # Even if we also patch VADER's BUT_WORDS, this makes behavior consistent.
-        but_words = patch.get("but_words") or []
+        # Normalize Tagalog contrast conjunctions to "but" (optional).
+        # This can over-polarize "mixed" sentences ("X pero Y") for news; disable via
+        # VADER_TL_BUT_NORMALIZE=0.
+        raw_env = os.getenv("VADER_TL_BUT_NORMALIZE")
+        normalize_contrast = True if raw_env is None else _truthy_env("VADER_TL_BUT_NORMALIZE")
+        but_words = (patch.get("but_words") or []) if normalize_contrast else []
         contrast_pat = patch.get("_compiled_contrast_pattern")
         if contrast_pat is None and but_words:
             ws = [re.escape(str(w).strip()) for w in but_words if str(w).strip()]
@@ -170,6 +174,10 @@ def _apply_vader_ph_patch(sia: Any) -> dict[str, Any]:
         negations = patch.get("negations") or []
         boosters = patch.get("boosters") or {}
         but_words = patch.get("but_words") or []
+        # Allow disabling Tagalog contrast weighting (often over-polarizes "X pero Y" news lines).
+        # Default: enabled (backwards compatible). Set VADER_TL_BUT_WORDS=0 to disable.
+        enable_but_words_env = os.getenv("VADER_TL_BUT_WORDS")
+        enable_but_words = True if enable_but_words_env is None else _truthy_env("VADER_TL_BUT_WORDS")
         override_existing_allowlist = patch.get("override_existing_allowlist") or []
         allow_override_set = {str(x).strip().lower() for x in override_existing_allowlist if str(x).strip()}
 
@@ -231,7 +239,12 @@ def _apply_vader_ph_patch(sia: Any) -> dict[str, Any]:
                 status["ph_boosters_added"] = max(0, len(constants.BOOSTER_DICT) - before)
 
             # "but" equivalents (Tagalog)
-            if hasattr(constants, "BUT_WORDS") and isinstance(but_words, list) and but_words:
+            if (
+                enable_but_words
+                and hasattr(constants, "BUT_WORDS")
+                and isinstance(but_words, list)
+                and but_words
+            ):
                 try:
                     before = len(constants.BUT_WORDS)
                 except Exception:
@@ -268,7 +281,7 @@ def _apply_vader_ph_patch(sia: Any) -> dict[str, Any]:
 
 
 def _ensure_vader():
-    global _vader
+    global _vader, _vader_library
     if _vader is not None:
         return _vader
     try:
@@ -276,14 +289,30 @@ def _ensure_vader():
         try:
             # Try to construct; if lexicon missing, download
             _vader = SentimentIntensityAnalyzer()
+            _vader_library = "nltk-vader"
             _apply_vader_ph_patch(_vader)
             return _vader
+        except LookupError:
+            # Offline-friendly fallback: use `vaderSentiment` package if installed
+            # (bundles lexicon, no NLTK downloader needed).
+            try:
+                from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer as VSIA  # type: ignore
+
+                _vader = VSIA()
+                _vader_library = "vaderSentiment"
+                _apply_vader_ph_patch(_vader)
+                return _vader
+            except Exception:
+                # Last resort: attempt NLTK download (may fail on flaky DNS).
+                import nltk
+
+                nltk.download("vader_lexicon", quiet=True)
+                _vader = SentimentIntensityAnalyzer()
+                _vader_library = "nltk-vader"
+                _apply_vader_ph_patch(_vader)
+                return _vader
         except Exception:
-            import nltk
-            nltk.download('vader_lexicon', quiet=True)
-            _vader = SentimentIntensityAnalyzer()
-            _apply_vader_ph_patch(_vader)
-            return _vader
+            raise
     except Exception as e:
         raise RuntimeError(f"Failed to initialize VADER: {e}")
 
@@ -357,7 +386,7 @@ def analyze_sentiment_vader_detailed(text: str) -> Tuple[float, str, float, Dict
     if not raw_text:
         elapsed_ms = (time.time() - start) * 1000.0
         return 0.0, "neutral", elapsed_ms, {
-            "library": "nltk-vader",
+            "library": _vader_library,
             "mode": "longform_weighted",
             "chunks_analyzed": 0,
             "title_present": False,
@@ -373,7 +402,7 @@ def analyze_sentiment_vader_detailed(text: str) -> Tuple[float, str, float, Dict
         label = _label_from_compound(score, pos_threshold=pos_th, neg_threshold=neg_th)
         elapsed_ms = (time.time() - start) * 1000.0
         return score, label, elapsed_ms, {
-            "library": "nltk-vader",
+            "library": _vader_library,
             "mode": "short_text",
             "chunks_analyzed": 1,
             "title_present": bool(title),
@@ -404,7 +433,7 @@ def analyze_sentiment_vader_detailed(text: str) -> Tuple[float, str, float, Dict
     label = _label_from_compound(compound, pos_threshold=pos_th, neg_threshold=neg_th)
     elapsed_ms = (time.time() - start) * 1000.0
     metadata = {
-        "library": "nltk-vader",
+        "library": _vader_library,
         "mode": "longform_weighted",
         "chunks_analyzed": len(chunk_scores),
         "title_present": title_score is not None,
@@ -428,6 +457,261 @@ def analyze_sentiment_vader(text: str) -> Tuple[float, str, float]:
     compound, label, elapsed_ms, _ = analyze_sentiment_vader_detailed(text)
     return compound, label, elapsed_ms
 
+
+def analyze_sentiment_distilbert_detailed(text: str) -> Tuple[float, str, float, Dict[str, Any]]:
+    """
+    CPU DistilBERT sentiment (English-first).
+    Returns: (compound_score, label, elapsed_ms, metadata)
+    """
+    try:
+        from app.ml.sentiment_transformer import analyze_sentiment_distilbert_detailed as _analyze  # noqa: WPS433
+
+        return _analyze(text)
+    except Exception as e:
+        # Fail closed: don't break the ML pipeline if transformers isn't installed yet.
+        start = time.time()
+        elapsed_ms = (time.time() - start) * 1000.0
+        return 0.0, "neutral", elapsed_ms, {
+            "library": "hf-transformers",
+            "engine": "distilbert_sst2",
+            "error": str(e),
+        }
+
+
+_TAGALOG_FUNCTION_WORDS = {
+    "ang",
+    "ng",
+    "mga",
+    "sa",
+    "si",
+    "ni",
+    "kay",
+    "kina",
+    "nasa",
+    "para",
+    "dahil",
+    "kasi",
+    "pero",
+    "ngunit",
+    "subalit",
+    "hindi",
+    "wala",
+    "huwag",
+    "pang",
+    "naman",
+    "sana",
+    "lang",
+    "rin",
+    "din",
+    "pa",
+    "raw",
+    "daw",
+    "umano",
+    "ayon",
+    "muna",
+    "kayo",
+    "kami",
+    "tayo",
+    "ito",
+    "iyan",
+    "yun",
+    "yung",
+}
+
+_TAGALOG_SIGNAL_TOKENS = {
+    # Common Taglish sentiment terms
+    "maganda",
+    "pangit",
+    "ganda",
+    "saya",
+    "lungkot",
+    "sayang",
+    "bisyo",
+    "bwisit",
+    "nakakainis",
+    "nakakalungkot",
+    # Common PH news terms (often Tagalog-heavy)
+    "patay",
+    "pumatay",
+    "namatay",
+    "binaril",
+    "sinaksak",
+    "gahasa",
+    "kidnap",
+    "krimen",
+    "bagyo",
+    "baha",
+    "nasunog",
+    "nalunod",
+    "nabangga",
+    "sumalpok",
+    "sagupaan",
+    "pahirap",
+    "krisis",
+    "kakulangan",
+    "brownout",
+    "aberya",
+    "ayuda",
+}
+
+_REPORTING_PREFIX_RE = re.compile(
+    r"^\s*(according to|as of now|as of today|as of|reported|confirmed|update|tip)\s*(?:[:\\-–—]\\s*)?",
+    flags=re.IGNORECASE,
+)
+
+
+def _looks_like_reporting_preface(text: str) -> bool:
+    raw = (text or "").strip()
+    if not raw:
+        return False
+    return bool(_REPORTING_PREFIX_RE.match(raw))
+
+
+def _get_env_float(name: str, default: float) -> float:
+    raw = (os.getenv(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        return float(raw)
+    except Exception:
+        return default
+
+
+def _tagalog_signal(text: str) -> dict[str, Any]:
+    """
+    Heuristic language signal:
+    - count Tagalog function words + a conservative set of PH/Taglish tokens
+    - compute ratio = hits / tokens
+    """
+    raw = (text or "").strip().lower()
+    tokens = re.findall(r"[a-zñ]+", raw, flags=re.IGNORECASE)
+    if not tokens:
+        return {"tokens": 0, "hits": 0, "ratio": 0.0}
+    hits = 0
+    for t in tokens:
+        tl = t.lower()
+        if tl in _TAGALOG_FUNCTION_WORDS or tl in _TAGALOG_SIGNAL_TOKENS:
+            hits += 1
+    return {"tokens": len(tokens), "hits": hits, "ratio": (hits / max(1, len(tokens)))}
+
+
+def analyze_sentiment_hybrid_detailed(text: str) -> Tuple[float, str, float, Dict[str, Any]]:
+    """
+    Hybrid sentiment router:
+    - If Tagalog-signal is high => use VADER+PH patch
+    - Else => use DistilBERT (SST-2) on CPU
+    """
+    threshold = _get_env_float("TAGALOG_SIGNAL_THRESHOLD", 0.06)
+    threshold = max(0.0, min(1.0, threshold))
+    sig = _tagalog_signal(text)
+    route = "vader" if float(sig.get("ratio") or 0.0) >= threshold else "distilbert"
+    route_reason = "tagalog_signal"
+
+    # Neutral-ish reporting prefaces are common in news. DistilBERT SST-2 (reviews)
+    # tends to over-polarize these; route them through VADER instead.
+    if route == "distilbert" and _looks_like_reporting_preface(text):
+        route = "vader"
+        route_reason = "reporting_preface"
+
+    if route == "vader":
+        try:
+            compound, label, elapsed_ms, meta = analyze_sentiment_vader_detailed(text)
+            return compound, label, elapsed_ms, {
+                "library": "hybrid",
+                "engine": "vader_or_distilbert",
+                "route": "vader",
+                "route_reason": route_reason,
+                "tagalog_signal_threshold": threshold,
+                "tagalog_signal_ratio": sig.get("ratio"),
+                "tagalog_signal_hits": sig.get("hits"),
+                "tagalog_signal_tokens": sig.get("tokens"),
+                "route_metadata": meta,
+            }
+        except Exception as e:
+            # If VADER can't initialize (e.g., NLTK lexicon missing offline), fall back to DistilBERT.
+            compound, label, elapsed_ms, meta = analyze_sentiment_distilbert_detailed(text)
+            return compound, label, elapsed_ms, {
+                "library": "hybrid",
+                "engine": "vader_or_distilbert",
+                "route": "distilbert_fallback",
+                "route_reason": route_reason,
+                "tagalog_signal_threshold": threshold,
+                "tagalog_signal_ratio": sig.get("ratio"),
+                "tagalog_signal_hits": sig.get("hits"),
+                "tagalog_signal_tokens": sig.get("tokens"),
+                "route_metadata": meta,
+                "vader_error": str(e),
+            }
+
+    compound, label, elapsed_ms, meta = analyze_sentiment_distilbert_detailed(text)
+    if meta.get("error"):
+        # If transformers fails (missing deps, download issue), fail over to VADER.
+        v_compound, v_label, v_elapsed, v_meta = analyze_sentiment_vader_detailed(text)
+        return v_compound, v_label, v_elapsed, {
+            "library": "hybrid",
+            "engine": "vader_or_distilbert",
+            "route": "vader_fallback",
+            "route_reason": route_reason,
+            "tagalog_signal_threshold": threshold,
+            "tagalog_signal_ratio": sig.get("ratio"),
+            "tagalog_signal_hits": sig.get("hits"),
+            "tagalog_signal_tokens": sig.get("tokens"),
+            "route_metadata": v_meta,
+            "distilbert_error": meta.get("error"),
+        }
+
+    return compound, label, elapsed_ms, {
+        "library": "hybrid",
+        "engine": "vader_or_distilbert",
+        "route": "distilbert",
+        "route_reason": route_reason,
+        "tagalog_signal_threshold": threshold,
+        "tagalog_signal_ratio": sig.get("ratio"),
+        "tagalog_signal_hits": sig.get("hits"),
+        "tagalog_signal_tokens": sig.get("tokens"),
+        "route_metadata": meta,
+    }
+
+
+def _sentiment_mode() -> str:
+    return (os.getenv("SENTIMENT_MODEL") or "").strip().lower() or "hybrid"
+
+
+def _sentiment_model_version(mode: str) -> str:
+    # Allow overriding for thesis experiments without code changes.
+    forced = (os.getenv("SENTIMENT_MODEL_VERSION") or "").strip()
+    if forced:
+        return forced
+    if mode == "vader":
+        return "vader_v1"
+    if mode == "distilbert":
+        return "sentiment_distilbert_v1"
+    return "sentiment_hybrid_v1"
+
+
+def build_sentiment_row(article_id: int, text: str) -> Dict[str, Any]:
+    mode = _sentiment_mode()
+    if mode == "vader":
+        compound, label, elapsed_ms, details = analyze_sentiment_vader_detailed(text)
+    elif mode == "distilbert":
+        compound, label, elapsed_ms, details = analyze_sentiment_distilbert_detailed(text)
+    else:
+        compound, label, elapsed_ms, details = analyze_sentiment_hybrid_detailed(text)
+
+    details = dict(details or {})
+    details.setdefault("sentiment_mode", mode)
+    return {
+        "article_id": article_id,
+        "model_version": _sentiment_model_version(mode),
+        "model_type": "sentiment",
+        "sentiment_score": compound,
+        "sentiment_label": label,
+        "confidence_score": None,
+        "processing_time_ms": int(elapsed_ms),
+        "model_metadata": details,
+    }
+
+
 def build_bias_row_for_vader(article_id: int, text: str) -> Dict[str, Any]:
     compound, label, elapsed_ms, details = analyze_sentiment_vader_detailed(text)
     return {
@@ -447,4 +731,4 @@ def build_comprehensive_bias_analysis(article_id: int, text: str) -> list[Dict[s
     Build sentiment analysis rows only.
     Political-bias generation is retired to reduce storage and noise.
     """
-    return [build_bias_row_for_vader(article_id, text)]
+    return [build_sentiment_row(article_id, text)]

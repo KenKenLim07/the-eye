@@ -9,6 +9,9 @@ Usage:
 
   # Patched (Taglish lexicon enabled)
   python scripts/evaluate_vader_longform.py --days 30 --limit 300 --ph-patch on
+
+  # Compare legacy VADER vs hybrid (VADER or DistilBERT routing)
+  python scripts/evaluate_vader_longform.py --days 30 --limit 300 --ph-patch on --model hybrid
 """
 
 from __future__ import annotations
@@ -61,10 +64,46 @@ def main() -> None:
     parser.add_argument("--source", type=str, default=None, help="Optional source filter (e.g., Rappler)")
     parser.add_argument("--top", type=int, default=10, help="Top changed examples to print")
     parser.add_argument(
+        "--model",
+        choices=["vader", "distilbert", "hybrid"],
+        default="vader",
+        help="Which new-path model to compare against legacy VADER (default: vader).",
+    )
+    parser.add_argument(
         "--ph-patch",
         choices=["auto", "on", "off"],
         default="auto",
         help="Control Taglish VADER patch via env var (default: auto/respect VADER_PH_PATCH).",
+    )
+    parser.add_argument(
+        "--vader-neutral-band",
+        type=float,
+        default=None,
+        help="Set VADER_NEUTRAL_BAND for this run (e.g., 0.16).",
+    )
+    parser.add_argument(
+        "--tagalog-signal-threshold",
+        type=float,
+        default=None,
+        help="Set TAGALOG_SIGNAL_THRESHOLD for this run (hybrid routing).",
+    )
+    parser.add_argument(
+        "--distilbert-neutral-min-conf",
+        type=float,
+        default=None,
+        help="Set DISTILBERT_NEUTRAL_MIN_CONF for this run.",
+    )
+    parser.add_argument(
+        "--vader-tl-but-words",
+        choices=["auto", "on", "off"],
+        default="auto",
+        help="Control VADER_TL_BUT_WORDS (Tagalog contrast words in BUT_WORDS).",
+    )
+    parser.add_argument(
+        "--vader-tl-but-normalize",
+        choices=["auto", "on", "off"],
+        default="auto",
+        help="Control VADER_TL_BUT_NORMALIZE (normalize pero|ngunit|subalit → 'but').",
     )
     args = parser.parse_args()
 
@@ -72,9 +111,28 @@ def main() -> None:
         os.environ["VADER_PH_PATCH"] = "1"
     elif args.ph_patch == "off":
         os.environ["VADER_PH_PATCH"] = "0"
+    if args.vader_neutral_band is not None:
+        os.environ["VADER_NEUTRAL_BAND"] = str(args.vader_neutral_band)
+    if args.tagalog_signal_threshold is not None:
+        os.environ["TAGALOG_SIGNAL_THRESHOLD"] = str(args.tagalog_signal_threshold)
+    if args.distilbert_neutral_min_conf is not None:
+        os.environ["DISTILBERT_NEUTRAL_MIN_CONF"] = str(args.distilbert_neutral_min_conf)
+    if args.vader_tl_but_words == "on":
+        os.environ["VADER_TL_BUT_WORDS"] = "1"
+    elif args.vader_tl_but_words == "off":
+        os.environ["VADER_TL_BUT_WORDS"] = "0"
+    if args.vader_tl_but_normalize == "on":
+        os.environ["VADER_TL_BUT_NORMALIZE"] = "1"
+    elif args.vader_tl_but_normalize == "off":
+        os.environ["VADER_TL_BUT_NORMALIZE"] = "0"
 
     # Import after setting env so VADER is initialized with the intended patch state.
-    from app.ml.bias import analyze_sentiment_vader_detailed, _ensure_vader  # noqa: WPS433
+    from app.ml.bias import (  # noqa: WPS433
+        _ensure_vader,
+        analyze_sentiment_distilbert_detailed,
+        analyze_sentiment_hybrid_detailed,
+        analyze_sentiment_vader_detailed,
+    )
 
     rows = fetch_recent_articles(days=args.days, limit=args.limit, source=args.source)
     if not rows:
@@ -82,6 +140,12 @@ def main() -> None:
         return
 
     sia = _ensure_vader()
+    if args.model == "vader":
+        scorer = analyze_sentiment_vader_detailed
+    elif args.model == "distilbert":
+        scorer = analyze_sentiment_distilbert_detailed
+    else:
+        scorer = analyze_sentiment_hybrid_detailed
     total = len(rows)
     changed = 0
     abs_diffs: list[float] = []
@@ -92,6 +156,7 @@ def main() -> None:
     confusion: dict[tuple[str, str], int] = defaultdict(int)
     changed_examples: list[dict[str, Any]] = []
     patch_meta_sample: dict[str, Any] | None = None
+    route_counts = Counter()
 
     for r in rows:
         title = str(r.get("title") or "").strip()
@@ -104,17 +169,25 @@ def main() -> None:
 
         # New path: title/body-aware weighted aggregation.
         upgraded_text = f"{title}\n\n{content}".strip()
-        new_compound, new_label, _, details = analyze_sentiment_vader_detailed(upgraded_text)
+        new_compound, new_label, _, details = scorer(upgraded_text)
+        if args.model == "hybrid":
+            route = str((details or {}).get("route") or "")
+            if route:
+                route_counts[route] += 1
         if patch_meta_sample is None:
+            # VADER details are nested under route_metadata for hybrid.
+            d = details or {}
+            if args.model == "hybrid":
+                d = (d.get("route_metadata") or {}) if isinstance(d.get("route_metadata"), dict) else {}
             patch_meta_sample = {
-                "ph_patch_enabled": details.get("ph_patch_enabled"),
-                "ph_patch_applied": details.get("ph_patch_applied"),
-                "ph_patch_version": details.get("ph_patch_version"),
-                "ph_lexicon_terms_added": details.get("ph_lexicon_terms_added"),
-                "ph_lexicon_overrides": details.get("ph_lexicon_overrides"),
-                "ph_lexicon_skipped_existing": details.get("ph_lexicon_skipped_existing"),
-                "ph_phrases_enabled": details.get("ph_phrases_enabled"),
-                "ph_patch_error": details.get("ph_patch_error"),
+                "ph_patch_enabled": d.get("ph_patch_enabled"),
+                "ph_patch_applied": d.get("ph_patch_applied"),
+                "ph_patch_version": d.get("ph_patch_version"),
+                "ph_lexicon_terms_added": d.get("ph_lexicon_terms_added"),
+                "ph_lexicon_overrides": d.get("ph_lexicon_overrides"),
+                "ph_lexicon_skipped_existing": d.get("ph_lexicon_skipped_existing"),
+                "ph_phrases_enabled": d.get("ph_phrases_enabled"),
+                "ph_patch_error": d.get("ph_patch_error"),
             }
 
         old_scores.append(old_compound)
@@ -143,7 +216,8 @@ def main() -> None:
 
     changed_examples.sort(key=lambda x: abs(float(x["delta"])), reverse=True)
 
-    print("=== VADER Comparison Report ===")
+    print("=== Sentiment Comparison Report ===")
+    print(f"New model: {args.model}")
     print(f"Window: last {args.days} days")
     print(f"Source: {args.source or 'ALL'}")
     print(f"Sampled articles: {total}")
@@ -161,6 +235,9 @@ def main() -> None:
             "ph_patch_error",
         ):
             print(f"- {k}: {patch_meta_sample.get(k)}")
+    if args.model == "hybrid" and route_counts:
+        print()
+        print(f"Hybrid routes: {dict(route_counts)}")
     print()
     print("Score drift")
     print(f"- Mean old score: {mean(old_scores):.4f}")

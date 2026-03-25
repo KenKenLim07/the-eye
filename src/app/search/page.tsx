@@ -21,6 +21,11 @@ const SOURCES = [
 
 type SearchParams = Promise<{ q?: string; source?: string; page?: string }>;
 
+function escapeForIlike(input: string): string {
+  // Prevent `%` / `_` from acting as wildcards. Uses Postgres default escape char `\`.
+  return input.replace(/([%_\\])/g, "\\$1");
+}
+
 export default async function SearchPage({ searchParams }: { searchParams: SearchParams }) {
   const sp = await searchParams;
   const q = (sp.q || "").trim();
@@ -32,22 +37,42 @@ export default async function SearchPage({ searchParams }: { searchParams: Searc
 
   const safeSource = SOURCES.includes(source) ? source : "all";
 
-  let queryBuilder = supabaseServer
-    .from("articles")
-    .select("id,title,url,content,published_at,source,category", { count: "exact" })
-    .order("published_at", { ascending: false })
-    .range(from, to);
+  const buildBase = () => {
+    let qb = supabaseServerUntyped
+      .from("articles")
+      .select("id,title,url,content,published_at,source,category", { count: "exact" })
+      .order("published_at", { ascending: false })
+      .range(from, to);
 
-  if (safeSource !== "all") {
-    queryBuilder = queryBuilder.eq("source", safeSource);
-  }
+    if (safeSource !== "all") {
+      qb = qb.eq("source", safeSource);
+    }
+    return qb;
+  };
+
+  // Prefer FTS when available (requires `articles.search_tsv` + GIN index). Fallback to ILIKE.
+  let data: unknown[] | null = null;
+  let error: unknown | null = null;
+  let count: number | null = null;
 
   if (q) {
-    // Search in title or content. Keep it simple and fast for demo.
-    queryBuilder = queryBuilder.or(`title.ilike.%${q}%,content.ilike.%${q}%`);
+    const fts = await buildBase().textSearch("search_tsv", q, { type: "websearch", config: "simple" });
+    if (!fts.error) {
+      data = fts.data ?? null;
+      count = (fts.count as number | null | undefined) ?? null;
+    } else {
+      const escaped = escapeForIlike(q);
+      const ilike = await buildBase().or(`title.ilike.%${escaped}%,content.ilike.%${escaped}%`);
+      data = ilike.data ?? null;
+      count = (ilike.count as number | null | undefined) ?? null;
+      error = ilike.error ?? fts.error;
+    }
+  } else {
+    const res = await buildBase();
+    data = res.data ?? null;
+    count = (res.count as number | null | undefined) ?? null;
+    error = res.error ?? null;
   }
-
-  const { data, error, count } = await queryBuilder;
 
   if (error) {
     return (
@@ -90,10 +115,11 @@ export default async function SearchPage({ searchParams }: { searchParams: Searc
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   // Enrich with demo-mode sentiment badges (public table) for nicer UI on Vercel.
-  let enriched = data || [];
-  if (data && data.length > 0) {
+  const rows = (data as Array<{ id: number | string }> | null) || [];
+  let enriched = rows || [];
+  if (rows && rows.length > 0) {
     try {
-      const ids = data.map((a) => Number(a.id)).filter(Boolean);
+      const ids = rows.map((a) => Number(a.id)).filter(Boolean);
       const sentimentById: Record<number, string | null> = {};
       const batchSize = 250;
       for (let i = 0; i < ids.length; i += batchSize) {
@@ -107,7 +133,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Searc
           sentimentById[Number(r.article_id)] = (r.sentiment_label as string | null | undefined) ?? null;
         }
       }
-      enriched = data.map((a) => ({ ...a, sentiment: sentimentById[Number(a.id)] ?? null }));
+      enriched = rows.map((a) => ({ ...a, sentiment: sentimentById[Number(a.id)] ?? null }));
     } catch {
       // non-fatal
     }
@@ -135,7 +161,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Searc
           ]}
         />
 
-        {!data?.length ? (
+        {!rows?.length ? (
           <Card>
             <CardHeader>
               <CardTitle>No results</CardTitle>
@@ -144,7 +170,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Searc
           </Card>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            <ArticleCardsInteractive articles={enriched} />
+            <ArticleCardsInteractive articles={enriched} layout="grid" />
           </div>
         )}
 
