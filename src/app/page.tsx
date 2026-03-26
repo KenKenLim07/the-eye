@@ -4,11 +4,10 @@ import { fetchAllArticles, fetchLatestAnalysisByIds } from "@/lib/articles";
 import type { AnalysisRow, Article } from "@/lib/types";
 import { supabaseServer, supabaseServerUntyped } from "@/lib/supabase/server";
 import Link from "next/link";
-import { Card, CardContent } from "@/components/ui/card";
 import HomeControlBar from "@/components/home/control-bar";
 import LatestFeed from "@/components/home/latest-feed";
-import SentimentSplitCard from "@/components/home/sentiment-split-card";
 import { formatDateTime } from "@/lib/utils/date";
+import HomeKpis from "@/components/home/home-kpis";
 
 // In production we often run without a deployed backend; force dynamic so Supabase reads happen at request-time
 // instead of being snapshotted during build (which can result in a "blank" homepage until the next revalidate).
@@ -377,6 +376,10 @@ export default async function Home() {
 
   const sentimentSplit7d = stats.sentiment_7d;
   const sentimentForCard = sentimentSplit7d ?? { ...sentimentSplitVisible, total: visibleArticles.length };
+  const sentimentLabel = sentimentSplit7d ? "Sentiment (7d)" : "Sentiment (visible)";
+  const sentimentSublabel = sentimentSplit7d
+    ? `Last 7d: ${stats.articles_last_7d}`
+    : `Sample: ${PER_SOURCE_LIMIT}×${canonicalOrder.length} = ${PER_SOURCE_LIMIT * canonicalOrder.length}`;
 
   const coveragePct = typeof stats.coverage_7d === "number" ? Math.round(stats.coverage_7d * 100) : null;
   const t1 = Date.now();
@@ -420,60 +423,19 @@ export default async function Home() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 sm:gap-3">
-            <Card>
-              <CardContent className="p-2.5 sm:p-4">
-                <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">Total</div>
-                <div className="u-serif text-xl sm:text-3xl font-semibold tabular-nums">{stats.total_articles.toLocaleString()}</div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-2.5 sm:p-4">
-                <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">24h</div>
-                <div className="u-serif text-xl sm:text-3xl font-semibold tabular-nums">{stats.articles_last_24h.toLocaleString()}</div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-2.5 sm:p-4">
-                <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">Sources</div>
-                <div className="u-serif text-xl sm:text-3xl font-semibold tabular-nums">7</div>
-                <div className="hidden sm:block text-xs text-muted-foreground mt-1">
-                  GMA, Rappler, Inquirer, Manila Times, Philstar, Sunstar, Manila Bulletin
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-2.5 sm:p-4">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">Coverage (7d)</div>
-                  <span
-                    className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground"
-                    title="Percent of last-7d articles that have rows in article_sentiment_public (public VADER sentiment cache)."
-                    aria-label="Coverage info"
-                  >
-                    i
-                  </span>
-                </div>
-                <div className="u-serif text-xl sm:text-3xl font-semibold tabular-nums">
-                  {typeof coveragePct === "number" ? `${coveragePct}%` : "—"}
-                </div>
-                <div className="mt-2 h-2 w-full rounded-full overflow-hidden border bg-muted" aria-label="Coverage progress bar">
-                  <div className="h-full bg-accent" style={{ width: `${coveragePct ?? 0}%` }} />
-                </div>
-                <div className="hidden sm:block text-xs text-muted-foreground mt-1">Articles with VADER sentiment rows</div>
-              </CardContent>
-            </Card>
-            <div className="col-span-2 sm:col-span-1">
-              <SentimentSplitCard
-                label={sentimentSplit7d ? "Sentiment (7d)" : "Sentiment (visible)"}
-                sublabel={sentimentSplit7d ? `Last 7d: ${stats.articles_last_7d}` : `Sample: ${PER_SOURCE_LIMIT}×${canonicalOrder.length} = ${PER_SOURCE_LIMIT * canonicalOrder.length}`}
-                positive={sentimentForCard.positive}
-                neutral={sentimentForCard.neutral}
-                negative={sentimentForCard.negative}
-                unlabeled={sentimentForCard.unlabeled}
-              />
-            </div>
-          </div>
+          <HomeKpis
+            totalArticles={stats.total_articles}
+            articles24h={stats.articles_last_24h}
+            coveragePct={typeof coveragePct === "number" ? coveragePct : null}
+            sentiment={{
+              label: sentimentLabel,
+              sublabel: sentimentSublabel,
+              positive: sentimentForCard.positive,
+              neutral: sentimentForCard.neutral,
+              negative: sentimentForCard.negative,
+              unlabeled: sentimentForCard.unlabeled,
+            }}
+          />
         </div>
 
         <LatestFeed articles={visibleArticles} limit={15} />

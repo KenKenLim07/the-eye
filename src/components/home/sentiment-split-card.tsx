@@ -1,9 +1,11 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import type { ReactNode } from "react";
 
 type Props = {
   label?: string;
   sublabel?: string;
+  totalSlot?: ReactNode;
   positive: number;
   neutral: number;
   negative: number;
@@ -18,6 +20,7 @@ function pct(part: number, total: number): number {
 export default function SentimentSplitCard({
   label = "Sentiment (visible)",
   sublabel,
+  totalSlot,
   positive,
   neutral,
   negative,
@@ -39,7 +42,9 @@ export default function SentimentSplitCard({
             <div className="u-mono text-[10px] tracking-widest text-muted-foreground/80">{sublabel}</div>
           ) : null}
         </div>
-        <div className="u-serif text-xl sm:text-3xl font-semibold tabular-nums">{total.toLocaleString()}</div>
+        <div className="u-serif text-xl sm:text-3xl font-semibold tabular-nums">
+          {totalSlot ?? total.toLocaleString()}
+        </div>
 
         <div className="h-2 w-full rounded-full overflow-hidden border bg-muted" aria-label="Sentiment split bar">
           <div className="h-full flex">
