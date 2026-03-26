@@ -101,12 +101,12 @@ export default function LatestFeedClient(props: { items: LatestFeedItem[] }) {
                       href={a.url}
                       target="_blank"
                       rel="noreferrer"
-                      className="block u-serif text-[13px] sm:text-base font-semibold leading-snug tracking-tight hover:underline underline-offset-4 break-words"
+                      className="block u-serif text-[13px] sm:text-base font-semibold leading-snug tracking-tight hover:underline underline-offset-4 break-words line-clamp-3 sm:line-clamp-2"
                     >
                       {a.title}
                     </a>
                   ) : (
-                    <div className="u-serif text-[13px] sm:text-base font-semibold leading-snug tracking-tight break-words">
+                    <div className="u-serif text-[13px] sm:text-base font-semibold leading-snug tracking-tight break-words line-clamp-3 sm:line-clamp-2">
                       {a.title}
                     </div>
                   )}

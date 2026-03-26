@@ -8,6 +8,7 @@ import HomeControlBar from "@/components/home/control-bar";
 import LatestFeed from "@/components/home/latest-feed";
 import { formatDateTime } from "@/lib/utils/date";
 import HomeKpis from "@/components/home/home-kpis";
+import { unstable_cache } from "next/cache";
 
 // In production we often run without a deployed backend; force dynamic so Supabase reads happen at request-time
 // instead of being snapshotted during build (which can result in a "blank" homepage until the next revalidate).
@@ -227,9 +228,19 @@ async function fetchHomeStatsFromSupabase(): Promise<HomeStats> {
   };
 }
 
+const fetchHomeStatsCached = unstable_cache(fetchHomeStatsFromSupabase, ["home-stats-v1"], { revalidate: 30 });
+const fetchHomeArticlesCached = unstable_cache(
+  async (limitPerSource: number, hasBackend: boolean) => {
+    if (hasBackend) return fetchAllArticles(limitPerSource);
+    return fetchHomeArticlesFromSupabase(limitPerSource);
+  },
+  ["home-articles-v1"],
+  { revalidate: 15 }
+);
+
 export default async function Home() {
   const t0 = Date.now();
-  const stats = await fetchHomeStatsFromSupabase().catch((e) => {
+  const stats = await fetchHomeStatsCached().catch((e) => {
     console.error("Home stats fetch failed:", e);
     return { total_articles: 0, articles_last_24h: 0, articles_last_7d: 0, last_updated: null, coverage_7d: null, sentiment_7d: null } as HomeStats;
   });
@@ -241,9 +252,7 @@ export default async function Home() {
     !!backendUrl &&
     (process.env.NODE_ENV === "development" ||
       (!backendUrl.includes("localhost") && !backendUrl.includes("127.0.0.1")));
-  const articlesBySource = hasBackend
-    ? await fetchAllArticles(PER_SOURCE_LIMIT)
-    : await fetchHomeArticlesFromSupabase(PER_SOURCE_LIMIT);
+  const articlesBySource = await fetchHomeArticlesCached(PER_SOURCE_LIMIT, hasBackend);
   const tAfterOptimized = Date.now();
 
   // Normalize backend source keys to canonical labels used in UI

@@ -32,19 +32,16 @@ export default function HomeKpis({ totalArticles, articles24h, coveragePct, sent
       if (reduced) return;
       const nav = performance.getEntriesByType?.("navigation")?.[0] as PerformanceNavigationTiming | undefined;
       const navType = nav?.type;
-      if (navType === "back_forward") return;
+      const isReload = navType === "reload";
+      const isBackForward = navType === "back_forward";
+      const already = sessionStorage.getItem(SESSION_KEY);
 
-      const docId = String(performance.timeOrigin ?? Date.now());
-      const alreadyDoc = sessionStorage.getItem(SESSION_KEY);
-      if (alreadyDoc === docId) return;
+      // Animate on hard reloads, and on the first-ever home visit in this tab session.
+      // Skip on client-side route switches (e.g., Entities -> Home) and back/forward restores.
+      if (isBackForward) return;
+      if (already && !isReload) return;
 
-      // Only animate when the *document* was loaded on Home (fresh visit / reload on "/").
-      // This prevents replay when returning to Home via client-side navigation.
-      const initialUrl = nav?.name;
-      const initialPath = initialUrl ? new URL(initialUrl, window.location.href).pathname : window.location.pathname;
-      if (initialPath !== "/") return;
-
-      sessionStorage.setItem(SESSION_KEY, docId);
+      sessionStorage.setItem(SESSION_KEY, "1");
       setPlay(true);
     } catch {
       // If storage is blocked, just skip the delight animation.
