@@ -1,5 +1,5 @@
 import MainLayout from "@/components/layout/main-layout";
-import ArticleRowServer from "../components/articles/article-row-server";
+import ArticleRowServer from "@/components/articles/article-row-server";
 import { fetchAllArticles, fetchLatestAnalysisByIds } from "@/lib/articles";
 import type { AnalysisRow, Article } from "@/lib/types";
 import { supabaseServer, supabaseServerUntyped } from "@/lib/supabase/server";
@@ -402,7 +402,7 @@ export default async function Home() {
   return (
     <MainLayout>
       <div className="space-y-8">
-        <header className="max-w-4xl mx-auto px-1">
+        <header className="max-w-4xl mx-auto">
           <h1 className="u-serif text-4xl sm:text-6xl font-bold tracking-tight leading-[1.02]">
             Today in the Philippines
           </h1>
@@ -418,7 +418,7 @@ export default async function Home() {
           </div>
         </div>
 
-        <div className="space-y-4">
+        <div className="max-w-4xl mx-auto space-y-4">
           <div className="flex items-end justify-between gap-3">
             <div className="space-y-1">
               <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">Snapshot</div>
@@ -447,7 +447,9 @@ export default async function Home() {
           />
         </div>
 
-        <LatestFeed articles={visibleArticles} limit={15} />
+        <div className="max-w-4xl mx-auto">
+          <LatestFeed articles={visibleArticles} limit={15} />
+        </div>
 
         <div className="space-y-8">
           <ArticleRowServer 
