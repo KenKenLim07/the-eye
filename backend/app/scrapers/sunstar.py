@@ -22,9 +22,17 @@ def _env_flag(name: str, default: bool = False) -> bool:
     val = os.getenv(name, str(default)).strip().lower()
     return val in {"1", "true", "yes", "on"}
 
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)).strip())
+    except Exception:
+        return default
+
 USE_ADV_HEADERS = _env_flag("USE_ADV_HEADERS", False)
 USE_HUMAN_DELAY = _env_flag("USE_HUMAN_DELAY", False)
 USE_URL_FILTER = _env_flag("USE_URL_FILTER", False)
+SUNSTAR_FETCH_FULL_ON_SHORT = _env_flag("SUNSTAR_FETCH_FULL_ON_SHORT", True)
+SCRAPER_CONTENT_MAX_CHARS = _env_int("SCRAPER_CONTENT_MAX_CHARS", 8000)
 
 try:
     from app.scrapers.utils import (
@@ -261,9 +269,19 @@ class SunstarScraper:
                     if content_elem is not None and content_elem.text:
                         # Clean HTML content
                         soup = BeautifulSoup(content_elem.text, 'html.parser')
-                        content = soup.get_text(strip=True)
+                        content = soup.get_text(" ", strip=True)
                     elif description_elem and description_elem.text:
                         content = description_elem.text.strip()
+
+                    # If RSS only provides an excerpt, fetch the full article body as a best-effort.
+                    # Keep this conservative (only when clearly too short), since it adds requests.
+                    if SUNSTAR_FETCH_FULL_ON_SHORT and content and (len(content) < 280 or re.search(r"(\.\.\.|…)\s*$", content)):
+                        full = self.scrape_article_content(url)
+                        if full and len(full) > len(content) + 200:
+                            content = full
+
+                    if SCRAPER_CONTENT_MAX_CHARS > 0 and len(content) > SCRAPER_CONTENT_MAX_CHARS:
+                        content = content[:SCRAPER_CONTENT_MAX_CHARS].rstrip() + "…"
                     
                     # Parse publication date
                     published_at = None
@@ -387,9 +405,18 @@ class SunstarScraper:
                     # Remove script and style elements
                     for script in content_elem(["script", "style"]):
                         script.decompose()
-                    content = content_elem.get_text(strip=True)
+                    # Prefer paragraph text to avoid nav/related leakage.
+                    paragraphs = [p.get_text(" ", strip=True) for p in content_elem.find_all("p")]
+                    paragraphs = [p for p in paragraphs if p and len(p) > 25 and not p.lower().startswith("advertisement")]
+                    content = "\n\n".join(paragraphs) if paragraphs else content_elem.get_text(" ", strip=True)
                     break
-            
+
+            if content:
+                # Preserve paragraph breaks while normalizing intra-line spacing.
+                content = re.sub(r"[ \t]+", " ", content)
+                content = re.sub(r"\n{3,}", "\n\n", content).strip()
+                if SCRAPER_CONTENT_MAX_CHARS > 0 and len(content) > SCRAPER_CONTENT_MAX_CHARS:
+                    content = content[:SCRAPER_CONTENT_MAX_CHARS].rstrip() + "…"
             return content
             
         except Exception as e:

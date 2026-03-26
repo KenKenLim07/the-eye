@@ -30,8 +30,15 @@ def _env_flag(name: str, default: bool = False) -> bool:
     val = os.getenv(name, str(default)).strip().lower()
     return val in {"1", "true", "yes", "on"}
 
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)).strip())
+    except Exception:
+        return default
+
 USE_ADV_HEADERS = _env_flag("USE_ADV_HEADERS", False)
 USE_HUMAN_DELAY = _env_flag("USE_HUMAN_DELAY", False)
+SCRAPER_CONTENT_MAX_CHARS = _env_int("SCRAPER_CONTENT_MAX_CHARS", 8000)
 
 try:
     from app.scrapers.utils import (
@@ -201,8 +208,8 @@ class ABSCBNScraper:
         
         if parts:
             combined = ' '.join(parts)
-            if len(combined) > 1000:
-                combined = combined[:1000]
+            if SCRAPER_CONTENT_MAX_CHARS > 0 and len(combined) > SCRAPER_CONTENT_MAX_CHARS:
+                combined = combined[:SCRAPER_CONTENT_MAX_CHARS].rstrip() + "…"
             return combined
         
         return None
@@ -343,6 +350,23 @@ class ABSCBNScraper:
                 page.wait_for_timeout(500)
             except:
                 pass
+
+            # ABS-CBN pages can hydrate article bodies after the initial HTML.
+            # Waiting briefly for network idle + multiple paragraphs reduces excerpt-only captures.
+            try:
+                page.wait_for_load_state("networkidle", timeout=8000)
+            except Exception:
+                pass
+            try:
+                page.wait_for_function(
+                    """() => {
+                      const sels = ['.article-content p', '.entry-content p', 'article p'];
+                      return sels.some((s) => document.querySelectorAll(s).length >= 4);
+                    }""",
+                    timeout=8000,
+                )
+            except Exception:
+                pass
             
             soup = BeautifulSoup(page.content(), 'html.parser')
             title = self._extract_with_fallbacks(soup, self.SELECTORS["title"])
@@ -357,6 +381,21 @@ class ABSCBNScraper:
                 return None
             
             content = self._extract_content(soup)
+            # Retry once if it still looks like an excerpt (common: ends with ... / …).
+            if content and re.search(r"(\.\.\.|…)\s*$", content) and len(content) < max(800, SCRAPER_CONTENT_MAX_CHARS - 50):
+                try:
+                    page.wait_for_timeout(1500)
+                except Exception:
+                    pass
+                try:
+                    page.wait_for_load_state("networkidle", timeout=6000)
+                except Exception:
+                    pass
+                soup2 = BeautifulSoup(page.content(), "html.parser")
+                content2 = self._extract_content(soup2)
+                if content2 and len(content2) > len(content) + 200:
+                    content = content2
+                    soup = soup2
             raw_published = self._extract_with_fallbacks(soup, self.SELECTORS["published_date"])
             published_iso = self._parse_published(raw_published)
             norm_cat, raw_cat = resolve_category_pair(url, soup)
@@ -476,4 +515,3 @@ def scrape_abs_cbn_latest() -> List[NormalizedArticle]:
     if result.errors:
         logger.warning(f"ABS-CBN: errors {result.errors}")
     return result.articles
-

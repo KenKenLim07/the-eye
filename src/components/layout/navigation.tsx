@@ -144,7 +144,7 @@ export default function Navigation() {
 
                 <SheetContent
                   side="bottom"
-                  className="p-4 sm:p-5 rounded-t-xl border-t max-h-[85dvh] overflow-y-auto pb-[max(1rem,env(safe-area-inset-bottom))] transform-gpu transition-[transform,opacity] ease-out motion-reduce:transition-none data-[state=open]:opacity-100 data-[state=closed]:opacity-0 data-[state=open]:duration-200 data-[state=closed]:duration-150 data-[state=closed]:scale-[0.99] data-[state=open]:scale-100"
+                  className="p-4 sm:p-5 rounded-t-xl border-t max-h-[85dvh] overflow-y-auto pb-[max(1rem,env(safe-area-inset-bottom))]"
                   showCloseButton
                 >
                   <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-border" aria-hidden="true" />

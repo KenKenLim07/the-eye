@@ -20,7 +20,7 @@ function SheetOverlay({
     <SheetPrimitive.Overlay
       data-slot="sheet-overlay"
       className={cn(
-        "fixed inset-0 z-50 bg-black/50 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
+        "fixed inset-0 z-50 bg-black/50 motion-safe:data-[state=open]:animate-in motion-safe:data-[state=closed]:animate-out motion-safe:data-[state=closed]:fade-out-0 motion-safe:data-[state=open]:fade-in-0",
         className
       )}
       {...props}
@@ -29,18 +29,18 @@ function SheetOverlay({
 }
 
 const sheetContentVariants = cva(
-  "fixed z-50 grid gap-4 bg-background p-5 shadow-lg outline-none will-change-transform transition-transform ease-out data-[state=closed]:duration-150 data-[state=open]:duration-200 motion-reduce:transition-none",
+  "fixed z-50 grid gap-4 bg-background p-5 shadow-lg outline-none will-change-transform motion-safe:data-[state=open]:animate-in motion-safe:data-[state=closed]:animate-out motion-safe:data-[state=closed]:fade-out-0 motion-safe:data-[state=open]:fade-in-0 motion-safe:data-[state=closed]:duration-150 motion-safe:data-[state=open]:duration-200",
   {
     variants: {
       side: {
         right:
-          "inset-y-0 right-0 h-full w-[min(24rem,calc(100vw-2.5rem))] border-l data-[state=closed]:translate-x-full data-[state=open]:translate-x-0",
+          "inset-y-0 right-0 h-full w-[min(24rem,calc(100vw-2.5rem))] border-l motion-safe:data-[state=open]:slide-in-from-right motion-safe:data-[state=closed]:slide-out-to-right",
         left:
-          "inset-y-0 left-0 h-full w-[min(24rem,calc(100vw-2.5rem))] border-r data-[state=closed]:-translate-x-full data-[state=open]:translate-x-0",
+          "inset-y-0 left-0 h-full w-[min(24rem,calc(100vw-2.5rem))] border-r motion-safe:data-[state=open]:slide-in-from-left motion-safe:data-[state=closed]:slide-out-to-left",
         top:
-          "inset-x-0 top-0 w-full border-b data-[state=closed]:-translate-y-full data-[state=open]:translate-y-0",
+          "inset-x-0 top-0 w-full border-b motion-safe:data-[state=open]:slide-in-from-top motion-safe:data-[state=closed]:slide-out-to-top",
         bottom:
-          "inset-x-0 bottom-0 w-full border-t data-[state=closed]:translate-y-full data-[state=open]:translate-y-0",
+          "inset-x-0 bottom-0 w-full border-t motion-safe:data-[state=open]:slide-in-from-bottom-2 motion-safe:data-[state=closed]:slide-out-to-bottom-2",
       },
     },
     defaultVariants: { side: "right" },
