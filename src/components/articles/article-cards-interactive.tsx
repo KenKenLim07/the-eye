@@ -1,6 +1,6 @@
 "use client";
 
-import { CSSProperties, useMemo, useState } from "react";
+import { CSSProperties, useEffect, useMemo, useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -26,8 +26,28 @@ interface ArticleCardsInteractiveProps {
 
 export function ArticleCardsInteractive({ articles, layout = "carousel" }: ArticleCardsInteractiveProps) {
   const [active, setActive] = useState<QuickViewArticle | null>(null);
+  const [open, setOpen] = useState(false);
+  const closeTimerRef = useRef<number | null>(null);
   const items = useMemo(() => articles ?? [], [articles]);
   type StaggerStyle = CSSProperties & { ["--i"]?: number };
+
+  useEffect(() => {
+    if (open) {
+      if (closeTimerRef.current != null) window.clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+      return;
+    }
+    if (!active) return;
+    if (closeTimerRef.current != null) window.clearTimeout(closeTimerRef.current);
+    closeTimerRef.current = window.setTimeout(() => {
+      setActive(null);
+      closeTimerRef.current = null;
+    }, 180);
+    return () => {
+      if (closeTimerRef.current != null) window.clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    };
+  }, [active, open]);
 
   const sentimentLabelShort = (s: string) => {
     const v = (s || "").toLowerCase();
@@ -121,7 +141,10 @@ export function ArticleCardsInteractive({ articles, layout = "carousel" }: Artic
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => setActive(a)}
+                    onClick={() => {
+                      setActive(a);
+                      setOpen(true);
+                    }}
                     className="text-xs"
                   >
                     <Eye className="h-3 w-3 mr-1" />
@@ -144,9 +167,9 @@ export function ArticleCardsInteractive({ articles, layout = "carousel" }: Artic
 
       <ArticleQuickViewDialog
         article={active}
-        open={!!active}
+        open={open && !!active}
         onOpenChange={(open) => {
-          if (!open) setActive(null);
+          setOpen(open);
         }}
       />
     </>

@@ -30,8 +30,21 @@ export default function HomeKpis({ totalArticles, articles24h, coveragePct, sent
     try {
       const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
       if (reduced) return;
-      if (sessionStorage.getItem(SESSION_KEY)) return;
-      sessionStorage.setItem(SESSION_KEY, "1");
+      const nav = performance.getEntriesByType?.("navigation")?.[0] as PerformanceNavigationTiming | undefined;
+      const navType = nav?.type;
+      if (navType === "back_forward") return;
+
+      const docId = String(performance.timeOrigin ?? Date.now());
+      const alreadyDoc = sessionStorage.getItem(SESSION_KEY);
+      if (alreadyDoc === docId) return;
+
+      // Only animate when the *document* was loaded on Home (fresh visit / reload on "/").
+      // This prevents replay when returning to Home via client-side navigation.
+      const initialUrl = nav?.name;
+      const initialPath = initialUrl ? new URL(initialUrl, window.location.href).pathname : window.location.pathname;
+      if (initialPath !== "/") return;
+
+      sessionStorage.setItem(SESSION_KEY, docId);
       setPlay(true);
     } catch {
       // If storage is blocked, just skip the delight animation.

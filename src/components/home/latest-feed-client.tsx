@@ -8,28 +8,47 @@ import type { CSSProperties } from "react";
 import { ExternalLink, Eye } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import ArticleQuickViewDialog, { type QuickViewArticle } from "@/components/articles/article-quick-view-dialog";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type LatestFeedItem = Article & {
   ageShort: string;
   absTime: string;
 };
 
-function sentimentBadge(sentiment: string | null | undefined): { label: string; className?: string } {
+function sentimentBadge(sentiment: string | null | undefined): { label: string; title: string; className?: string } {
   const s = (sentiment || "").toLowerCase();
-  if (s === "positive") return { label: "positive", className: "bg-emerald-600 text-white border-emerald-600 dark:bg-emerald-500" };
-  if (s === "negative") return { label: "negative", className: "bg-red-600 text-white border-red-600 dark:bg-red-500" };
-  if (s === "neutral") return { label: "neutral", className: "bg-slate-700 text-white border-slate-700 dark:bg-slate-500" };
-  return { label: "unlabeled", className: "bg-muted text-muted-foreground border-border" };
+  if (s === "positive") return { label: "Pos", title: "positive", className: "bg-emerald-600 text-white border-emerald-600 dark:bg-emerald-500" };
+  if (s === "negative") return { label: "Neg", title: "negative", className: "bg-red-600 text-white border-red-600 dark:bg-red-500" };
+  if (s === "neutral") return { label: "Neu", title: "neutral", className: "bg-slate-700 text-white border-slate-700 dark:bg-slate-500" };
+  return { label: "Unl", title: "unlabeled", className: "bg-muted text-muted-foreground border-border" };
 }
 
 export default function LatestFeedClient(props: { items: LatestFeedItem[] }) {
   const items = props.items || [];
   const [active, setActive] = useState<QuickViewArticle | null>(null);
-  const activeOpen = !!active;
+  const [open, setOpen] = useState(false);
+  const closeTimerRef = useRef<number | null>(null);
   type CSSVarProperties = CSSProperties & Record<`--${string}`, string | number>;
 
   const stableItems = useMemo(() => items, [items]);
+
+  useEffect(() => {
+    if (open) {
+      if (closeTimerRef.current != null) window.clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+      return;
+    }
+    if (!active) return;
+    if (closeTimerRef.current != null) window.clearTimeout(closeTimerRef.current);
+    closeTimerRef.current = window.setTimeout(() => {
+      setActive(null);
+      closeTimerRef.current = null;
+    }, 180);
+    return () => {
+      if (closeTimerRef.current != null) window.clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    };
+  }, [active, open]);
 
   return (
     <div className="divide-y rounded-md border bg-card/60">
@@ -43,13 +62,13 @@ export default function LatestFeedClient(props: { items: LatestFeedItem[] }) {
             <div
               key={`${a.source}-${a.id}`}
               className={cn(
-                "px-3 py-3 sm:p-4 hover:bg-accent/5 transition-colors",
+                "px-3 py-2.5 sm:px-4 sm:py-3 hover:bg-accent/5 transition-colors",
                 "u-stagger-item"
               )}
               style={style}
             >
               <div className="flex items-start justify-between gap-2 sm:gap-3">
-                <div className="min-w-0 space-y-2">
+                <div className="min-w-0 space-y-1.5">
                   <div className="flex flex-wrap items-center gap-2">
                     <Link
                       href={`/source/${encodeURIComponent(a.source)}`}
@@ -68,7 +87,13 @@ export default function LatestFeedClient(props: { items: LatestFeedItem[] }) {
                     <span className="u-mono text-[10px] tracking-widest text-muted-foreground/70" title={`Article ID ${a.id}`}>
                       #{a.id}
                     </span>
-                    <Badge className={cn("capitalize", s.className)}>{s.label}</Badge>
+                    <Badge
+                      className={cn("px-1.5 py-0 text-[10px] leading-none uppercase tracking-wide", s.className)}
+                      title={`VADER sentiment: ${s.title}`}
+                      aria-label={`Sentiment ${s.title}`}
+                    >
+                      {s.label}
+                    </Badge>
                   </div>
 
                   {a.url ? (
@@ -76,12 +101,12 @@ export default function LatestFeedClient(props: { items: LatestFeedItem[] }) {
                       href={a.url}
                       target="_blank"
                       rel="noreferrer"
-                      className="block u-serif text-sm sm:text-lg font-semibold leading-snug tracking-tight hover:underline underline-offset-4 break-words"
+                      className="block u-serif text-[13px] sm:text-base font-semibold leading-snug tracking-tight hover:underline underline-offset-4 break-words"
                     >
                       {a.title}
                     </a>
                   ) : (
-                    <div className="u-serif text-sm sm:text-lg font-semibold leading-snug tracking-tight break-words">
+                    <div className="u-serif text-[13px] sm:text-base font-semibold leading-snug tracking-tight break-words">
                       {a.title}
                     </div>
                   )}
@@ -93,21 +118,27 @@ export default function LatestFeedClient(props: { items: LatestFeedItem[] }) {
                     variant="outline"
                     size="icon"
                     className="h-11 w-11 sm:hidden"
-                    onClick={() => setActive(a)}
+                    onClick={() => {
+                      setActive(a);
+                      setOpen(true);
+                    }}
                     aria-label="Quick view"
                     title="Quick view"
                   >
-                    <Eye className="h-4 w-4" />
+                    <Eye className="h-3.5 w-3.5" />
                   </Button>
 
                   <Button
                     type="button"
                     variant="outline"
                     size="sm"
-                    className="hidden sm:inline-flex h-10"
-                    onClick={() => setActive(a)}
+                    className="hidden sm:inline-flex h-9 px-2.5 text-xs"
+                    onClick={() => {
+                      setActive(a);
+                      setOpen(true);
+                    }}
                   >
-                    <Eye className="h-4 w-4" />
+                    <Eye className="h-3.5 w-3.5" />
                     Quick view
                   </Button>
 
@@ -131,7 +162,7 @@ export default function LatestFeedClient(props: { items: LatestFeedItem[] }) {
                       aria-label="Read original"
                       title="Read original"
                     >
-                      <ExternalLink className="h-4 w-4" />
+                      <ExternalLink className="h-3.5 w-3.5" />
                     </a>
                   ) : null}
                 </div>
@@ -143,9 +174,9 @@ export default function LatestFeedClient(props: { items: LatestFeedItem[] }) {
 
       <ArticleQuickViewDialog
         article={active}
-        open={activeOpen}
+        open={open && !!active}
         onOpenChange={(open) => {
-          if (!open) setActive(null);
+          setOpen(open);
         }}
       />
     </div>

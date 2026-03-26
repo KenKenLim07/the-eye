@@ -42,10 +42,11 @@ export default function ArticleQuickViewDialog(props: {
         className={cn(
           "p-0 overflow-hidden !flex !flex-col",
           "w-full max-w-[calc(100%-1.25rem)] sm:max-w-3xl",
-          "max-h-[92dvh]"
+          "max-h-[92dvh] duration-150"
         )}
+        onCloseAutoFocus={(e) => e.preventDefault()}
       >
-        <div className="flex items-start gap-3 border-b bg-background/80 backdrop-blur px-3 sm:px-4 py-3">
+        <div className="flex items-start gap-3 border-b bg-background px-3 sm:px-4 py-3">
           <Button
             type="button"
             variant="ghost"
@@ -116,7 +117,7 @@ export default function ArticleQuickViewDialog(props: {
         </div>
 
         {article?.url ? (
-          <div className="border-t px-3 sm:px-4 py-3 bg-background/80 backdrop-blur">
+          <div className="border-t px-3 sm:px-4 py-3 bg-background">
             <Button asChild className="h-11 w-full">
               <a href={article.url} target="_blank" rel="noreferrer">
                 <ExternalLink className="h-4 w-4" />
