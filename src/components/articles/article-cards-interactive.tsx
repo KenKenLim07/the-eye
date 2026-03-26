@@ -4,9 +4,9 @@ import { CSSProperties, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Eye, ExternalLink } from "lucide-react";
 import { formatDate } from "@/lib/utils/date";
+import ArticleQuickViewDialog, { type QuickViewArticle } from "./article-quick-view-dialog";
 
 interface Article {
   id: number | string;
@@ -25,7 +25,7 @@ interface ArticleCardsInteractiveProps {
 }
 
 export function ArticleCardsInteractive({ articles, layout = "carousel" }: ArticleCardsInteractiveProps) {
-  const [openId, setOpenId] = useState<number | null>(null);
+  const [active, setActive] = useState<QuickViewArticle | null>(null);
   const items = useMemo(() => articles ?? [], [articles]);
   type StaggerStyle = CSSProperties & { ["--i"]?: number };
 
@@ -48,7 +48,6 @@ export function ArticleCardsInteractive({ articles, layout = "carousel" }: Artic
   return (
     <>
       {items.map((a, idx) => {
-        const numericId = Number(a.id);
         const sentiment = a.sentiment;
         const sentimentFullLabel = sentiment || "unlabeled";
         const staggerStyle: StaggerStyle = { ["--i"]: idx };
@@ -122,7 +121,7 @@ export function ArticleCardsInteractive({ articles, layout = "carousel" }: Artic
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => setOpenId(numericId)}
+                    onClick={() => setActive(a)}
                     className="text-xs"
                   >
                     <Eye className="h-3 w-3 mr-1" />
@@ -139,62 +138,17 @@ export function ArticleCardsInteractive({ articles, layout = "carousel" }: Artic
                 </div>
               </CardContent>
             </Card>
-
-            <Dialog open={openId === numericId} onOpenChange={(open) => setOpenId(open ? numericId : null)}>
-              <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
-                <DialogHeader className="flex-shrink-0">
-                  <DialogTitle className="text-xl leading-tight pr-6">{a.title}</DialogTitle>
-                  <DialogDescription className="text-sm text-muted-foreground">
-                    Article details and metadata
-                  </DialogDescription>
-                </DialogHeader>
-                
-                {/* Badges moved outside DialogDescription to fix HTML validation */}
-                <div className="flex items-center gap-2 flex-wrap mb-4">
-                  <Badge variant="outline" className="u-mono uppercase tracking-widest text-[10px]">{a.source}</Badge>
-                  {a.category && <Badge variant="secondary" className="u-mono uppercase tracking-widest text-[10px]">{a.category}</Badge>}
-                  <Badge variant="outline" className="u-mono uppercase tracking-widest text-[10px]">{formatDate(a.published_at)}</Badge>
-                  <span className="u-mono text-[10px] tracking-widest text-muted-foreground/70" title={`Article ID ${a.id}`}>
-                    #{a.id}
-                  </span>
-                  {sentiment && (
-                    <Badge
-                      variant="outline"
-                      className={`u-mono uppercase tracking-wide text-[10px] ${sentimentClass(sentiment)}`}
-                      title={`VADER sentiment: ${sentiment}`}
-                    >
-                      {sentiment}
-                    </Badge>
-                  )}
-                </div>
-
-                {/* Scrollable content area */}
-                <div className="flex-1 overflow-y-auto space-y-4 min-h-0">
-                  <div className="prose prose-sm max-w-none">
-                    <p className="text-sm leading-6 whitespace-pre-wrap text-foreground">
-                      {a.content || "No summary available."}
-                    </p>
-                  </div>
-                  
-                  {a.url && (
-                    <div className="pt-4 border-t">
-                      <a 
-                        className="inline-flex items-center text-sm text-accent hover:text-accent/80 underline" 
-                        href={a.url} 
-                        target="_blank" 
-                        rel="noreferrer"
-                      >
-                        <ExternalLink className="h-4 w-4 mr-2" />
-                        Read original article →
-                      </a>
-                    </div>
-                  )}
-                </div>
-              </DialogContent>
-            </Dialog>
           </div>
         );
       })}
+
+      <ArticleQuickViewDialog
+        article={active}
+        open={!!active}
+        onOpenChange={(open) => {
+          if (!open) setActive(null);
+        }}
+      />
     </>
   );
 }

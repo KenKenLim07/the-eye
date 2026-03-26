@@ -17,8 +17,10 @@ export const dynamic = "force-dynamic";
 type HomeStats = {
   total_articles: number;
   articles_last_24h: number;
+  articles_last_7d: number;
   last_updated: string | null;
   coverage_7d: number | null; // 0..1, null when unavailable
+  sentiment_7d: { positive: number; neutral: number; negative: number; unlabeled: number; total: number } | null;
 };
 
 async function fetchHomeArticlesFromSupabase(limitPerSource: number): Promise<Record<string, Article[]>> {
@@ -50,6 +52,70 @@ async function fetchHomeArticlesFromSupabase(limitPerSource: number): Promise<Re
   );
 
   return Object.fromEntries(results);
+}
+
+async function fetchSentimentSplitFromSupabase(
+  isoSince: string,
+  hardCap: number
+): Promise<{ positive: number; neutral: number; negative: number; unlabeled: number; total: number } | null> {
+  try {
+    const pageSize = 1000;
+    let offset = 0;
+    const ids: number[] = [];
+
+    while (true) {
+      const { data, error } = await supabaseServer
+        .from("articles")
+        .select("id")
+        .gte("published_at", isoSince)
+        .order("published_at", { ascending: false })
+        .range(offset, offset + pageSize - 1);
+
+      if (error) throw error;
+      const rows = ((data as unknown) as Array<{ id: number }> | null) || [];
+      for (const r of rows) {
+        const id = Number(r.id);
+        if (Number.isFinite(id)) ids.push(id);
+      }
+      if (rows.length < pageSize) break;
+      offset += pageSize;
+      if (ids.length >= hardCap) break;
+    }
+
+    if (ids.length === 0) return { positive: 0, neutral: 0, negative: 0, unlabeled: 0, total: 0 };
+
+    const labelById = new Map<number, string | null>();
+    const batchSize = 500;
+    for (let i = 0; i < ids.length; i += batchSize) {
+      const batch = ids.slice(i, i + batchSize);
+      const { data: srows, error: serr } = await supabaseServerUntyped
+        .from("article_sentiment_public")
+        .select("article_id,sentiment_label")
+        .in("article_id", batch);
+      if (serr) throw serr;
+      for (const r of (srows as Array<{ article_id: number; sentiment_label: string | null }> | null) || []) {
+        labelById.set(Number(r.article_id), (r.sentiment_label as string | null | undefined) ?? null);
+      }
+    }
+
+    let positive = 0;
+    let neutral = 0;
+    let negative = 0;
+    let unlabeled = 0;
+
+    for (const id of ids) {
+      const label = (labelById.get(id) || "").toLowerCase();
+      if (label === "positive") positive += 1;
+      else if (label === "neutral") neutral += 1;
+      else if (label === "negative") negative += 1;
+      else unlabeled += 1;
+    }
+
+    return { positive, neutral, negative, unlabeled, total: ids.length };
+  } catch (e) {
+    console.warn("Failed to compute 24h sentiment split:", e);
+    return null;
+  }
 }
 
 async function fetchHomeStatsFromSupabase(): Promise<HomeStats> {
@@ -151,14 +217,22 @@ async function fetchHomeStatsFromSupabase(): Promise<HomeStats> {
       ? Math.min(1, Math.max(0, sentiment_rows_last_7d / articles_last_7d))
       : null;
 
-  return { total_articles, articles_last_24h, last_updated, coverage_7d };
+  const sentiment_7d = await fetchSentimentSplitFromSupabase(iso7d, 12_000);
+  return {
+    total_articles,
+    articles_last_24h,
+    articles_last_7d: typeof articles_last_7d === "number" ? articles_last_7d : 0,
+    last_updated,
+    coverage_7d,
+    sentiment_7d,
+  };
 }
 
 export default async function Home() {
   const t0 = Date.now();
   const stats = await fetchHomeStatsFromSupabase().catch((e) => {
     console.error("Home stats fetch failed:", e);
-    return { total_articles: 0, articles_last_24h: 0, last_updated: null, coverage_7d: null } as HomeStats;
+    return { total_articles: 0, articles_last_24h: 0, articles_last_7d: 0, last_updated: null, coverage_7d: null, sentiment_7d: null } as HomeStats;
   });
 
   // Fetch latest articles per source using optimized single endpoint
@@ -289,7 +363,7 @@ export default async function Home() {
   }
 
   const visibleArticles: Article[] = Object.values(enrichedBySource).flat();
-  const sentimentSplit = visibleArticles.reduce(
+  const sentimentSplitVisible = visibleArticles.reduce(
     (acc, a) => {
       const s = (a.sentiment || "").toLowerCase();
       if (s === "positive") acc.positive += 1;
@@ -300,6 +374,9 @@ export default async function Home() {
     },
     { positive: 0, neutral: 0, negative: 0, unlabeled: 0 }
   );
+
+  const sentimentSplit7d = stats.sentiment_7d;
+  const sentimentForCard = sentimentSplit7d ?? { ...sentimentSplitVisible, total: visibleArticles.length };
 
   const coveragePct = typeof stats.coverage_7d === "number" ? Math.round(stats.coverage_7d * 100) : null;
   const t1 = Date.now();
@@ -388,10 +465,12 @@ export default async function Home() {
             </Card>
             <div className="col-span-2 sm:col-span-1">
               <SentimentSplitCard
-                positive={sentimentSplit.positive}
-                neutral={sentimentSplit.neutral}
-                negative={sentimentSplit.negative}
-                unlabeled={sentimentSplit.unlabeled}
+                label={sentimentSplit7d ? "Sentiment (7d)" : "Sentiment (visible)"}
+                sublabel={sentimentSplit7d ? `Last 7d: ${stats.articles_last_7d}` : `Sample: ${PER_SOURCE_LIMIT}×${canonicalOrder.length} = ${PER_SOURCE_LIMIT * canonicalOrder.length}`}
+                positive={sentimentForCard.positive}
+                neutral={sentimentForCard.neutral}
+                negative={sentimentForCard.negative}
+                unlabeled={sentimentForCard.unlabeled}
               />
             </div>
           </div>

@@ -18,9 +18,16 @@ def _env_flag(name: str, default: bool = False) -> bool:
     val = os.getenv(name, str(default)).strip().lower()
     return val in {"1", "true", "yes", "on"}
 
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)).strip())
+    except Exception:
+        return default
+
 USE_ADV_HEADERS = _env_flag("USE_ADV_HEADERS", False)
 USE_HUMAN_DELAY = _env_flag("USE_HUMAN_DELAY", False)
 USE_URL_FILTER = _env_flag("USE_URL_FILTER", False)
+SCRAPER_CONTENT_MAX_CHARS = _env_int("SCRAPER_CONTENT_MAX_CHARS", 8000)
 
 # Optional advanced utils
 try:
@@ -198,10 +205,8 @@ class GMAScraper:
                 parts.append(t)
         if parts:
             combined = ' '.join(parts)
-            if len(combined) > 1000:
-                combined = combined[:1000] + "..."
-            elif len(combined) > 500:
-                combined = combined[:500] + "..."
+            if SCRAPER_CONTENT_MAX_CHARS > 0 and len(combined) > SCRAPER_CONTENT_MAX_CHARS:
+                combined = combined[:SCRAPER_CONTENT_MAX_CHARS].rstrip() + "…"
             logger.info(f"GMA v1: content parts={len(parts)}, length={len(combined)}")
             return combined
         logger.warning(f"GMA v1: no content extracted for {url}")
