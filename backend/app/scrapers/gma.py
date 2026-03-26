@@ -170,22 +170,34 @@ class GMAScraper:
         # Blacklist boilerplate/ads/lotto instructions commonly embedded in GMA pages
         blacklist = re.compile(r"(how\s+to\s+play|pcso|\b4\s*-?\s*digit\b|lotto|lucky\s*pick|permutations?\s+of\s+the\s+number|advertisement)", re.IGNORECASE)
         seen: set[str] = set()
+
+        def _collect_for_selector(selector: str) -> List[str]:
+            out: List[str] = []
+            for el in soup.select(selector):
+                text = el.get_text().strip()
+                if not text:
+                    continue
+                if text in seen:
+                    continue
+                if len(text) <= 50:
+                    continue
+                if text.upper().startswith("ADVERTISEMENT"):
+                    continue
+                if blacklist.search(text):
+                    continue
+                seen.add(text)
+                out.append(text)
+            return out
+
+        # Prefer the first selector that yields a credible body (avoid mixing in unrelated <p> text).
         for sel in self.SELECTORS["content"]:
             try:
-                for el in soup.select(sel):
-                    text = el.get_text().strip()
-                    if not text:
-                        continue
-                    if text in seen:
-                        continue
-                    seen.add(text)
-                    if len(text) <= 50:
-                        continue
-                    if text.upper().startswith("ADVERTISEMENT"):
-                        continue
-                    if blacklist.search(text):
-                        continue
-                    parts.append(text)
+                candidate = _collect_for_selector(sel)
+                if not parts and candidate:
+                    parts = candidate
+                if len(candidate) >= 3 or sum(len(x) for x in candidate) >= 900:
+                    parts = candidate
+                    break
             except Exception:
                 continue
         if not parts:
@@ -457,6 +469,29 @@ class GMAScraper:
                 page.wait_for_selector('h1', timeout=8000)
             except:
                 pass
+            # GMA pages sometimes hydrate/replace article bodies after DOMContentLoaded.
+            # Waiting briefly for network to settle and for multiple paragraphs to appear
+            # reduces "excerpt-only" captures (which often end with .../…).
+            try:
+                page.wait_for_load_state("networkidle", timeout=8000)
+            except Exception:
+                pass
+            try:
+                page.wait_for_function(
+                    """() => {
+                      const sels = [
+                        '.article__content p',
+                        '.story__content p',
+                        '.article-content p',
+                        '.article-body p',
+                        '.content__article p',
+                      ];
+                      return sels.some((s) => document.querySelectorAll(s).length >= 4);
+                    }""",
+                    timeout=8000,
+                )
+            except Exception:
+                pass
             soup = BeautifulSoup(page.content(), 'html.parser')
             title = self._extract_with_fallbacks(soup, self.SELECTORS["title"]) or ""
             if not title:
@@ -467,6 +502,22 @@ class GMAScraper:
                 context.close()
                 return None
             content = self._extract_content(soup, url)
+            # Retry once if it still looks like an excerpt (common: ends with ... / …).
+            if content and re.search(r"(\.\.\.|…)\s*$", content) and len(content) < max(800, SCRAPER_CONTENT_MAX_CHARS - 50):
+                try:
+                    page.wait_for_timeout(1500)
+                except Exception:
+                    pass
+                try:
+                    page.wait_for_load_state("networkidle", timeout=6000)
+                except Exception:
+                    pass
+                soup2 = BeautifulSoup(page.content(), "html.parser")
+                content2 = self._extract_content(soup2, url)
+                if content2 and len(content2) > len(content) + 200:
+                    content = content2
+                    soup = soup2
+
             raw_published = self._extract_with_fallbacks(soup, self.SELECTORS["published_date"]) or None
             published_iso = self._parse_published(raw_published)
             norm_cat, raw_cat = self._extract_gma_category(url, soup)

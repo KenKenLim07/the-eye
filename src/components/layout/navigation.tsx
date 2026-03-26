@@ -1,17 +1,19 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Menu, Moon, Search, Sun } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetClose, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { formatDateTime } from "@/lib/utils/date";
+import { getContainerSize, getResponsivePadding } from "@/lib/design-system";
 
 export default function Navigation() {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [isDark, setIsDark] = useState(false);
+  type CSSVarProperties = CSSProperties & Record<`--${string}`, string | number>;
 
   const navItems = useMemo(
     () => [
@@ -65,16 +67,15 @@ export default function Navigation() {
 
   return (
     <nav className="sticky top-0 z-50 border-b bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-      <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
-        <div className="flex h-16 items-center justify-between gap-3">
-          <Link href="/" className="flex items-center gap-3">
-            <div className="leading-none">
-              <div className="u-serif text-xl font-semibold tracking-tight">PH‑Eye</div>
-              <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-                Editorial analytics
+      <div className={getResponsivePadding()}>
+        <div className={`mx-auto ${getContainerSize("lg")}`}>
+          <div className="flex h-16 items-center justify-between gap-3">
+            <Link href="/" className="flex items-center gap-3">
+              <div className="leading-none">
+                <div className="u-serif text-xl font-semibold tracking-tight">PH‑Eye</div>
+                <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">Editorial analytics</div>
               </div>
-            </div>
-          </Link>
+            </Link>
 
           {/* Desktop Navigation */}
           <div className="hidden md:flex items-center gap-6">
@@ -102,7 +103,7 @@ export default function Navigation() {
             })}
           </div>
 
-          <div className="flex items-center gap-2 sm:gap-3">
+            <div className="flex items-center gap-2 sm:gap-3">
             {lastUpdated && (
               <div className="hidden lg:block u-mono text-[10px] uppercase tracking-widest text-muted-foreground">
                 Updated {formatDateTime(lastUpdated)}
@@ -127,14 +128,14 @@ export default function Navigation() {
             </Button>
 
             {/* Mobile menu */}
-            <div className="md:hidden">
+              <div className="md:hidden">
               <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
                 <SheetTrigger asChild>
                   <Button
                     type="button"
                     variant="outline"
                     size="icon"
-                    className="h-11 w-11 hover:bg-muted hover:text-foreground"
+                    className="h-11 w-11 hover:bg-muted hover:text-foreground transition-[transform,background-color] active:scale-[0.98]"
                     aria-label="Open menu"
                   >
                     <Menu className="h-5 w-5" />
@@ -143,43 +144,45 @@ export default function Navigation() {
 
                 <SheetContent
                   side="bottom"
-                  className="p-4 sm:p-5 rounded-t-xl border-t max-h-[85dvh] overflow-y-auto pb-[max(1rem,env(safe-area-inset-bottom))]"
+                  className="p-4 sm:p-5 rounded-t-xl border-t max-h-[85dvh] overflow-y-auto pb-[max(1rem,env(safe-area-inset-bottom))] transform-gpu transition-[transform,opacity] ease-out motion-reduce:transition-none data-[state=open]:opacity-100 data-[state=closed]:opacity-0 data-[state=open]:duration-200 data-[state=closed]:duration-150 data-[state=closed]:scale-[0.99] data-[state=open]:scale-100"
                   showCloseButton
                 >
                   <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-border" aria-hidden="true" />
                   <SheetHeader className="pb-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="space-y-0.5">
-                        <SheetTitle className="u-serif text-lg">PH‑Eye</SheetTitle>
-                        <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-                          Index
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-2 pt-1">
-                        <span className="inline-flex h-2 w-2 rounded-full bg-primary" aria-hidden="true" />
-                        <span className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-                          Live-ish
-                        </span>
+                    <div className="space-y-0.5">
+                      <SheetTitle className="u-serif text-lg u-sheet-stagger-item" style={{ "--i": 0 } as CSSVarProperties}>
+                        PH‑Eye
+                      </SheetTitle>
+                      <div
+                        className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground u-sheet-stagger-item"
+                        style={{ "--i": 1 } as CSSVarProperties}
+                      >
+                        Index
                       </div>
                     </div>
                   </SheetHeader>
 
                   <div className="space-y-2">
-                    <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+                    <div
+                      className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground u-sheet-stagger-item"
+                      style={{ "--i": 2 } as CSSVarProperties}
+                    >
                       Navigate
                     </div>
                     <div className="grid gap-1.5">
-                      {navItems.map((item) => {
+                      {navItems.map((item, idx) => {
                         const active = pathname === item.href;
+                        const style: CSSVarProperties = { "--i": idx + 3 };
                         return (
                           <SheetClose asChild key={item.href}>
                             <Link
                               href={item.href}
                               aria-current={active ? "page" : undefined}
+                              style={style}
                               className={[
                                 "relative flex items-center justify-between rounded-md px-3 py-3 text-sm transition-colors",
                                 "border bg-card/40 hover:bg-muted",
+                                "u-sheet-stagger-item",
                                 active ? "text-foreground bg-muted/70" : "text-muted-foreground hover:text-foreground",
                               ].join(" ")}
                             >
@@ -200,7 +203,10 @@ export default function Navigation() {
                   </div>
 
                   <div className="mt-6 space-y-2">
-                    <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+                    <div
+                      className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground u-sheet-stagger-item"
+                      style={{ "--i": navItems.length + 3 } as CSSVarProperties}
+                    >
                       Sources
                     </div>
                     <div className="flex flex-wrap gap-2">
@@ -212,16 +218,20 @@ export default function Navigation() {
                         "Philstar",
                         "Sunstar",
                         "Manila Bulletin",
-                      ].map((source) => (
-                        <SheetClose asChild key={source}>
-                          <Link
-                            href={`/source/${encodeURIComponent(source)}`}
-                            className="inline-flex items-center rounded-full border bg-card px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-                          >
-                            {source}
-                          </Link>
-                        </SheetClose>
-                      ))}
+                      ].map((source, idx) => {
+                        const style: CSSVarProperties = { "--i": navItems.length + 4 + idx };
+                        return (
+                          <SheetClose asChild key={source}>
+                            <Link
+                              href={`/source/${encodeURIComponent(source)}`}
+                              style={style}
+                              className="inline-flex items-center rounded-full border bg-card px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors u-sheet-stagger-item"
+                            >
+                              {source}
+                            </Link>
+                          </SheetClose>
+                        );
+                      })}
                     </div>
                   </div>
 
@@ -234,6 +244,7 @@ export default function Navigation() {
                   )}
                 </SheetContent>
               </Sheet>
+              </div>
             </div>
           </div>
         </div>

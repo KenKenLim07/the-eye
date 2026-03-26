@@ -17,10 +17,10 @@ type LatestFeedItem = Article & {
 
 function sentimentBadge(sentiment: string | null | undefined): { label: string; title: string; className?: string } {
   const s = (sentiment || "").toLowerCase();
-  if (s === "positive") return { label: "Pos", title: "positive", className: "bg-emerald-600 text-white border-emerald-600 dark:bg-emerald-500" };
-  if (s === "negative") return { label: "Neg", title: "negative", className: "bg-red-600 text-white border-red-600 dark:bg-red-500" };
-  if (s === "neutral") return { label: "Neu", title: "neutral", className: "bg-slate-700 text-white border-slate-700 dark:bg-slate-500" };
-  return { label: "Unl", title: "unlabeled", className: "bg-muted text-muted-foreground border-border" };
+  if (s === "positive") return { label: "POS", title: "positive", className: "bg-emerald-600 text-white border-emerald-600 dark:bg-emerald-500" };
+  if (s === "negative") return { label: "NEG", title: "negative", className: "bg-red-600 text-white border-red-600 dark:bg-red-500" };
+  if (s === "neutral") return { label: "NEU", title: "neutral", className: "bg-slate-700 text-white border-slate-700 dark:bg-slate-500" };
+  return { label: "UNL", title: "unlabeled", className: "bg-muted text-muted-foreground border-border" };
 }
 
 export default function LatestFeedClient(props: { items: LatestFeedItem[] }) {
@@ -84,16 +84,21 @@ export default function LatestFeedClient(props: { items: LatestFeedItem[] }) {
                     <span className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground" title={a.absTime}>
                       {a.ageShort}
                     </span>
-                    <span className="u-mono text-[10px] tracking-widest text-muted-foreground/70" title={`Article ID ${a.id}`}>
-                      #{a.id}
-                    </span>
-                    <Badge
-                      className={cn("px-1.5 py-0 text-[10px] leading-none uppercase tracking-wide", s.className)}
-                      title={`VADER sentiment: ${s.title}`}
-                      aria-label={`Sentiment ${s.title}`}
-                    >
-                      {s.label}
-                    </Badge>
+                    <div className="flex items-center gap-2">
+                      <span className="u-mono text-[10px] tracking-widest text-muted-foreground/70" title={`Article ID ${a.id}`}>
+                        #{a.id}
+                      </span>
+                      <Badge
+                        className={cn(
+                          "inline-flex items-center justify-center h-5 px-2 py-0 text-[10px] leading-none rounded-full border uppercase tracking-wide",
+                          s.className
+                        )}
+                        title={`VADER sentiment: ${s.title}`}
+                        aria-label={`Sentiment ${s.title}`}
+                      >
+                        {s.label}
+                      </Badge>
+                    </div>
                   </div>
 
                   {a.url ? (
