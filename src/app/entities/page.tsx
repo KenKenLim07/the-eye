@@ -10,6 +10,7 @@ import { formatDateTime } from "@/lib/utils/date";
 import { supabase } from "@/lib/supabase/client";
 import AnalyticsFiltersSheet from "@/components/analytics/analytics-filters-sheet";
 import ActiveFilters from "@/components/analytics/active-filters";
+import Link from "next/link";
 
 interface NerEntity {
   text: string;
@@ -380,6 +381,12 @@ export default function EntitiesPage() {
                 />
               </div>
 
+              <Button asChild variant="outline" className="h-11">
+                <Link href="/trends">Trends</Link>
+              </Button>
+              <Button asChild variant="outline" className="h-11">
+                <Link href="/correlation">Correlation</Link>
+              </Button>
               <Button onClick={() => load(true)} variant="outline" className="h-11 w-full sm:w-auto" disabled={loading || refreshing}>
                 {(loading || refreshing) ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
                 Refresh
@@ -399,11 +406,11 @@ export default function EntitiesPage() {
         </div>
 
         <Card>
-            <CardHeader>
+          <CardHeader>
             <CardTitle>Top Entities (NER + Sentiment)</CardTitle>
             <CardDescription className="break-words">
               {computedAt ? `Snapshot: ${formatDateTime(computedAt)}. ` : ""}
-              Sampled: {sampled} / {totalCapped ?? totalCap}
+              Analyzed (entities+sentiment): {sampled} / {totalCapped ?? totalCap}
               {typeof totalAvailable === "number" ? ` (available: ${totalAvailable})` : ""}
               {sampleCap > 0 && sampled >= sampleCap && (totalCapped ?? totalCap) > sampleCap ? `, capped at ${sampleCap}` : ""}
             </CardDescription>
@@ -437,6 +444,17 @@ export default function EntitiesPage() {
                           <div>{e.text}</div>
                           <div className="sm:hidden mt-0.5 u-mono text-[10px] uppercase tracking-widest text-muted-foreground">
                             {e.type}
+                          </div>
+                          <div
+                            className={[
+                              "sm:hidden mt-0.5 u-mono text-[10px] uppercase tracking-widest",
+                              typeof e.avg_sentiment === "number"
+                                ? (e.avg_sentiment > 0.05 ? "text-emerald-600" : e.avg_sentiment < -0.05 ? "text-red-600" : "text-muted-foreground")
+                                : "text-muted-foreground",
+                            ].join(" ")}
+                            title="Average sentiment score (VADER compound, averaged over entity mentions)"
+                          >
+                            Avg {typeof e.avg_sentiment === "number" ? e.avg_sentiment.toFixed(3) : "-"}
                           </div>
                         </td>
                         <td className="hidden sm:table-cell p-2 text-muted-foreground u-mono text-[11px] uppercase tracking-widest">{e.type}</td>
