@@ -312,7 +312,7 @@ export default async function Home() {
 
   return (
     <MainLayout>
-      <div className="space-y-8 mt-10">
+      <div className="space-y-8">
         <header className="max-w-4xl mx-auto px-1">
           <h1 className="u-serif text-4xl sm:text-6xl font-bold tracking-tight leading-[1.02]">
             Today in the Philippines

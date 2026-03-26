@@ -17,17 +17,19 @@ export default function ArticlesGridSkeleton({
     <MainLayout containerSize="xl">
       <div className="space-y-6">
         <div className="space-y-4">
-          <div className="flex items-start justify-between gap-3">
-            <div className="space-y-2">
-              <Skeleton className={`h-8 ${titleWidthClassName}`} />
-              <Skeleton className={`h-4 ${subtitleWidthClassName}`} />
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex items-start gap-3 min-w-0">
+              {showBack ? <Skeleton className="h-11 w-11 shrink-0 rounded-md" /> : null}
+              <div className="space-y-2 min-w-0">
+                <Skeleton className={`h-8 ${titleWidthClassName}`} />
+                <Skeleton className={`h-4 ${subtitleWidthClassName}`} />
+              </div>
             </div>
-            {showBack ? <Skeleton className="h-4 w-16" /> : null}
           </div>
           <div className="flex flex-col md:flex-row items-stretch gap-2">
-            <Skeleton className="h-10 w-full md:w-56" />
-            <Skeleton className="h-10 w-full" />
-            <Skeleton className="h-10 w-28" />
+            <Skeleton className="h-11 w-full md:w-56" />
+            <Skeleton className="h-11 w-full" />
+            <Skeleton className="h-11 w-28" />
           </div>
         </div>
 
@@ -50,4 +52,3 @@ export default function ArticlesGridSkeleton({
     </MainLayout>
   );
 }
-

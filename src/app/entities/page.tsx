@@ -387,7 +387,7 @@ export default function EntitiesPage() {
               <Button asChild variant="outline" className="h-11">
                 <Link href="/correlation">Correlation</Link>
               </Button>
-              <Button onClick={() => load(true)} variant="outline" className="h-11 w-full sm:w-auto" disabled={loading || refreshing}>
+              <Button onClick={() => load(true)} variant="outline" className="h-11" disabled={loading || refreshing}>
                 {(loading || refreshing) ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
                 Refresh
               </Button>

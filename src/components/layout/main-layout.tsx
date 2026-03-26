@@ -19,7 +19,7 @@ export default function MainLayout({
       <Navigation />
       <main className={`flex-1 ${className}`}>
         {/* Responsive padding using design system constants */}
-        <div className={getResponsivePadding()}>
+        <div className={`${getResponsivePadding()} py-6 sm:py-8 lg:py-10`}>
           {/* Container with max-width constraints and responsive margins */}
           <div className={`mx-auto ${getContainerSize(containerSize)} space-y-8`}>
             {children}
