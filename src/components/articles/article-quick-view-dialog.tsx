@@ -46,19 +46,7 @@ export default function ArticleQuickViewDialog(props: {
         )}
         onCloseAutoFocus={(e) => e.preventDefault()}
       >
-        <div className="flex items-start gap-3 border-b bg-background px-3 sm:px-4 py-3">
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="h-11 w-11 shrink-0"
-            onClick={() => onOpenChange(false)}
-            aria-label="Close quick view"
-            title="Close"
-          >
-            <X className="h-4 w-4" />
-          </Button>
-
+        <div className="flex items-start justify-between gap-3 border-b bg-background px-3 sm:px-4 py-3">
           <div className="min-w-0 flex-1">
             <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">Quick view</div>
             <div className="u-serif text-lg sm:text-2xl font-semibold leading-tight break-words">
@@ -101,6 +89,18 @@ export default function ArticleQuickViewDialog(props: {
               ) : null}
             </div>
           </div>
+
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-11 w-11 shrink-0"
+            onClick={() => onOpenChange(false)}
+            aria-label="Close quick view"
+            title="Close"
+          >
+            <X className="h-4 w-4" />
+          </Button>
         </div>
 
         <div className="flex-1 overflow-y-auto overscroll-contain min-h-0 px-3 sm:px-4 py-4">
