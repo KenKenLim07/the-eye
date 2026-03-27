@@ -7,6 +7,7 @@ export const dynamic = "force-dynamic";
 
 const MAX_NOTE_LEN = 800;
 const MAX_REPORTS_PER_HOUR = 5;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function firstIpFromXff(xff: string | null): string | null {
   if (!xff) return null;
@@ -74,6 +75,9 @@ export async function POST(req: NextRequest) {
     }
     if (typeof clientReportId !== "string" || clientReportId.length < 10 || clientReportId.length > 80) {
       return NextResponse.json({ ok: false, error: "Invalid client_report_id" }, { status: 400 });
+    }
+    if (!UUID_RE.test(clientReportId)) {
+      return NextResponse.json({ ok: false, error: "client_report_id must be a UUID" }, { status: 400 });
     }
 
     let note: string | null = null;

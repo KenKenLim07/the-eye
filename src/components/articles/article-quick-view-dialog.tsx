@@ -29,6 +29,30 @@ function sentimentClass(sentiment: string | null | undefined): string {
   return "bg-muted text-muted-foreground border-border";
 }
 
+function uuidV4(): string {
+  // Prefer native randomUUID when available.
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+
+  // Fallback: generate v4 UUID from random bytes.
+  const bytes = new Uint8Array(16);
+  if (typeof crypto !== "undefined" && "getRandomValues" in crypto) {
+    crypto.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < bytes.length; i += 1) {
+      bytes[i] = Math.floor(Math.random() * 256);
+    }
+  }
+
+  // Set version (4) and variant bits.
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 export default function ArticleQuickViewDialog(props: {
   article: QuickViewArticle | null;
   open: boolean;
@@ -78,7 +102,7 @@ export default function ArticleQuickViewDialog(props: {
     if (hasReported) return;
     setReportStatus("submitting");
     setReportError(null);
-    const clientReportId = typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+    const clientReportId = uuidV4();
 
     try {
       const res = await fetch("/api/reports/sentiment", {
@@ -388,7 +412,7 @@ export default function ArticleQuickViewDialog(props: {
               </DialogContent>
             </Dialog>
           </div>
-        ) : null}
+        )}
       </DialogContent>
     </Dialog>
   );
