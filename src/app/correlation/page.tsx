@@ -10,6 +10,7 @@ import MainLayout from "@/components/layout/main-layout";
 import { supabaseUntyped } from "@/lib/supabase/client";
 import AnalyticsFiltersSheet from "@/components/analytics/analytics-filters-sheet";
 import ActiveFilters from "@/components/analytics/active-filters";
+import { Skeleton } from "@/components/ui/skeleton";
 
 interface CorrelationData {
   ok: boolean;
@@ -19,6 +20,62 @@ interface CorrelationData {
   matrix: Array<Array<number | null>>;
   p_values: Array<Array<number | null>>;
 }
+
+function heatCellClass(r: number | null): string {
+  if (r == null) {
+    return "bg-muted/30 text-muted-foreground dark:bg-muted/15";
+  }
+
+  const abs = Math.abs(r);
+  const intensity =
+    abs >= 0.75 ? "strong" : abs >= 0.5 ? "mid" : abs >= 0.25 ? "soft" : "near0";
+
+  if (intensity === "near0") {
+    return "bg-slate-50 text-foreground dark:bg-slate-900/35 dark:text-foreground";
+  }
+
+  const isPos = r > 0;
+  if (isPos) {
+    if (intensity === "soft") return "bg-emerald-50 text-foreground dark:bg-emerald-500/15 dark:text-foreground";
+    if (intensity === "mid") return "bg-emerald-100 text-foreground dark:bg-emerald-500/24 dark:text-foreground";
+    return "bg-emerald-200 text-foreground dark:bg-emerald-500/34 dark:text-foreground";
+  }
+
+  if (intensity === "soft") return "bg-rose-50 text-foreground dark:bg-rose-500/15 dark:text-foreground";
+  if (intensity === "mid") return "bg-rose-100 text-foreground dark:bg-rose-500/24 dark:text-foreground";
+  return "bg-rose-200 text-foreground dark:bg-rose-500/34 dark:text-foreground";
+}
+
+const CorrelationMatrixSkeleton = () => (
+  <div className="overflow-auto">
+    <div className="min-w-[720px] rounded-lg border overflow-hidden">
+      <div className="grid grid-cols-9 gap-0 border-b bg-muted/20 dark:bg-muted/10">
+        <div className="p-2 border-r border-border/40">
+          <Skeleton className="h-3 w-14" />
+        </div>
+        {Array.from({ length: 8 }).map((_, i) => (
+          <div key={i} className="p-2 border-r last:border-r-0 border-border/40">
+            <Skeleton className="h-3 w-20" />
+          </div>
+        ))}
+      </div>
+      <div className="divide-y">
+        {Array.from({ length: 7 }).map((_, r) => (
+          <div key={r} className="grid grid-cols-9 gap-0">
+            <div className="p-2 border-r border-border/40 bg-background/60 dark:bg-background/20">
+              <Skeleton className="h-3 w-20" />
+            </div>
+            {Array.from({ length: 8 }).map((_, c) => (
+              <div key={c} className="p-2 border-r last:border-r-0 border-border/40">
+                <Skeleton className="h-3 w-12 mx-auto" />
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+    </div>
+  </div>
+);
 
 const SOURCES = [
   { value: "all", label: "All Sources" },
@@ -260,28 +317,42 @@ export default function CorrelationPage() {
           </CardHeader>
           <CardContent>
             {loading ? (
-              <div className="text-sm text-muted-foreground py-6">Loading correlation...</div>
+              <CorrelationMatrixSkeleton />
             ) : !corr?.ok || (corr.sources?.length ?? 0) === 0 ? (
               <div className="text-sm text-muted-foreground py-6">No correlation data available.</div>
             ) : (
               <div className="overflow-auto">
-                <table className="min-w-full text-sm">
+                <table className="min-w-full text-sm border-collapse">
                   <thead>
                     <tr>
-                      <th className="text-left p-2">Source</th>
-                      {corr.sources.map((s) => <th key={s} className="text-left p-2">{s}</th>)}
+                      <th className="text-left p-2 text-xs font-medium text-foreground border border-border/40 bg-muted/30 dark:bg-muted/15">
+                        Source
+                      </th>
+                      {corr.sources.map((s) => (
+                        <th
+                          key={s}
+                          className="text-left p-2 text-xs font-medium text-foreground border border-border/40 bg-muted/30 dark:bg-muted/15"
+                        >
+                          {s}
+                        </th>
+                      ))}
                     </tr>
                   </thead>
                   <tbody>
                     {corr.sources.map((rowSrc, i) => (
-                      <tr key={rowSrc} className="border-t">
-                        <td className="p-2 font-medium">{rowSrc}</td>
+                      <tr key={rowSrc}>
+                        <td className="p-2 font-medium border border-border/40 bg-background/60 dark:bg-background/20 whitespace-nowrap">
+                          {rowSrc}
+                        </td>
                         {corr.sources.map((colSrc, j) => {
                           const r = corr.matrix[i]?.[j];
                           const p = corr.p_values[i]?.[j];
-                          const bg = r == null ? "bg-gray-100" : r >= 0.5 ? "bg-green-100" : r <= -0.5 ? "bg-red-100" : "bg-yellow-50";
                           return (
-                            <td key={colSrc} className={`p-2 ${bg}`} title={`r=${r == null ? "n/a" : r.toFixed(3)}${p != null ? `, p=${p.toFixed(3)}` : ""}`}>
+                            <td
+                              key={colSrc}
+                              className={`p-2 tabular-nums text-center border border-border/40 ${heatCellClass(r)}`}
+                              title={`r=${r == null ? "n/a" : r.toFixed(3)}${p != null ? `, p=${p.toFixed(3)}` : ""}`}
+                            >
                               {r == null ? "-" : r.toFixed(3)}
                             </td>
                           );

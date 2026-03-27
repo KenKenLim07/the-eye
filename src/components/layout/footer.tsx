@@ -16,10 +16,6 @@ export default function Footer() {
                   </div>
                 </div>
                 <div className="hidden sm:flex items-center gap-2">
-                  <span className="inline-flex h-2 w-2 rounded-full bg-primary" aria-hidden="true" />
-                  <span className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-                    Live-ish
-                  </span>
                 </div>
               </div>
 
@@ -71,15 +67,13 @@ export default function Footer() {
                   </Link>
                 ))}
               </div>
-              <div className="text-xs text-muted-foreground leading-5">
-                Some publishers show dates in PHT; timestamps are normalized for consistent analytics.
-              </div>
+              
             </div>
           </div>
 
           <div className="pt-6 border-t flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <p className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-              © {year} PH‑Eye • Thesis demo build
+              © {year} PH‑Eye •
             </p>
             <p className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">
               Built by Jose Marie Lim • Next.js + Supabase

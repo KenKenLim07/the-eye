@@ -11,6 +11,7 @@ import { supabase } from "@/lib/supabase/client";
 import AnalyticsFiltersSheet from "@/components/analytics/analytics-filters-sheet";
 import ActiveFilters from "@/components/analytics/active-filters";
 import Link from "next/link";
+import { Skeleton } from "@/components/ui/skeleton";
 
 interface NerEntity {
   text: string;
@@ -61,6 +62,8 @@ const PERIODS = [
   { value: "30d", label: "Last 30 Days" },
 ];
 
+const MAX_ENTITIES_TO_SHOW = 50;
+
 const cache = new Map<string, { expires: number; data: NerSampleData }>();
 const inflight = new Map<string, Promise<NerSampleData>>();
 
@@ -108,7 +111,7 @@ async function fetchTopEntities(period: string, source: string | undefined, scan
     period,
     limit_articles: String(limitArticles),
     total_cap: "0",
-    max_entities: "100",
+    max_entities: String(MAX_ENTITIES_TO_SHOW),
     scan_mode: scanMode,
   });
   if (source && source !== "all") params.set("source", source);
@@ -219,7 +222,7 @@ async function fetchTopEntitiesFromSnapshots(period: string, refresh = false): P
         .select("entity_text,entity_type,mentions,avg_sentiment")
         .eq("snapshot_key", snap.key)
         .order("mentions", { ascending: false })
-        .limit(Math.max(1, Math.min(Number(snap.max_entities ?? 100), 2000)));
+        .limit(MAX_ENTITIES_TO_SHOW);
 
       if (itemsRes.error) {
         throw new Error(itemsRes.error.message);
@@ -276,6 +279,38 @@ export default function EntitiesPage() {
   const [isPending, startTransition] = useTransition();
   const [computedAt, setComputedAt] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+
+  const visibleRows = rows.slice(0, MAX_ENTITIES_TO_SHOW);
+
+  const sentimentTextClass = (v: number | null | undefined) => {
+    if (typeof v !== "number") return "text-muted-foreground";
+    if (v > 0.05) return "text-emerald-700 dark:text-emerald-300";
+    if (v < -0.05) return "text-rose-700 dark:text-rose-300";
+    return "text-muted-foreground";
+  };
+
+  const EntitiesTableSkeleton = () => (
+    <div className="overflow-x-auto -mx-2 px-2 sm:mx-0 sm:px-0">
+      <div className="rounded-lg border overflow-hidden">
+        <div className="grid grid-cols-12 gap-2 p-3 bg-muted/20">
+          <Skeleton className="h-3 col-span-2" />
+          <Skeleton className="h-3 col-span-6" />
+          <Skeleton className="h-3 col-span-2 hidden sm:block" />
+          <Skeleton className="h-3 col-span-2" />
+        </div>
+        <div className="divide-y">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <div key={i} className="grid grid-cols-12 gap-2 p-3">
+              <Skeleton className="h-4 col-span-2" />
+              <Skeleton className="h-4 col-span-6" />
+              <Skeleton className="h-4 col-span-2 hidden sm:block" />
+              <Skeleton className="h-4 col-span-2" />
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
 
   const load = useCallback(async (refresh = false) => {
     if (refresh) setRefreshing(true);
@@ -407,22 +442,23 @@ export default function EntitiesPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Top Entities (NER + Sentiment)</CardTitle>
+            <CardTitle>Top {MAX_ENTITIES_TO_SHOW} Entities (NER + Sentiment)</CardTitle>
             <CardDescription className="break-words">
               {computedAt ? `Snapshot: ${formatDateTime(computedAt)}. ` : ""}
-              Analyzed (entities+sentiment): {sampled} / {totalCapped ?? totalCap}
-              {typeof totalAvailable === "number" ? ` (available: ${totalAvailable})` : ""}
+              Scanned: {sampleCap || 0} / {totalCapped ?? totalCap}
+              {typeof totalAvailable === "number" ? ` (available: ${totalAvailable})` : ""} • Contributed (entities+sentiment): {sampled}
               {sampleCap > 0 && sampled >= sampleCap && (totalCapped ?? totalCap) > sampleCap ? `, capped at ${sampleCap}` : ""}
+              {` • Top ${MAX_ENTITIES_TO_SHOW} by mentions`}
             </CardDescription>
           </CardHeader>
           <CardContent>
             {loading ? (
-              <div className="text-sm text-muted-foreground py-6">Loading entities...</div>
+              <EntitiesTableSkeleton />
             ) : loadError ? (
               <div className="text-sm text-red-600 py-6 whitespace-pre-wrap break-words">
                 {loadError}
               </div>
-            ) : rows.length === 0 ? (
+            ) : visibleRows.length === 0 ? (
               <div className="text-sm text-muted-foreground py-6">No entity data available for the selected filter.</div>
             ) : (
               <div className="overflow-x-auto -mx-2 px-2 sm:mx-0 sm:px-0">
@@ -437,7 +473,7 @@ export default function EntitiesPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {rows.map((e, idx) => (
+                    {visibleRows.map((e, idx) => (
                       <tr key={`${e.text}:${e.type}:${idx}`} className={`border-t ${idx % 2 === 0 ? "bg-transparent" : "bg-muted/30"}`}>
                         <td className="p-2 u-mono text-[11px] text-muted-foreground">{idx + 1}</td>
                         <td className="p-2 font-medium break-words">
@@ -448,9 +484,7 @@ export default function EntitiesPage() {
                           <div
                             className={[
                               "sm:hidden mt-0.5 u-mono text-[10px] uppercase tracking-widest",
-                              typeof e.avg_sentiment === "number"
-                                ? (e.avg_sentiment > 0.05 ? "text-emerald-600" : e.avg_sentiment < -0.05 ? "text-red-600" : "text-muted-foreground")
-                                : "text-muted-foreground",
+                              sentimentTextClass(e.avg_sentiment),
                             ].join(" ")}
                             title="Average sentiment score (VADER compound, averaged over entity mentions)"
                           >
@@ -459,7 +493,7 @@ export default function EntitiesPage() {
                         </td>
                         <td className="hidden sm:table-cell p-2 text-muted-foreground u-mono text-[11px] uppercase tracking-widest">{e.type}</td>
                         <td className="p-2 text-right u-mono text-[11px]">{e.mentions}</td>
-                        <td className="hidden sm:table-cell p-2 text-right u-mono text-[11px] text-muted-foreground">
+                        <td className={`hidden sm:table-cell p-2 text-right u-mono text-[11px] ${sentimentTextClass(e.avg_sentiment)}`}>
                           {typeof e.avg_sentiment === "number" ? e.avg_sentiment.toFixed(3) : "-"}
                         </td>
                       </tr>
