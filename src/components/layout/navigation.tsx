@@ -22,6 +22,7 @@ export default function Navigation() {
       { href: "/trends", label: "Trends" },
       { href: "/correlation", label: "Correlation" },
       { href: "/entities", label: "Entities" },
+      { href: "/about", label: "About" },
     ],
     []
   );

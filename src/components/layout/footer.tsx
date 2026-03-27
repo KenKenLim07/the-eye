@@ -43,6 +43,9 @@ export default function Footer() {
                 <Link href="/entities" className="hover:underline underline-offset-4">
                   Entities
                 </Link>
+                <Link href="/about" className="hover:underline underline-offset-4">
+                  About
+                </Link>
               </div>
             </div>
 
