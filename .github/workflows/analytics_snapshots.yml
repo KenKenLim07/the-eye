@@ -1,0 +1,41 @@
+name: Analytics Snapshots (Supabase)
+
+on:
+  schedule:
+    # Every 6 hours at minute 10
+    - cron: "10 */6 * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: analytics-snapshots
+  cancel-in-progress: false
+
+jobs:
+  write-snapshots:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/scripts/requirements.entity_rankings_snapshot.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/scripts/requirements.entity_rankings_snapshot.txt
+
+      - name: Write 7d snapshots
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          python backend/scripts/trends_snapshot.py 7d
+          python backend/scripts/correlation_snapshot.py 7d
+          python backend/scripts/entity_rankings_snapshot.py 7d

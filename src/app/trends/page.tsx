@@ -348,6 +348,41 @@ export default function TrendsPage() {
   }
 
   if (!data?.ok) {
+    if (useSnapshots && selectedPeriod === "30d") {
+      return (
+        <MainLayout containerSize="xl">
+          <div className="space-y-6">
+            <div>
+              <h1 className="u-serif text-3xl font-semibold tracking-tight">News Sentiment Trends</h1>
+              <p className="text-muted-foreground">Analyzing sentiment patterns across Philippine news sources</p>
+            </div>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>30d snapshots aren’t generated yet</CardTitle>
+                <CardDescription>
+                  This deployment is using Supabase snapshot mode. Only 7d snapshots are currently automated by cron.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-col sm:flex-row gap-2">
+                <Button onClick={() => handlePeriodChange("7d")} className="h-11">
+                  Switch to 7d
+                </Button>
+                <Button onClick={handleRefresh} variant="outline" className="h-11" disabled={isRefreshing}>
+                  {isRefreshing ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                  )}
+                  Retry
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
+        </MainLayout>
+      );
+    }
+
     return (
       <div className="container mx-auto max-w-6xl p-4">
         <h1 className="text-3xl font-bold mb-6">News Sentiment Trends</h1>

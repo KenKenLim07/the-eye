@@ -281,6 +281,7 @@ export default function EntitiesPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const visibleRows = rows.slice(0, MAX_ENTITIES_TO_SHOW);
+  const missing30dSnapshot = useSnapshots && selectedPeriod === "30d" && !loading && !computedAt && !loadError;
 
   const sentimentTextClass = (v: number | null | undefined) => {
     if (typeof v !== "number") return "text-muted-foreground";
@@ -454,6 +455,16 @@ export default function EntitiesPage() {
           <CardContent>
             {loading ? (
               <EntitiesTableSkeleton />
+            ) : missing30dSnapshot && visibleRows.length === 0 ? (
+              <div className="py-10 flex flex-col items-center text-center gap-3">
+                <div className="text-sm font-medium">30d snapshots aren’t generated yet.</div>
+                <div className="text-sm text-muted-foreground max-w-md">
+                  This deployment is using Supabase snapshot mode. Only 7d snapshots are currently automated by cron.
+                </div>
+                <Button onClick={() => startTransition(() => setSelectedPeriod("7d"))} className="h-11 mt-2">
+                  Switch to 7d
+                </Button>
+              </div>
             ) : loadError ? (
               <div className="text-sm text-red-600 py-6 whitespace-pre-wrap break-words">
                 {loadError}

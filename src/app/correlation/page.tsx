@@ -201,6 +201,7 @@ export default function CorrelationPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [isPending, startTransition] = useTransition();
   const useSnapshots = shouldUseSnapshots();
+  const missing30dSnapshot = useSnapshots && selectedPeriod === "30d" && !loading && !(corr?.ok ?? true);
 
   useEffect(() => {
     if (useSnapshots && selectedSource !== "all") setSelectedSource("all");
@@ -318,6 +319,16 @@ export default function CorrelationPage() {
           <CardContent>
             {loading ? (
               <CorrelationMatrixSkeleton />
+            ) : missing30dSnapshot ? (
+              <div className="py-10 flex flex-col items-center text-center gap-3">
+                <div className="text-sm font-medium">30d snapshots aren’t generated yet.</div>
+                <div className="text-sm text-muted-foreground max-w-md">
+                  This deployment is using Supabase snapshot mode. Only 7d snapshots are currently automated by cron.
+                </div>
+                <Button onClick={() => startTransition(() => setSelectedPeriod("7d"))} className="h-11 mt-2">
+                  Switch to 7d
+                </Button>
+              </div>
             ) : !corr?.ok || (corr.sources?.length ?? 0) === 0 ? (
               <div className="text-sm text-muted-foreground py-6">No correlation data available.</div>
             ) : (
