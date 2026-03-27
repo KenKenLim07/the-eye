@@ -21,6 +21,8 @@ export type QuickViewArticle = {
   sentiment?: string | null;
 };
 
+const REPORT_NOTE_MAX_LEN = 200;
+
 function sentimentClass(sentiment: string | null | undefined): string {
   const v = (sentiment || "").toLowerCase();
   if (v === "positive") return "bg-emerald-600 text-white border-transparent dark:bg-emerald-500";
@@ -66,7 +68,8 @@ export default function ArticleQuickViewDialog(props: {
   const reportedStorageKey = articleIdKey ? `ph-eye:reported_sentiment:${articleIdKey}` : null;
 
   const [reportOpen, setReportOpen] = useState(false);
-  const [reportedLabel, setReportedLabel] = useState<"positive" | "neutral" | "negative" | "unlabeled">("unlabeled");
+  const [reportType, setReportType] = useState<"sentiment" | "not_news">("sentiment");
+  const [reportedLabel, setReportedLabel] = useState<"positive" | "neutral" | "negative">("neutral");
   const [reportNote, setReportNote] = useState("");
   const [reportStatus, setReportStatus] = useState<"idle" | "submitting" | "success" | "error">("idle");
   const [reportError, setReportError] = useState<string | null>(null);
@@ -94,7 +97,8 @@ export default function ArticleQuickViewDialog(props: {
       setReportStatus("idle");
       setReportError(null);
       setReportNote("");
-      setReportedLabel("unlabeled");
+      setReportType("sentiment");
+      setReportedLabel("neutral");
     }
   }, [reportOpen]);
 
@@ -111,7 +115,8 @@ export default function ArticleQuickViewDialog(props: {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           article_id: articleIdKey,
-          reported_label: reportedLabel,
+          report_type: reportType,
+          reported_label: reportType === "sentiment" ? reportedLabel : undefined,
           note: reportNote || undefined,
           client_report_id: clientReportId,
           context_path: locationPath || undefined,
@@ -136,6 +141,15 @@ export default function ArticleQuickViewDialog(props: {
       setReportError(e instanceof Error ? e.message : "Failed to submit report.");
     }
   }
+
+  const optionButtonClass = (active: boolean) =>
+    cn(
+      "h-11 rounded-md border px-3 text-sm font-medium transition-colors",
+      "hover:bg-muted/30",
+      active
+        ? "bg-foreground text-background border-foreground"
+        : "bg-background text-foreground border-border"
+    );
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -220,15 +234,15 @@ export default function ArticleQuickViewDialog(props: {
 
         {article?.url ? (
           <div className="border-t px-3 sm:px-4 py-3 bg-background">
-            <div className="flex flex-col sm:flex-row gap-2">
+            <div className="flex flex-row gap-2">
               <Dialog open={reportOpen} onOpenChange={setReportOpen}>
                 <Button
                   type="button"
                   variant="outline"
-                  className="h-11 w-full sm:w-auto"
+                  className="h-11 flex-1"
                   onClick={() => setReportOpen(true)}
                   disabled={!articleIdKey || hasReported}
-                  title={hasReported ? "Thanks — already reported for this article on this device." : "Report sentiment"}
+                  title={hasReported ? "Thanks — already reported for this article on this device." : "Report an issue"}
                 >
                   <Flag className="h-4 w-4" />
                   {hasReported ? "Reported" : "Report"}
@@ -236,13 +250,36 @@ export default function ArticleQuickViewDialog(props: {
 
                 <DialogContent className="sm:max-w-md">
                   <DialogHeader>
-                    <DialogTitle>Report sentiment</DialogTitle>
+                    <DialogTitle>Report</DialogTitle>
                     <DialogDescription>
-                      Help us fine-tune DistilBERT and our modified VADER by flagging misclassifications.
+                      Help us fine-tune DistilBERT and our modified VADER by flagging misclassifications and non-news.
                     </DialogDescription>
                   </DialogHeader>
 
                   <div className="space-y-3">
+                    <div className="space-y-2">
+                      <div className="text-sm font-medium">Type</div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setReportType("sentiment")}
+                          className={optionButtonClass(reportType === "sentiment")}
+                          aria-pressed={reportType === "sentiment"}
+                        >
+                          Sentiment wrong
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setReportType("not_news")}
+                          className={optionButtonClass(reportType === "not_news")}
+                          aria-pressed={reportType === "not_news"}
+                        >
+                          Ad / not news
+                        </button>
+                      </div>
+                    </div>
+
+                    {reportType === "sentiment" ? (
                     <div className="space-y-2">
                       <div className="text-sm font-medium">Correct label</div>
                       <div className="grid grid-cols-2 gap-2">
@@ -251,20 +288,13 @@ export default function ArticleQuickViewDialog(props: {
                             { value: "positive", label: "Positive" },
                             { value: "neutral", label: "Neutral" },
                             { value: "negative", label: "Negative" },
-                            { value: "unlabeled", label: "Unlabeled" },
                           ] as const
                         ).map((opt) => (
                           <button
                             key={opt.value}
                             type="button"
                             onClick={() => setReportedLabel(opt.value)}
-                            className={cn(
-                              "h-11 rounded-md border px-3 text-sm font-medium transition-colors",
-                              "hover:bg-accent/5",
-                              reportedLabel === opt.value
-                                ? "border-foreground/30 bg-accent/10"
-                                : "border-border bg-background"
-                            )}
+                            className={optionButtonClass(reportedLabel === opt.value)}
                             aria-pressed={reportedLabel === opt.value}
                           >
                             {opt.label}
@@ -272,16 +302,17 @@ export default function ArticleQuickViewDialog(props: {
                         ))}
                       </div>
                     </div>
+                    ) : null}
 
                     <div className="space-y-2">
                       <div className="text-sm font-medium">Note (optional)</div>
                       <Textarea
                         value={reportNote}
                         onChange={(e) => setReportNote(e.target.value)}
-                        placeholder="What’s wrong with the sentiment label?"
-                        maxLength={800}
+                        placeholder={reportType === "not_news" ? "What did we pick up? (e.g. advertisement/promo)" : "What’s wrong with the sentiment label?"}
+                        maxLength={REPORT_NOTE_MAX_LEN}
                       />
-                      <div className="text-xs text-muted-foreground">{Math.min(800, reportNote.length)}/800</div>
+                      <div className="text-xs text-muted-foreground">{Math.min(REPORT_NOTE_MAX_LEN, reportNote.length)}/{REPORT_NOTE_MAX_LEN}</div>
                     </div>
 
                     {reportStatus === "success" ? (
@@ -289,7 +320,7 @@ export default function ArticleQuickViewDialog(props: {
                         <AlertDescription>Thanks — report submitted.</AlertDescription>
                       </Alert>
                     ) : reportStatus === "error" ? (
-                      <Alert variant="destructive">
+                      <Alert className="border-foreground/20 bg-muted/20 text-foreground">
                         <AlertDescription>{reportError || "Failed to submit report."}</AlertDescription>
                       </Alert>
                     ) : null}
@@ -312,7 +343,7 @@ export default function ArticleQuickViewDialog(props: {
                 </DialogContent>
               </Dialog>
 
-              <Button asChild className="h-11 w-full">
+              <Button asChild className="h-11 flex-1">
                 <a href={article.url} target="_blank" rel="noreferrer">
                   <ExternalLink className="h-4 w-4" />
                   Read original
@@ -329,21 +360,44 @@ export default function ArticleQuickViewDialog(props: {
                 className="h-11 w-full"
                 onClick={() => setReportOpen(true)}
                 disabled={!articleIdKey || hasReported}
-                title={hasReported ? "Thanks — already reported for this article on this device." : "Report sentiment"}
+                title={hasReported ? "Thanks — already reported for this article on this device." : "Report an issue"}
               >
                 <Flag className="h-4 w-4" />
-                {hasReported ? "Reported" : "Report sentiment"}
+                {hasReported ? "Reported" : "Report"}
               </Button>
 
               <DialogContent className="sm:max-w-md">
                 <DialogHeader>
-                  <DialogTitle>Report sentiment</DialogTitle>
+                  <DialogTitle>Report</DialogTitle>
                   <DialogDescription>
-                    Help us fine-tune DistilBERT and our modified VADER by flagging misclassifications.
+                    Help us fine-tune DistilBERT and our modified VADER by flagging misclassifications and non-news.
                   </DialogDescription>
                 </DialogHeader>
 
                 <div className="space-y-3">
+                  <div className="space-y-2">
+                    <div className="text-sm font-medium">Type</div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setReportType("sentiment")}
+                        className={optionButtonClass(reportType === "sentiment")}
+                        aria-pressed={reportType === "sentiment"}
+                      >
+                        Sentiment wrong
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setReportType("not_news")}
+                        className={optionButtonClass(reportType === "not_news")}
+                        aria-pressed={reportType === "not_news"}
+                      >
+                        Ad / not news
+                      </button>
+                    </div>
+                  </div>
+
+                  {reportType === "sentiment" ? (
                   <div className="space-y-2">
                     <div className="text-sm font-medium">Correct label</div>
                     <div className="grid grid-cols-2 gap-2">
@@ -352,20 +406,13 @@ export default function ArticleQuickViewDialog(props: {
                           { value: "positive", label: "Positive" },
                           { value: "neutral", label: "Neutral" },
                           { value: "negative", label: "Negative" },
-                          { value: "unlabeled", label: "Unlabeled" },
                         ] as const
                       ).map((opt) => (
                         <button
                           key={opt.value}
                           type="button"
                           onClick={() => setReportedLabel(opt.value)}
-                          className={cn(
-                            "h-11 rounded-md border px-3 text-sm font-medium transition-colors",
-                            "hover:bg-accent/5",
-                            reportedLabel === opt.value
-                              ? "border-foreground/30 bg-accent/10"
-                              : "border-border bg-background"
-                          )}
+                          className={optionButtonClass(reportedLabel === opt.value)}
                           aria-pressed={reportedLabel === opt.value}
                         >
                           {opt.label}
@@ -373,16 +420,17 @@ export default function ArticleQuickViewDialog(props: {
                       ))}
                     </div>
                   </div>
+                  ) : null}
 
                   <div className="space-y-2">
                     <div className="text-sm font-medium">Note (optional)</div>
                     <Textarea
                       value={reportNote}
                       onChange={(e) => setReportNote(e.target.value)}
-                      placeholder="What’s wrong with the sentiment label?"
-                      maxLength={800}
+                      placeholder={reportType === "not_news" ? "What did we pick up? (e.g. advertisement/promo)" : "What’s wrong with the sentiment label?"}
+                      maxLength={REPORT_NOTE_MAX_LEN}
                     />
-                    <div className="text-xs text-muted-foreground">{Math.min(800, reportNote.length)}/800</div>
+                    <div className="text-xs text-muted-foreground">{Math.min(REPORT_NOTE_MAX_LEN, reportNote.length)}/{REPORT_NOTE_MAX_LEN}</div>
                   </div>
 
                   {reportStatus === "success" ? (
@@ -390,7 +438,7 @@ export default function ArticleQuickViewDialog(props: {
                       <AlertDescription>Thanks — report submitted.</AlertDescription>
                     </Alert>
                   ) : reportStatus === "error" ? (
-                    <Alert variant="destructive">
+                    <Alert className="border-foreground/20 bg-muted/20 text-foreground">
                       <AlertDescription>{reportError || "Failed to submit report."}</AlertDescription>
                     </Alert>
                   ) : null}

@@ -5,9 +5,10 @@ import { getSupabaseAdmin, getSupabaseAdminUntyped } from "@/lib/supabase/admin"
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const MAX_NOTE_LEN = 800;
+const MAX_NOTE_LEN = 200;
 const MAX_REPORTS_PER_HOUR = 5;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const REPORT_TYPES = new Set(["sentiment", "not_news"]);
 
 function firstIpFromXff(xff: string | null): string | null {
   if (!xff) return null;
@@ -36,8 +37,8 @@ function safeContextPath(referer: string | null): string | null {
   }
 }
 
-function isValidReportedLabel(v: unknown): v is "positive" | "neutral" | "negative" | "unlabeled" {
-  return v === "positive" || v === "neutral" || v === "negative" || v === "unlabeled";
+function isValidReportedLabel(v: unknown): v is "positive" | "neutral" | "negative" {
+  return v === "positive" || v === "neutral" || v === "negative";
 }
 
 export async function POST(req: NextRequest) {
@@ -48,6 +49,7 @@ export async function POST(req: NextRequest) {
     const body = (await req.json().catch(() => null)) as
       | {
           article_id?: unknown;
+          report_type?: unknown;
           reported_label?: unknown;
           note?: unknown;
           client_report_id?: unknown;
@@ -56,6 +58,7 @@ export async function POST(req: NextRequest) {
       | null;
 
     const articleIdRaw = body?.article_id;
+    const reportTypeRaw = body?.report_type;
     const reportedLabel = body?.reported_label;
     const noteRaw = body?.note;
     const clientReportId = body?.client_report_id;
@@ -71,7 +74,12 @@ export async function POST(req: NextRequest) {
     if (!Number.isFinite(articleId) || articleId <= 0) {
       return NextResponse.json({ ok: false, error: "Invalid article_id" }, { status: 400 });
     }
-    if (!isValidReportedLabel(reportedLabel)) {
+
+    const reportType = typeof reportTypeRaw === "string" ? reportTypeRaw.trim() : "sentiment";
+    if (!REPORT_TYPES.has(reportType)) {
+      return NextResponse.json({ ok: false, error: "Invalid report_type" }, { status: 400 });
+    }
+    if (reportType === "sentiment" && !isValidReportedLabel(reportedLabel)) {
       return NextResponse.json({ ok: false, error: "Invalid reported_label" }, { status: 400 });
     }
     if (typeof clientReportId !== "string" || clientReportId.length < 10 || clientReportId.length > 80) {
@@ -133,11 +141,12 @@ export async function POST(req: NextRequest) {
 
     const insertRow = {
       article_id: articleId,
+      report_type: reportType,
       predicted_label: sentimentRow?.sentiment_label ?? null,
       predicted_score: sentimentRow?.sentiment_score ?? null,
       predicted_model_version: sentimentRow?.model_version ?? null,
       predicted_created_at: sentimentRow?.created_at ?? null,
-      reported_label: reportedLabel,
+      reported_label: reportType === "sentiment" ? reportedLabel : null,
       reported_score: null,
       note,
       context_path: contextPath,
