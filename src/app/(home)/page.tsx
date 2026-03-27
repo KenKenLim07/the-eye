@@ -113,7 +113,40 @@ async function fetchSentimentSplitFromSupabase(
 
     return { positive, neutral, negative, unlabeled, total: ids.length };
   } catch (e) {
-    console.warn("Failed to compute 24h sentiment split:", e);
+    console.warn("Failed to compute 7d sentiment split:", e);
+    return null;
+  }
+}
+
+async function fetchSentimentSplitFromTrendsSnapshot(
+  period: "7d" | "30d"
+): Promise<{ positive: number; neutral: number; negative: number; unlabeled: number; total: number } | null> {
+  try {
+    const key = `trends:period=${period}:source=all:include_today=1`;
+    const { data, error } = await supabaseServerUntyped
+      .from("sentiment_trends_snapshots")
+      .select("timeline")
+      .eq("key", key)
+      .limit(1);
+    if (error) throw error;
+    const row = (data as Array<{ timeline?: unknown }> | null)?.[0];
+    const timeline = (row as { timeline?: Array<Record<string, unknown>> } | undefined)?.timeline;
+    if (!Array.isArray(timeline) || timeline.length === 0) return null;
+
+    let positive = 0;
+    let neutral = 0;
+    let negative = 0;
+    let total = 0;
+    for (const day of timeline) {
+      positive += Number(day?.positive ?? 0) || 0;
+      neutral += Number(day?.neutral ?? 0) || 0;
+      negative += Number(day?.negative ?? 0) || 0;
+      total += Number(day?.total ?? 0) || 0;
+    }
+    const unlabeled = Math.max(0, total - positive - neutral - negative);
+    return { positive, neutral, negative, unlabeled, total };
+  } catch (e) {
+    console.warn("Failed to read trends snapshot for sentiment split:", e);
     return null;
   }
 }
@@ -217,7 +250,11 @@ async function fetchHomeStatsFromSupabase(): Promise<HomeStats> {
       ? Math.min(1, Math.max(0, sentiment_rows_last_7d / articles_last_7d))
       : null;
 
-  const sentiment_7d = await fetchSentimentSplitFromSupabase(iso7d, 12_000);
+  // Weekly sentiment split is used on the home KPI.
+  // Prefer a DB-precomputed snapshot (fast + stable for Vercel demos), otherwise compute from the public cache table.
+  const sentiment_7d =
+    (await fetchSentimentSplitFromSupabase(iso7d, 12_000)) ??
+    (await fetchSentimentSplitFromTrendsSnapshot("7d"));
   return {
     total_articles,
     articles_last_24h,
