@@ -7,10 +7,9 @@ import { cn } from "@/lib/utils";
 type Props = {
   sources: string[];
   lastUpdated: string | null;
-  showUpdated?: boolean;
 };
 
-export default function HomeControlBar({ sources, lastUpdated, showUpdated = true }: Props) {
+export default function HomeControlBar({ sources, lastUpdated }: Props) {
   return (
     <div className="space-y-3">
       <div className="flex flex-col md:flex-row md:items-center gap-2">
@@ -26,13 +25,11 @@ export default function HomeControlBar({ sources, lastUpdated, showUpdated = tru
           </Button>
         </form>
 
-        {showUpdated ? (
-          <div className="flex items-center justify-between md:justify-end gap-3">
-            <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-              {lastUpdated ? `Updated ${formatDateTime(lastUpdated)}` : ""}
-            </div>
+        <div className="flex items-center justify-between md:justify-end gap-3">
+          <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+            {lastUpdated ? `Updated ${formatDateTime(lastUpdated)}` : ""}
           </div>
-        ) : null}
+        </div>
       </div>
 
       <div

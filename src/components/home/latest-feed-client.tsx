@@ -15,12 +15,14 @@ type LatestFeedItem = Article & {
   absTime: string;
 };
 
-function sentimentBadge(sentiment: string | null | undefined): { label: string; title: string; className?: string } {
+function sentimentBadge(
+  sentiment: string | null | undefined
+): { label: string; title: string; dotClassName: string } {
   const s = (sentiment || "").toLowerCase();
-  if (s === "positive") return { label: "POS", title: "positive", className: "bg-emerald-600 text-white border-emerald-600 dark:bg-emerald-500" };
-  if (s === "negative") return { label: "NEG", title: "negative", className: "bg-red-600 text-white border-red-600 dark:bg-red-500" };
-  if (s === "neutral") return { label: "NEU", title: "neutral", className: "bg-slate-700 text-white border-slate-700 dark:bg-slate-500" };
-  return { label: "UNL", title: "unlabeled", className: "bg-muted text-muted-foreground border-border" };
+  if (s === "positive") return { label: "POS", title: "positive", dotClassName: "bg-emerald-500" };
+  if (s === "negative") return { label: "NEG", title: "negative", dotClassName: "bg-rose-500" };
+  if (s === "neutral") return { label: "NEU", title: "neutral", dotClassName: "bg-slate-500" };
+  return { label: "UNK", title: "unknown", dotClassName: "bg-border" };
 }
 
 export default function LatestFeedClient(props: { items: LatestFeedItem[] }) {
@@ -87,13 +89,16 @@ export default function LatestFeedClient(props: { items: LatestFeedItem[] }) {
                         #{a.id}
                       </span>
                       <Badge
+                        variant="outline"
                         className={cn(
-                          "inline-flex items-center justify-center h-5 px-2 py-0 text-[10px] leading-none rounded-full border uppercase tracking-wide",
-                          s.className
+                          "inline-flex items-center justify-center gap-1.5",
+                          "h-5 px-2 py-0 rounded-full border-border bg-transparent",
+                          "u-mono text-[10px] leading-none uppercase tracking-widest text-muted-foreground"
                         )}
-                        title={`VADER sentiment: ${s.title}`}
-                        aria-label={`Sentiment ${s.title}`}
+                        title={`Sentiment: ${s.title}`}
+                        aria-label={`Tone ${s.title}`}
                       >
+                        <span className={cn("h-1.5 w-1.5 rounded-full", s.dotClassName)} aria-hidden="true" />
                         {s.label}
                       </Badge>
                     </div>

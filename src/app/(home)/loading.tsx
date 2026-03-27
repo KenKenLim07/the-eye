@@ -5,47 +5,28 @@ import { Skeleton } from "@/components/ui/skeleton";
 export default function Loading() {
   return (
     <MainLayout>
-      <div className="space-y-10">
-        {/* Hero */}
-        <header className="space-y-5">
-          <div className="space-y-2">
-            <Skeleton className="h-10 w-40 sm:h-14 sm:w-56" />
-            <Skeleton className="h-4 w-[92%] sm:w-[72%]" />
-            <Skeleton className="h-4 w-[82%] sm:w-[58%]" />
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <Skeleton key={i} className="h-6 w-28 rounded-full" />
-            ))}
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <Skeleton key={i} className="h-9 w-24 rounded-md" />
-            ))}
-          </div>
+      <div className="space-y-8">
+        {/* Header */}
+        <header>
+          <Skeleton className="h-10 w-72 sm:h-14 sm:w-[420px]" />
+          <Skeleton className="h-4 w-80 sm:w-[520px] mt-2" />
         </header>
 
-        {/* Explore card */}
-        <Card className="bg-card/60">
-          <CardHeader className="pb-3">
-            <Skeleton className="h-6 w-28" />
-            <Skeleton className="h-4 w-64" />
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="flex flex-col md:flex-row md:items-center gap-2">
-              <div className="flex flex-1 items-center gap-2">
-                <Skeleton className="h-11 w-full" />
-                <Skeleton className="h-11 w-28" />
-              </div>
+        {/* Control bar */}
+        <div className="space-y-3">
+          <div className="flex flex-col md:flex-row md:items-center gap-2">
+            <div className="flex flex-1 items-center gap-2">
+              <Skeleton className="h-11 w-full" />
+              <Skeleton className="h-11 w-28" />
             </div>
-            <div className="flex items-center gap-2 overflow-x-auto pb-1 -mx-1 px-1 sm:flex-wrap sm:overflow-visible sm:pb-0 sm:mx-0 sm:px-0">
-              {Array.from({ length: 7 }).map((_, i) => (
-                <Skeleton key={i} className="h-11 w-24 shrink-0" />
-              ))}
-            </div>
-            <Skeleton className="h-4 w-72" />
-          </CardContent>
-        </Card>
+            <Skeleton className="h-4 w-40" />
+          </div>
+          <div className="flex items-center gap-2 overflow-x-auto pb-1 -mx-1 px-1 sm:flex-wrap sm:overflow-visible sm:pb-0 sm:mx-0 sm:px-0">
+            {Array.from({ length: 7 }).map((_, i) => (
+              <Skeleton key={i} className="h-11 w-24 shrink-0" />
+            ))}
+          </div>
+        </div>
 
         {/* KPI grid */}
         <div className="space-y-4">
@@ -53,7 +34,9 @@ export default function Loading() {
             <div className="space-y-1">
               <Skeleton className="h-3 w-20" />
               <Skeleton className="h-7 w-40" />
+              <Skeleton className="h-4 w-56 sm:hidden" />
             </div>
+            <Skeleton className="h-4 w-48 hidden sm:block" />
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 sm:gap-3">
@@ -94,20 +77,6 @@ export default function Loading() {
               ))}
             </CardContent>
           </Card>
-        </div>
-
-        {/* By source */}
-        <div className="space-y-3">
-          <div className="space-y-1">
-            <Skeleton className="h-3 w-20" />
-            <Skeleton className="h-7 w-32" />
-            <Skeleton className="h-4 w-72" />
-          </div>
-          <div className="space-y-2">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <Skeleton key={i} className="h-14 w-full rounded-md" />
-            ))}
-          </div>
         </div>
       </div>
     </MainLayout>
