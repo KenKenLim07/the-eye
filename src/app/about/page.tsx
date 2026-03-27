@@ -131,7 +131,7 @@ export default function AboutPage() {
                 <ul className="list-disc pl-5 space-y-1">
                   <li>
                     Stored in <span className="u-mono text-[12px]">bias_analysis</span> as{" "}
-                    <span className="u-mono text-[12px]">model_type='sentiment'</span>.
+                    <span className="u-mono text-[12px]">model_type=&apos;sentiment&apos;</span>.
                   </li>
                   <li>
                     Hybrid routing is heuristic (language signal + reporting preface detection), not a guaranteed
@@ -318,4 +318,3 @@ export default function AboutPage() {
     </MainLayout>
   );
 }
-

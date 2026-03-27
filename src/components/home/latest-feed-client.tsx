@@ -8,7 +8,7 @@ import type { CSSProperties } from "react";
 import { ExternalLink, Eye } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import ArticleQuickViewDialog, { type QuickViewArticle } from "@/components/articles/article-quick-view-dialog";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type LatestFeedItem = Article & {
   ageShort: string;
@@ -24,13 +24,11 @@ function sentimentBadge(sentiment: string | null | undefined): { label: string; 
 }
 
 export default function LatestFeedClient(props: { items: LatestFeedItem[] }) {
-  const items = props.items || [];
+  const items = props.items ?? [];
   const [active, setActive] = useState<QuickViewArticle | null>(null);
   const [open, setOpen] = useState(false);
   const closeTimerRef = useRef<number | null>(null);
   type CSSVarProperties = CSSProperties & Record<`--${string}`, string | number>;
-
-  const stableItems = useMemo(() => items, [items]);
 
   useEffect(() => {
     if (open) {
@@ -52,10 +50,10 @@ export default function LatestFeedClient(props: { items: LatestFeedItem[] }) {
 
   return (
     <div className="divide-y rounded-md border bg-card/60">
-      {stableItems.length === 0 ? (
+      {items.length === 0 ? (
         <div className="p-4 text-sm text-muted-foreground">No articles yet.</div>
       ) : (
-        stableItems.map((a, i) => {
+        items.map((a, i) => {
           const s = sentimentBadge(a.sentiment);
           const style: CSSVarProperties = { "--i": i };
           return (
