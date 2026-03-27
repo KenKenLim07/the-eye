@@ -39,11 +39,11 @@ export default function LatestFeed({ articles, limit = 15 }: Props) {
       <div className="flex items-end justify-between gap-3">
         <div className="space-y-1">
           <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">Just in</div>
-          <h2 className="font-sans text-lg sm:text-2xl font-semibold tracking-tight">Happening now</h2>
+          <h2 className="u-serif text-xl sm:text-2xl font-semibold tracking-tight">Happening now</h2>
         </div>
         <Link
           href={{ pathname: "/search", query: { sort: "newest" } }}
-          className="text-sm border rounded-md px-3 py-2 bg-card hover:bg-accent/5 transition-colors min-h-[44px] inline-flex items-center"
+          className="u-mono text-[10px] uppercase tracking-widest border rounded-md px-3 py-2 bg-card hover:bg-accent/5 transition-colors min-h-[44px] inline-flex items-center"
         >
           Browse all
         </Link>

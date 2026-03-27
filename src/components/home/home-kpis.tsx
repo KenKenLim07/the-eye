@@ -1,9 +1,10 @@
 "use client";
 
 import { useLayoutEffect, useMemo, useState } from "react";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import AnimatedNumber from "@/components/ui/animated-number";
 import SentimentSplitCard from "@/components/home/sentiment-split-card";
+import { Clock, Layers, Newspaper, ShieldCheck } from "lucide-react";
 
 type Sentiment = {
   label: string;
@@ -60,8 +61,15 @@ export default function HomeKpis({ totalArticles, articles24h, coveragePct, sent
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 sm:gap-3">
       <Card>
-        <CardContent className="p-2.5 sm:p-4">
-          <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">Total</div>
+        <CardHeader className="pb-2 px-2.5 pt-2.5 sm:px-4 sm:pt-4">
+          <div className="flex items-center justify-between gap-2">
+            <div className="inline-flex h-8 w-8 items-center justify-center rounded-md border bg-background/60">
+              <Newspaper className="h-4 w-4" aria-hidden="true" />
+            </div>
+            <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">Total</div>
+          </div>
+        </CardHeader>
+        <CardContent className="px-2.5 pb-2.5 sm:px-4 sm:pb-4 pt-0">
           <div className="u-serif text-xl sm:text-3xl font-semibold tabular-nums">
             <AnimatedNumber value={totalArticles} animate={play} durationMs={900} className="u-serif" />
           </div>
@@ -69,8 +77,15 @@ export default function HomeKpis({ totalArticles, articles24h, coveragePct, sent
       </Card>
 
       <Card>
-        <CardContent className="p-2.5 sm:p-4">
-          <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">24h</div>
+        <CardHeader className="pb-2 px-2.5 pt-2.5 sm:px-4 sm:pt-4">
+          <div className="flex items-center justify-between gap-2">
+            <div className="inline-flex h-8 w-8 items-center justify-center rounded-md border bg-background/60">
+              <Clock className="h-4 w-4" aria-hidden="true" />
+            </div>
+            <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">24h</div>
+          </div>
+        </CardHeader>
+        <CardContent className="px-2.5 pb-2.5 sm:px-4 sm:pb-4 pt-0">
           <div className="u-serif text-xl sm:text-3xl font-semibold tabular-nums">
             <AnimatedNumber value={articles24h} animate={play} durationMs={650} className="u-serif" />
           </div>
@@ -78,8 +93,15 @@ export default function HomeKpis({ totalArticles, articles24h, coveragePct, sent
       </Card>
 
       <Card>
-        <CardContent className="p-2.5 sm:p-4">
-          <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">Sources</div>
+        <CardHeader className="pb-2 px-2.5 pt-2.5 sm:px-4 sm:pt-4">
+          <div className="flex items-center justify-between gap-2">
+            <div className="inline-flex h-8 w-8 items-center justify-center rounded-md border bg-background/60">
+              <Layers className="h-4 w-4" aria-hidden="true" />
+            </div>
+            <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">Sources</div>
+          </div>
+        </CardHeader>
+        <CardContent className="px-2.5 pb-2.5 sm:px-4 sm:pb-4 pt-0">
           <div className="u-serif text-xl sm:text-3xl font-semibold tabular-nums">7</div>
           <div className="hidden sm:block text-xs text-muted-foreground mt-1">
             GMA, Rappler, Inquirer, Manila Times, Philstar, Sunstar, Manila Bulletin
@@ -88,17 +110,21 @@ export default function HomeKpis({ totalArticles, articles24h, coveragePct, sent
       </Card>
 
       <Card>
-        <CardContent className="p-2.5 sm:p-4">
+        <CardHeader className="pb-2 px-2.5 pt-2.5 sm:px-4 sm:pt-4">
           <div className="flex items-center justify-between gap-2">
-            <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">Coverage (7d)</div>
+            <div className="inline-flex h-8 w-8 items-center justify-center rounded-md border bg-background/60">
+              <ShieldCheck className="h-4 w-4" aria-hidden="true" />
+            </div>
             <span
               className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground"
-              title="Percent of last-7d articles that have rows in article_sentiment_public (public VADER sentiment cache)."
+              title="Percent of last-7d articles that have rows in article_sentiment_public (public sentiment cache)."
               aria-label="Coverage info"
             >
-              i
+              Coverage (7d)
             </span>
           </div>
+        </CardHeader>
+        <CardContent className="px-2.5 pb-2.5 sm:px-4 sm:pb-4 pt-0">
           <div className="u-serif text-xl sm:text-3xl font-semibold tabular-nums">
             {typeof coveragePct === "number" ? (
               <AnimatedNumber
@@ -115,7 +141,7 @@ export default function HomeKpis({ totalArticles, articles24h, coveragePct, sent
           <div className="mt-2 h-2 w-full rounded-full overflow-hidden border bg-muted" aria-label="Coverage progress bar">
             <div className="h-full bg-accent" style={{ width: `${coveragePct ?? 0}%` }} />
           </div>
-          <div className="hidden sm:block text-xs text-muted-foreground mt-1">Articles with VADER sentiment rows</div>
+          <div className="hidden sm:block text-xs text-muted-foreground mt-1">Articles with sentiment rows</div>
         </CardContent>
       </Card>
 

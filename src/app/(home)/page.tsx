@@ -9,6 +9,9 @@ import LatestFeed from "@/components/home/latest-feed";
 import { formatDateTime } from "@/lib/utils/date";
 import HomeKpis from "@/components/home/home-kpis";
 import { unstable_cache } from "next/cache";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 // In production we often run without a deployed backend; force dynamic so Supabase reads happen at request-time
 // instead of being snapshotted during build (which can result in a "blank" homepage until the next revalidate).
@@ -401,34 +404,71 @@ export default async function Home() {
 
   return (
     <MainLayout>
-      <div className="space-y-8">
-        <header className="max-w-4xl mx-auto">
-          <h1 className="u-serif text-4xl sm:text-6xl font-bold tracking-tight leading-[1.02]">
-            Today in the Philippines
-          </h1>
-          <p className="text-sm sm:text-base text-muted-foreground mt-2 max-w-prose">
-            Headlines from top PH news sources—updated continuously, with sentiment and trends.
-          </p>
+      <div className="space-y-10">
+        <header className="space-y-5">
+          <div className="space-y-2">
+            <h1 className="u-serif text-3xl sm:text-5xl font-semibold tracking-tight leading-[1.05]">
+              PH‑Eye
+            </h1>
+            <p className="text-sm sm:text-base text-muted-foreground leading-6 max-w-3xl">
+              A Philippine news aggregator with editorial analytics—sentiment, trends, correlation, and entities—built
+              for fast browsing and explainable dashboards.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <Badge variant="outline" className="u-mono text-[10px] uppercase tracking-widest">
+              7 sources
+            </Badge>
+            <Badge variant="outline" className="u-mono text-[10px] uppercase tracking-widest">
+              Hybrid: VADER + DistilBERT
+            </Badge>
+            <Badge variant="outline" className="u-mono text-[10px] uppercase tracking-widest">
+              spaCy NER
+            </Badge>
+            <Badge variant="outline" className="u-mono text-[10px] uppercase tracking-widest">
+              {stats.last_updated ? `Updated ${formatDateTime(stats.last_updated)}` : "Updated —"}
+            </Badge>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <Button asChild size="sm" className="h-11">
+              <Link href="/trends">Trends</Link>
+            </Button>
+            <Button asChild variant="outline" size="sm" className="h-11">
+              <Link href="/correlation">Correlation</Link>
+            </Button>
+            <Button asChild variant="outline" size="sm" className="h-11">
+              <Link href="/entities">Entities</Link>
+            </Button>
+            <Button asChild variant="outline" size="sm" className="h-11">
+              <Link href="/about">About</Link>
+            </Button>
+          </div>
         </header>
 
-        <div className="max-w-4xl mx-auto">
-          <HomeControlBar sources={canonicalOrder} lastUpdated={stats.last_updated} />
-          <div className="text-xs text-muted-foreground mt-2 text-center">
-            Tip: use <Link className="underline" href="/search">Advanced search</Link> for pagination.
-          </div>
-        </div>
+        <Card className="bg-card/60">
+          <CardHeader className="pb-3">
+            <CardTitle className="u-serif text-lg">Explore</CardTitle>
+            <CardDescription>Search headlines and jump to source pages.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            <HomeControlBar sources={canonicalOrder} lastUpdated={stats.last_updated} showUpdated={false} />
+            <div className="text-xs text-muted-foreground">
+              Tip: use <Link className="underline underline-offset-4" href="/search">Search</Link> to browse everything with
+              pagination.
+            </div>
+          </CardContent>
+        </Card>
 
-        <div className="max-w-4xl mx-auto space-y-4">
+        <section className="space-y-4">
           <div className="flex items-end justify-between gap-3">
             <div className="space-y-1">
               <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">Snapshot</div>
-              <div className="font-sans text-xl sm:text-2xl font-semibold tracking-tight">Today’s pulse</div>
-              <div className="sm:hidden text-xs text-muted-foreground">
-                {stats.last_updated ? `Updated ${formatDateTime(stats.last_updated)}` : ""}
+              <h2 className="u-serif text-xl sm:text-2xl font-semibold tracking-tight">Today’s pulse</h2>
+              <div className="text-xs text-muted-foreground">
+                Coverage + sentiment summary from the last 7 days (fallbacks to visible sample in demo mode).
               </div>
-            </div>
-            <div className="hidden sm:block text-xs text-muted-foreground">
-              {stats.last_updated ? `Updated ${formatDateTime(stats.last_updated)}` : ""}
             </div>
           </div>
 
@@ -445,13 +485,22 @@ export default async function Home() {
               unlabeled: sentimentForCard.unlabeled,
             }}
           />
-        </div>
+        </section>
 
-        <div className="max-w-4xl mx-auto">
+        <section className="space-y-2">
           <LatestFeed articles={visibleArticles} limit={15} />
-        </div>
+        </section>
 
-        <div className="space-y-8">
+        <section className="space-y-4">
+          <div className="flex items-end justify-between gap-3">
+            <div className="space-y-1">
+              <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">Browse</div>
+              <h2 className="u-serif text-xl sm:text-2xl font-semibold tracking-tight">By source</h2>
+              <div className="text-xs text-muted-foreground">Latest articles per outlet (tap to expand/collapse).</div>
+            </div>
+          </div>
+
+          <div className="space-y-6">
           <ArticleRowServer 
             articles={enrichedBySource["GMA"] || []} 
             title="GMA News" 
@@ -494,7 +543,8 @@ export default async function Home() {
             sourceValue="Manila Bulletin" 
             collapsible
           />
-        </div>
+          </div>
+        </section>
       </div>
     </MainLayout>
   );
