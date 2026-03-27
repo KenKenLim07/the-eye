@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
-import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { getSupabaseAdmin, getSupabaseAdminUntyped } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -43,6 +43,7 @@ function isValidReportedLabel(v: unknown): v is "positive" | "neutral" | "negati
 export async function POST(req: NextRequest) {
   try {
     const supabaseAdmin = getSupabaseAdmin();
+    const supabaseAdminUntyped = getSupabaseAdminUntyped();
 
     const body = (await req.json().catch(() => null)) as
       | {
@@ -108,7 +109,7 @@ export async function POST(req: NextRequest) {
     // Rate limit (best-effort) by IP hash.
     if (reporterIpHash) {
       const since = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-      const { count, error: countErr } = await supabaseAdmin
+      const { count, error: countErr } = await supabaseAdminUntyped
         .from("sentiment_misclassification_reports")
         .select("id", { head: true, count: "exact" })
         .eq("reporter_ip_hash", reporterIpHash)
@@ -146,7 +147,7 @@ export async function POST(req: NextRequest) {
       status: "new",
     };
 
-    const { error: insErr } = await supabaseAdmin
+    const { error: insErr } = await supabaseAdminUntyped
       .from("sentiment_misclassification_reports")
       .insert(insertRow);
 

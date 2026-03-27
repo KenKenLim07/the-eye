@@ -30,15 +30,16 @@ function sentimentClass(sentiment: string | null | undefined): string {
 }
 
 function uuidV4(): string {
+  const c: Crypto | undefined =
+    typeof globalThis !== "undefined" ? (globalThis.crypto as Crypto | undefined) : undefined;
+
   // Prefer native randomUUID when available.
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID();
-  }
+  if (c?.randomUUID) return c.randomUUID();
 
   // Fallback: generate v4 UUID from random bytes.
   const bytes = new Uint8Array(16);
-  if (typeof crypto !== "undefined" && "getRandomValues" in crypto) {
-    crypto.getRandomValues(bytes);
+  if (c?.getRandomValues) {
+    c.getRandomValues(bytes);
   } else {
     for (let i = 0; i < bytes.length; i += 1) {
       bytes[i] = Math.floor(Math.random() * 256);
