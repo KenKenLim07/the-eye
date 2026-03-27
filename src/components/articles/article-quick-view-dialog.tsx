@@ -2,10 +2,13 @@
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { cn } from "@/lib/utils";
 import { formatDateTime } from "@/lib/utils/date";
-import { ExternalLink, X } from "lucide-react";
+import { ExternalLink, Flag, Loader2, X } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 
 export type QuickViewArticle = {
   id: string | number;
@@ -34,6 +37,80 @@ export default function ArticleQuickViewDialog(props: {
   const { article, open, onOpenChange } = props;
   const content = (article?.content || "").trim();
   const looksLikeExcerpt = /\.\.\.$|…$/.test(content);
+  const articleIdKey = article?.id != null ? String(article.id) : null;
+  const reportedStorageKey = articleIdKey ? `ph-eye:reported_sentiment:${articleIdKey}` : null;
+
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportedLabel, setReportedLabel] = useState<"positive" | "neutral" | "negative" | "unlabeled">("unlabeled");
+  const [reportNote, setReportNote] = useState("");
+  const [reportStatus, setReportStatus] = useState<"idle" | "submitting" | "success" | "error">("idle");
+  const [reportError, setReportError] = useState<string | null>(null);
+  const [hasReported, setHasReported] = useState(false);
+
+  const locationPath = useMemo(() => {
+    if (typeof window === "undefined") return null;
+    return `${window.location.pathname}${window.location.search || ""}`;
+  }, []);
+
+  useEffect(() => {
+    if (!reportedStorageKey) {
+      setHasReported(false);
+      return;
+    }
+    try {
+      setHasReported(window.localStorage.getItem(reportedStorageKey) === "1");
+    } catch {
+      setHasReported(false);
+    }
+  }, [reportedStorageKey]);
+
+  useEffect(() => {
+    if (!reportOpen) {
+      setReportStatus("idle");
+      setReportError(null);
+      setReportNote("");
+      setReportedLabel("unlabeled");
+    }
+  }, [reportOpen]);
+
+  async function submitReport() {
+    if (!articleIdKey) return;
+    if (hasReported) return;
+    setReportStatus("submitting");
+    setReportError(null);
+    const clientReportId = typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+
+    try {
+      const res = await fetch("/api/reports/sentiment", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          article_id: articleIdKey,
+          reported_label: reportedLabel,
+          note: reportNote || undefined,
+          client_report_id: clientReportId,
+          context_path: locationPath || undefined,
+        }),
+      });
+      const json = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+      if (!res.ok || !json?.ok) {
+        throw new Error(json?.error || `Request failed (HTTP ${res.status})`);
+      }
+      if (reportedStorageKey) {
+        try {
+          window.localStorage.setItem(reportedStorageKey, "1");
+        } catch {
+          // ignore
+        }
+      }
+      setHasReported(true);
+      setReportStatus("success");
+      window.setTimeout(() => setReportOpen(false), 650);
+    } catch (e) {
+      setReportStatus("error");
+      setReportError(e instanceof Error ? e.message : "Failed to submit report.");
+    }
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -118,12 +195,198 @@ export default function ArticleQuickViewDialog(props: {
 
         {article?.url ? (
           <div className="border-t px-3 sm:px-4 py-3 bg-background">
-            <Button asChild className="h-11 w-full">
-              <a href={article.url} target="_blank" rel="noreferrer">
-                <ExternalLink className="h-4 w-4" />
-                Read original
-              </a>
-            </Button>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <Dialog open={reportOpen} onOpenChange={setReportOpen}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-11 w-full sm:w-auto"
+                  onClick={() => setReportOpen(true)}
+                  disabled={!articleIdKey || hasReported}
+                  title={hasReported ? "Thanks — already reported for this article on this device." : "Report sentiment"}
+                >
+                  <Flag className="h-4 w-4" />
+                  {hasReported ? "Reported" : "Report"}
+                </Button>
+
+                <DialogContent className="sm:max-w-md">
+                  <DialogHeader>
+                    <DialogTitle>Report sentiment</DialogTitle>
+                    <DialogDescription>
+                      Help us fine-tune DistilBERT and our modified VADER by flagging misclassifications.
+                    </DialogDescription>
+                  </DialogHeader>
+
+                  <div className="space-y-3">
+                    <div className="space-y-2">
+                      <div className="text-sm font-medium">Correct label</div>
+                      <div className="grid grid-cols-2 gap-2">
+                        {(
+                          [
+                            { value: "positive", label: "Positive" },
+                            { value: "neutral", label: "Neutral" },
+                            { value: "negative", label: "Negative" },
+                            { value: "unlabeled", label: "Unlabeled" },
+                          ] as const
+                        ).map((opt) => (
+                          <button
+                            key={opt.value}
+                            type="button"
+                            onClick={() => setReportedLabel(opt.value)}
+                            className={cn(
+                              "h-11 rounded-md border px-3 text-sm font-medium transition-colors",
+                              "hover:bg-accent/5",
+                              reportedLabel === opt.value
+                                ? "border-foreground/30 bg-accent/10"
+                                : "border-border bg-background"
+                            )}
+                            aria-pressed={reportedLabel === opt.value}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="text-sm font-medium">Note (optional)</div>
+                      <Textarea
+                        value={reportNote}
+                        onChange={(e) => setReportNote(e.target.value)}
+                        placeholder="What’s wrong with the sentiment label?"
+                        maxLength={800}
+                      />
+                      <div className="text-xs text-muted-foreground">{Math.min(800, reportNote.length)}/800</div>
+                    </div>
+
+                    {reportStatus === "success" ? (
+                      <Alert>
+                        <AlertDescription>Thanks — report submitted.</AlertDescription>
+                      </Alert>
+                    ) : reportStatus === "error" ? (
+                      <Alert variant="destructive">
+                        <AlertDescription>{reportError || "Failed to submit report."}</AlertDescription>
+                      </Alert>
+                    ) : null}
+                  </div>
+
+                  <DialogFooter>
+                    <Button type="button" variant="outline" onClick={() => setReportOpen(false)} className="h-11">
+                      Cancel
+                    </Button>
+                    <Button
+                      type="button"
+                      onClick={submitReport}
+                      className="h-11"
+                      disabled={!articleIdKey || hasReported || reportStatus === "submitting"}
+                    >
+                      {reportStatus === "submitting" ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+                      Submit
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+
+              <Button asChild className="h-11 w-full">
+                <a href={article.url} target="_blank" rel="noreferrer">
+                  <ExternalLink className="h-4 w-4" />
+                  Read original
+                </a>
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="border-t px-3 sm:px-4 py-3 bg-background">
+            <Dialog open={reportOpen} onOpenChange={setReportOpen}>
+              <Button
+                type="button"
+                variant="outline"
+                className="h-11 w-full"
+                onClick={() => setReportOpen(true)}
+                disabled={!articleIdKey || hasReported}
+                title={hasReported ? "Thanks — already reported for this article on this device." : "Report sentiment"}
+              >
+                <Flag className="h-4 w-4" />
+                {hasReported ? "Reported" : "Report sentiment"}
+              </Button>
+
+              <DialogContent className="sm:max-w-md">
+                <DialogHeader>
+                  <DialogTitle>Report sentiment</DialogTitle>
+                  <DialogDescription>
+                    Help us fine-tune DistilBERT and our modified VADER by flagging misclassifications.
+                  </DialogDescription>
+                </DialogHeader>
+
+                <div className="space-y-3">
+                  <div className="space-y-2">
+                    <div className="text-sm font-medium">Correct label</div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {(
+                        [
+                          { value: "positive", label: "Positive" },
+                          { value: "neutral", label: "Neutral" },
+                          { value: "negative", label: "Negative" },
+                          { value: "unlabeled", label: "Unlabeled" },
+                        ] as const
+                      ).map((opt) => (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => setReportedLabel(opt.value)}
+                          className={cn(
+                            "h-11 rounded-md border px-3 text-sm font-medium transition-colors",
+                            "hover:bg-accent/5",
+                            reportedLabel === opt.value
+                              ? "border-foreground/30 bg-accent/10"
+                              : "border-border bg-background"
+                          )}
+                          aria-pressed={reportedLabel === opt.value}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="text-sm font-medium">Note (optional)</div>
+                    <Textarea
+                      value={reportNote}
+                      onChange={(e) => setReportNote(e.target.value)}
+                      placeholder="What’s wrong with the sentiment label?"
+                      maxLength={800}
+                    />
+                    <div className="text-xs text-muted-foreground">{Math.min(800, reportNote.length)}/800</div>
+                  </div>
+
+                  {reportStatus === "success" ? (
+                    <Alert>
+                      <AlertDescription>Thanks — report submitted.</AlertDescription>
+                    </Alert>
+                  ) : reportStatus === "error" ? (
+                    <Alert variant="destructive">
+                      <AlertDescription>{reportError || "Failed to submit report."}</AlertDescription>
+                    </Alert>
+                  ) : null}
+                </div>
+
+                <DialogFooter>
+                  <Button type="button" variant="outline" onClick={() => setReportOpen(false)} className="h-11">
+                    Cancel
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={submitReport}
+                    className="h-11"
+                    disabled={!articleIdKey || hasReported || reportStatus === "submitting"}
+                  >
+                    {reportStatus === "submitting" ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+                    Submit
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
           </div>
         ) : null}
       </DialogContent>
