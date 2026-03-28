@@ -68,8 +68,7 @@ export default function ArticleQuickViewDialog(props: {
   const reportedStorageKey = articleIdKey ? `ph-eye:reported_sentiment:${articleIdKey}` : null;
 
   const [reportOpen, setReportOpen] = useState(false);
-  const [reportType, setReportType] = useState<"sentiment" | "not_news">("sentiment");
-  const [reportedLabel, setReportedLabel] = useState<"positive" | "neutral" | "negative">("neutral");
+  const [reportedLabel, setReportedLabel] = useState<"positive" | "neutral" | "negative" | "not_news">("neutral");
   const [reportNote, setReportNote] = useState("");
   const [reportStatus, setReportStatus] = useState<"idle" | "submitting" | "success" | "error">("idle");
   const [reportError, setReportError] = useState<string | null>(null);
@@ -97,7 +96,6 @@ export default function ArticleQuickViewDialog(props: {
       setReportStatus("idle");
       setReportError(null);
       setReportNote("");
-      setReportType("sentiment");
       setReportedLabel("neutral");
     }
   }, [reportOpen]);
@@ -115,8 +113,7 @@ export default function ArticleQuickViewDialog(props: {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           article_id: articleIdKey,
-          report_type: reportType,
-          reported_label: reportType === "sentiment" ? reportedLabel : undefined,
+          reported_label: reportedLabel,
           note: reportNote || undefined,
           client_report_id: clientReportId,
           context_path: locationPath || undefined,
@@ -249,45 +246,23 @@ export default function ArticleQuickViewDialog(props: {
                 </Button>
 
                 <DialogContent className="sm:max-w-md">
-                  <DialogHeader>
-                    <DialogTitle>Report</DialogTitle>
-                    <DialogDescription>
-                      Help us fine-tune DistilBERT and our modified VADER by flagging misclassifications and non-news.
-                    </DialogDescription>
-                  </DialogHeader>
+                <DialogHeader>
+                  <DialogTitle>Report</DialogTitle>
+                  <DialogDescription>
+                    Help us improve our scrapers and NLP (DistilBERT, modified VADER, spaCy) by flagging misclassifications and non-news.
+                  </DialogDescription>
+                </DialogHeader>
 
-                  <div className="space-y-3">
+                <div className="space-y-3">
                     <div className="space-y-2">
-                      <div className="text-sm font-medium">Type</div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setReportType("sentiment")}
-                          className={optionButtonClass(reportType === "sentiment")}
-                          aria-pressed={reportType === "sentiment"}
-                        >
-                          Sentiment wrong
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setReportType("not_news")}
-                          className={optionButtonClass(reportType === "not_news")}
-                          aria-pressed={reportType === "not_news"}
-                        >
-                          Ad / not news
-                        </button>
-                      </div>
-                    </div>
-
-                    {reportType === "sentiment" ? (
-                    <div className="space-y-2">
-                      <div className="text-sm font-medium">Correct label</div>
+                      <div className="text-sm font-medium">Report category</div>
                       <div className="grid grid-cols-2 gap-2">
                         {(
                           [
                             { value: "positive", label: "Positive" },
                             { value: "neutral", label: "Neutral" },
                             { value: "negative", label: "Negative" },
+                            { value: "not_news", label: "Ad / not news" },
                           ] as const
                         ).map((opt) => (
                           <button
@@ -302,14 +277,13 @@ export default function ArticleQuickViewDialog(props: {
                         ))}
                       </div>
                     </div>
-                    ) : null}
 
                     <div className="space-y-2">
                       <div className="text-sm font-medium">Note (optional)</div>
                       <Textarea
                         value={reportNote}
                         onChange={(e) => setReportNote(e.target.value)}
-                        placeholder={reportType === "not_news" ? "What did we pick up? (e.g. advertisement/promo)" : "What’s wrong with the sentiment label?"}
+                        placeholder={reportedLabel === "not_news" ? "What did we pick up? (e.g. advertisement/promo)" : "What’s wrong with the classification?"}
                         maxLength={REPORT_NOTE_MAX_LEN}
                       />
                       <div className="text-xs text-muted-foreground">{Math.min(REPORT_NOTE_MAX_LEN, reportNote.length)}/{REPORT_NOTE_MAX_LEN}</div>
@@ -370,42 +344,20 @@ export default function ArticleQuickViewDialog(props: {
                 <DialogHeader>
                   <DialogTitle>Report</DialogTitle>
                   <DialogDescription>
-                    Help us fine-tune DistilBERT and our modified VADER by flagging misclassifications and non-news.
+                    Help us improve our scrapers and NLP (DistilBERT, modified VADER, spaCy) by flagging misclassifications and non-news.
                   </DialogDescription>
                 </DialogHeader>
 
                 <div className="space-y-3">
                   <div className="space-y-2">
-                    <div className="text-sm font-medium">Type</div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setReportType("sentiment")}
-                        className={optionButtonClass(reportType === "sentiment")}
-                        aria-pressed={reportType === "sentiment"}
-                      >
-                        Sentiment wrong
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setReportType("not_news")}
-                        className={optionButtonClass(reportType === "not_news")}
-                        aria-pressed={reportType === "not_news"}
-                      >
-                        Ad / not news
-                      </button>
-                    </div>
-                  </div>
-
-                  {reportType === "sentiment" ? (
-                  <div className="space-y-2">
-                    <div className="text-sm font-medium">Correct label</div>
+                    <div className="text-sm font-medium">Report category</div>
                     <div className="grid grid-cols-2 gap-2">
                       {(
                         [
                           { value: "positive", label: "Positive" },
                           { value: "neutral", label: "Neutral" },
                           { value: "negative", label: "Negative" },
+                          { value: "not_news", label: "Ad / not news" },
                         ] as const
                       ).map((opt) => (
                         <button
@@ -420,14 +372,13 @@ export default function ArticleQuickViewDialog(props: {
                       ))}
                     </div>
                   </div>
-                  ) : null}
 
                   <div className="space-y-2">
                     <div className="text-sm font-medium">Note (optional)</div>
                     <Textarea
                       value={reportNote}
                       onChange={(e) => setReportNote(e.target.value)}
-                      placeholder={reportType === "not_news" ? "What did we pick up? (e.g. advertisement/promo)" : "What’s wrong with the sentiment label?"}
+                      placeholder={reportedLabel === "not_news" ? "What did we pick up? (e.g. advertisement/promo)" : "What’s wrong with the classification?"}
                       maxLength={REPORT_NOTE_MAX_LEN}
                     />
                     <div className="text-xs text-muted-foreground">{Math.min(REPORT_NOTE_MAX_LEN, reportNote.length)}/{REPORT_NOTE_MAX_LEN}</div>
