@@ -41,6 +41,27 @@ function isValidReportedLabel(v: unknown): v is "positive" | "neutral" | "negati
   return v === "positive" || v === "neutral" || v === "negative";
 }
 
+function errorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === "string") return err;
+  if (!err || typeof err !== "object") return "Unknown error";
+
+  const e = err as { message?: unknown; details?: unknown; hint?: unknown; code?: unknown };
+  if (typeof e.message === "string" && e.message.trim()) return e.message;
+
+  const parts: string[] = [];
+  if (typeof e.code === "string" && e.code.trim()) parts.push(e.code.trim());
+  if (typeof e.hint === "string" && e.hint.trim()) parts.push(e.hint.trim());
+  if (typeof e.details === "string" && e.details.trim()) parts.push(e.details.trim());
+  if (parts.length) return parts.join(" • ");
+
+  try {
+    return JSON.stringify(err);
+  } catch {
+    return "Unknown error";
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
     const supabaseAdmin = getSupabaseAdmin();
@@ -168,8 +189,11 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true });
   } catch (error: unknown) {
+    // Keep client-visible messages useful (Supabase errors are often plain objects, not `Error`).
+    // Server logs will still show the full object.
+    console.error("Report sentiment API failed:", error);
     return NextResponse.json(
-      { ok: false, error: error instanceof Error ? error.message : "Unknown error" },
+      { ok: false, error: errorMessage(error) },
       { status: 500 }
     );
   }
