@@ -5,10 +5,10 @@ import random
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from app.core.supabase import get_supabase
+from app.core.url import canonicalize_url
 from .normalize import NormalizedArticle
 from app.scrapers.utils import normalize_source, normalize_category
 import logging
-from urllib.parse import urlparse, urlunparse
 
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
@@ -33,25 +33,6 @@ def _normalize_published_at(raw: str | None) -> str:
         return dt.astimezone(timezone.utc).isoformat()
     except Exception:
         return datetime.now(timezone.utc).isoformat()
-
-
-def _canonicalize_url(raw_url: str) -> str:
-    """Normalize URLs to avoid duplicate shapes (strip query/fragment, lower host, trim trailing slash)."""
-    if not raw_url:
-        return raw_url
-    try:
-        p = urlparse(raw_url)
-        # Lower-case hostname
-        netloc = p.netloc.lower()
-        # Remove query and fragment
-        path = p.path or "/"
-        # Trim trailing slash except for root
-        if path != "/" and path.endswith("/"):
-            path = path.rstrip("/")
-        canon = urlunparse((p.scheme, netloc, path, "", "", ""))
-        return canon
-    except Exception:
-        return raw_url
 
 
 def _is_transient_network_error(exc: Exception) -> bool:
@@ -100,7 +81,7 @@ def insert_articles(articles: List[NormalizedArticle]) -> dict:
     # Canonicalize URLs up-front
     for a in articles:
         if getattr(a, "url", None):
-            a.url = _canonicalize_url(a.url)
+            a.url = canonicalize_url(a.url)
     # Filter out articles without URL (optional, but keeps DB clean)
     to_check = [a.url for a in articles if a.url]
     existing_urls: set[str] = set()

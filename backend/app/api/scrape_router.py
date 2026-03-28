@@ -4,6 +4,7 @@ from app.workers.celery_app import celery
 from celery.result import AsyncResult
 
 from app.workers.tasks import (
+    scrape_abs_cbn_task,
     scrape_gma_task,
     scrape_inquirer_task,
     scrape_manila_bulletin_task,
@@ -50,6 +51,9 @@ async def run_scrape(payload: dict = Body(default={})):
         elif s in ["manila_times", "manila-times", "mt"]:
             job = scrape_manila_times_task.delay()
             jobs.append({"source": "manila_times", "task_id": str(job)})
+        elif s in ["abs_cbn", "abs-cbn", "abscbn", "abs_cbn_news", "abs-cbn-news"]:
+            job = scrape_abs_cbn_task.delay()
+            jobs.append({"source": "abs_cbn", "task_id": str(job)})
     return {"queued": True, "jobs": jobs}
 
 

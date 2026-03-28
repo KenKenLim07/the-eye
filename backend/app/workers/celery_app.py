@@ -2,6 +2,7 @@ from celery import Celery
 from app.core.config import settings
 from celery.schedules import schedule
 from kombu import Queue
+import os
 
 celery = Celery(
     "ph_eye",
@@ -73,3 +74,11 @@ celery.conf.beat_schedule = {
         "schedule": schedule(1.50 * 60 * 60),  # 1.50 hours - Regional focus
     },
 }
+
+# Optional: ABS-CBN is Akamai-sensitive and typically needs headed Chromium (Xvfb) for reliability.
+# Keep it off by default so demo builds don't become flaky/heavy.
+if os.getenv("ENABLE_ABS_CBN_SCRAPER", "0").strip().lower() in {"1", "true", "yes", "on"}:
+    celery.conf.beat_schedule["scrape_abs_cbn"] = {
+        "task": "app.workers.tasks.scrape_abs_cbn_task",
+        "schedule": schedule(3.0 * 60 * 60),  # 3 hours - heavy/slow, keep gentle
+    }

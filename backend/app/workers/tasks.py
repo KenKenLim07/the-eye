@@ -21,6 +21,9 @@ from app.scrapers.manila_times import ManilaTimesScraper
 from app.scrapers.rappler import RapplerScraper
 from app.scrapers.sunstar import SunstarScraper
 
+# New import for ABS-CBN (Akamai-sensitive; needs headed mode via Xvfb in Docker)
+from app.scrapers.abs_cbn import ABSCBNScraper
+
 logger = logging.getLogger(__name__)
 
 @shared_task
@@ -104,7 +107,7 @@ def scrape_manila_bulletin_task(self):
         source_key="manila_bulletin",
         source_name="Manila Bulletin",
         task_id=task_id,
-        scrape_fn=lambda: scraper.scrape_latest(max_articles=15),
+        scrape_fn=lambda: scraper.scrape_latest(max_articles=20),
         retry_base_seconds=60,
     )
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
@@ -117,7 +120,7 @@ def scrape_rappler_task(self):
         source_key="rappler",
         source_name="Rappler",
         task_id=task_id,
-        scrape_fn=lambda: scraper.scrape_latest(max_articles=15),
+        scrape_fn=lambda: scraper.scrape_latest(max_articles=20),
         retry_base_seconds=60,
     )
 
@@ -149,4 +152,23 @@ def scrape_manila_times_task(self):
         task_id=task_id,
         scrape_fn=lambda: scraper.scrape_latest(max_articles=15),
         retry_base_seconds=60,
+    )
+
+
+@shared_task(bind=True, max_retries=2, default_retry_delay=120)
+def scrape_abs_cbn_task(self):
+    """
+    ABS-CBN is often blocked in headless mode (Akamai).
+    Run the Celery worker under Xvfb and set PLAYWRIGHT_HEADLESS=false for best results.
+    """
+    task_id = str(self.request.id)
+    logger.info("Starting ABS-CBN scraping task %s", task_id)
+    scraper = ABSCBNScraper()
+    return run_scrape_task(
+        celery_self=self,
+        source_key="abs_cbn",
+        source_name="ABS-CBN",
+        task_id=task_id,
+        scrape_fn=lambda: scraper.scrape_latest(max_articles=10),
+        retry_base_seconds=120,
     )

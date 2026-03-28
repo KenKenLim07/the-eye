@@ -8,7 +8,7 @@ from playwright.sync_api import Browser
 from bs4 import BeautifulSoup
 from app.pipeline.normalize import build_article, NormalizedArticle
 from app.scrapers.base import launch_browser
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 import re
 import urllib.request
@@ -16,6 +16,8 @@ import json
 import httpx
 from app.scrapers.utils import resolve_category_pair
 from email.utils import parsedate_to_datetime
+from app.core.supabase import get_supabase
+from app.core.url import canonicalize_url
 
 # Feature flags (env-driven) for gradual rollout
 import os
@@ -223,12 +225,24 @@ class RapplerScraper:
             return False
         if not ("rappler.com" in parsed.netloc):
             return False
-        
+
+        # Rappler-specific blocklist: keep dataset "news-only"
+        try:
+            path_lower = (parsed.path or "").lower()
+            # People/human-interest/food/features tend to pollute "news" signals
+            if path_lower.startswith("/people/"):
+                return False
+        except Exception:
+            pass
+
+        # Optional advanced validator: treat as an additional gate, not an override.
         if USE_URL_FILTER and is_valid_news_url is not None:
-            # Use advanced validator with domain guard
-            if is_valid_news_url(url, "rappler.com"):
-                return True
-            # If advanced filter rejects, fall back to legacy heuristics below
+            try:
+                if not is_valid_news_url(url, "rappler.com"):
+                    return False
+            except Exception:
+                # If advanced filter errors, fall back to legacy checks
+                pass
         
         # Legacy checks (fallback)
         # Filter out non-article URLs
@@ -289,6 +303,48 @@ class RapplerScraper:
             return False
 
         return True
+
+    def _canon(self, url: str) -> str:
+        return canonicalize_url(url, force_https=True)
+
+    def _unique_valid_canon_links(self, links: List[str]) -> List[str]:
+        seen: set[str] = set()
+        out: List[str] = []
+        for link in links or []:
+            c = self._canon(link)
+            if not c or c in seen:
+                continue
+            if not self._validate_url(c):
+                continue
+            seen.add(c)
+            out.append(c)
+        return out
+
+    def _filter_existing_urls(self, urls: List[str]) -> tuple[List[str], set[str]]:
+        """
+        Return (urls_not_in_db, existing_urls_in_db) for the canonicalized URLs.
+
+        Best-effort: on any storage/DNS failure, return the original list and an empty existing-set.
+        """
+        cleaned = [self._canon(u) for u in (urls or []) if u]
+        # Preserve order while de-duping
+        seen: set[str] = set()
+        ordered: List[str] = []
+        for u in cleaned:
+            if u and u not in seen:
+                seen.add(u)
+                ordered.append(u)
+        if not ordered:
+            return [], set()
+        try:
+            sb = get_supabase()
+            res = sb.table("articles").select("url").in_("url", ordered).execute()
+            existing = {str(r.get("url")) for r in (res.data or []) if r.get("url")}
+            remaining = [u for u in ordered if u not in existing]
+            return remaining, existing
+        except Exception as e:
+            logger.warning("Rappler DB preflight failed (will scrape without it): %s", e)
+            return ordered, set()
 
     def _extract_with_fallbacks(self, soup: BeautifulSoup, selectors: List[str]) -> Optional[str]:
         """Extract text using fallback selectors."""
@@ -678,8 +734,30 @@ class RapplerScraper:
             
             soup = BeautifulSoup(xml_content, "xml")
             links = []
+
+            # Optional freshness gate to reduce churn on frequent runs.
+            try:
+                freshness_hours = int(os.getenv("RAPPLER_RSS_FRESHNESS_HOURS", "48"))
+            except Exception:
+                freshness_hours = 48
+            cutoff = None
+            if freshness_hours and freshness_hours > 0:
+                cutoff = datetime.now(timezone.utc) - timedelta(hours=freshness_hours)
             
             for item in soup.find_all("item"):
+                if cutoff is not None:
+                    try:
+                        pub = item.select_one("pubDate")
+                        if pub and pub.get_text(strip=True):
+                            dt = parsedate_to_datetime(pub.get_text(strip=True))
+                            if dt is not None:
+                                if dt.tzinfo is None:
+                                    dt = dt.replace(tzinfo=timezone.utc)
+                                if dt.astimezone(timezone.utc) < cutoff:
+                                    continue
+                    except Exception:
+                        # If we can't parse pubDate, keep the item (safer).
+                        pass
                 link_el = item.select_one("link")
                 if link_el:
                     url = link_el.get_text().strip()
@@ -811,6 +889,10 @@ class RapplerScraper:
         """Discover strictly from /latest/ page, with dynamic scroll & 'Load more' handling."""
         links = []
         try:
+            try:
+                latest_timeout_ms = int(os.getenv("RAPPLER_LATEST_TIMEOUT_MS", "25000"))
+            except Exception:
+                latest_timeout_ms = 25000
             with launch_browser() as browser:
                 # Setup advanced or fallback headers
                 if USE_ADV_HEADERS and get_advanced_stealth_headers is not None:
@@ -837,11 +919,14 @@ class RapplerScraper:
 
                 url = urljoin(self.BASE_URL, "/latest/")
                 logger.info(f"[+] Navigating to {url}")
-                page.goto(url, wait_until="domcontentloaded", timeout=25000)
+                page.goto(url, wait_until="domcontentloaded", timeout=latest_timeout_ms)
 
                 # Wait for article elements to appear
                 try:
-                    page.wait_for_selector(".archive-article, article, .post-card", timeout=15000)
+                    page.wait_for_selector(
+                        ".archive-article, article, .post-card",
+                        timeout=min(20000, max(5000, latest_timeout_ms)),
+                    )
                 except Exception:
                     logger.warning("[!] Initial selector not found — continuing anyway")
 
@@ -1199,59 +1284,56 @@ class RapplerScraper:
         
         logger.info(f"Rappler: flags USE_ADV_HEADERS={USE_ADV_HEADERS}, USE_HUMAN_DELAY={USE_HUMAN_DELAY}, USE_URL_FILTER={USE_URL_FILTER}")
         
-        # Multi-source discovery strategy
-        all_links = []
-        
-        # 1. RSS Feed (most reliable)
+        # Discovery (Hybrid: RSS primary, /latest fallback)
+        rss_links_raw: List[str] = []
+        latest_links_raw: List[str] = []
+        existing_urls: set[str] = set()
+        candidates: List[str] = []
+
         try:
-            rss_links = self._discover_from_rss(max_articles * 5)
-            all_links.extend(rss_links)
+            rss_links_raw = self._discover_from_rss(max_articles * 8)
         except Exception as e:
             errors.append(f"RSS: {e}")
-        
-        # 1.4 Latest page (prioritize newest)
-        try:
-            latest_links = self._discover_from_latest(max_articles * 2)
-            all_links.extend(latest_links)
-        except Exception as e:
-            errors.append(f"Latest: {e}")
-        
-        # 1.5 Homepage blocks (Latest News + thematic blocks)
-        try:
-            homepage_links = self._discover_from_homepage(max_articles * 3)
-            all_links.extend(homepage_links)
-        except Exception as e:
-            errors.append(f"Homepage: {e}")
-        
-        # 2. Google News RSS (backup)
-        if len(all_links) < max_articles * 2:
+
+        rss_links = self._unique_valid_canon_links(rss_links_raw)
+        rss_to_scrape, rss_existing = self._filter_existing_urls(rss_links)
+        existing_urls |= rss_existing
+        candidates.extend(rss_to_scrape)
+
+        # Only pay the Playwright cost for /latest if RSS doesn't yield enough *new* URLs.
+        if len(candidates) < max_articles:
             try:
-                gn_links = self._discover_from_google_news(max_articles * 3)
-                all_links.extend(gn_links)
+                latest_links_raw = self._discover_from_latest(max_articles * 8)
             except Exception as e:
-                errors.append(f"Google News: {e}")
-        
-        # 3. Section pages (if still need more)
-        if len(all_links) < max_articles * 2:
-            try:
-                section_links = self._discover_from_sections(max_articles * 2)
-                all_links.extend(section_links)
-            except Exception as e:
-                errors.append(f"Sections: {e}")
-        
-        # Deduplicate and limit
-        seen = set()
-        candidates = []
-        for link in all_links:
-            if link not in seen and self._validate_url(link):
-                seen.add(link)
-                candidates.append(link)
-                
-        candidates = candidates[:max_articles * 3]  # Give some buffer
-        
-        logger.info(f"Rappler discovered {len(candidates)} candidate articles")
+                errors.append(f"Latest: {e}")
+
+            latest_links = self._unique_valid_canon_links(latest_links_raw)
+            # Remove anything already considered from RSS
+            rss_set = set(rss_links)
+            latest_only = [u for u in latest_links if u not in rss_set]
+            latest_to_scrape, latest_existing = self._filter_existing_urls(latest_only)
+            existing_urls |= latest_existing
+            # Preserve order: RSS first, then /latest
+            seen_cand = set(candidates)
+            for u in latest_to_scrape:
+                if u not in seen_cand:
+                    seen_cand.add(u)
+                    candidates.append(u)
+
+        # Give some buffer for scrape failures
+        candidates = candidates[: max_articles * 6]
+
+        logger.info(
+            "Rappler candidates: rss_raw=%s rss_unique=%s rss_existing=%s rss_new=%s latest_raw=%s total_new_to_scrape=%s",
+            len(rss_links_raw),
+            len(rss_links),
+            len(rss_existing),
+            len(rss_to_scrape),
+            len(latest_links_raw),
+            len(candidates),
+        )
         for preview in candidates[:8]:
-            logger.info(f"Candidate: {preview}")
+            logger.info("Candidate: %s", preview)
         
         # Scrape articles
         try:
@@ -1262,6 +1344,11 @@ class RapplerScraper:
                     
                     article = self._scrape_article(url, browser)
                     if article:
+                        # Ensure URL matches store canonicalization shape
+                        try:
+                            article.url = self._canon(article.url)
+                        except Exception:
+                            pass
                         articles.append(article)
                         logger.info(f"Successfully scraped: {article.title[:50]}...")
         except Exception as e:
@@ -1276,8 +1363,12 @@ class RapplerScraper:
         
         metadata = {
             "domain": "rappler.com",
-            "discovery_sources": ["rss", "latest", "homepage", "google_news", "sections"],
-            "total_links_discovered": len(all_links)
+            "discovery_sources": ["rss", "latest"],
+            "rss_links_raw": len(rss_links_raw),
+            "rss_links_unique": len(rss_links),
+            "db_existing_urls": len(existing_urls),
+            "candidates_new_to_scrape": len(candidates),
+            "latest_links_raw": len(latest_links_raw),
         }
         
         return ScrapingResult(
