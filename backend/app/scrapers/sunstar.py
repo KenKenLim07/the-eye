@@ -16,6 +16,7 @@ import httpx
 import xml.etree.ElementTree as ET
 # Feature flags (env-driven) for gradual rollout
 import os
+from app.scrapers.support.db_dedupe import filter_existing_article_urls, unique_canonical_urls
 
 
 def _env_flag(name: str, default: bool = False) -> bool:
@@ -32,6 +33,8 @@ USE_ADV_HEADERS = _env_flag("USE_ADV_HEADERS", False)
 USE_HUMAN_DELAY = _env_flag("USE_HUMAN_DELAY", False)
 USE_URL_FILTER = _env_flag("USE_URL_FILTER", False)
 SUNSTAR_FETCH_FULL_ON_SHORT = _env_flag("SUNSTAR_FETCH_FULL_ON_SHORT", True)
+SUNSTAR_SKIP_EXISTING = _env_flag("SUNSTAR_SKIP_EXISTING", True)
+SUNSTAR_SECTION_FETCH_FULL = _env_flag("SUNSTAR_SECTION_FETCH_FULL", True)
 SCRAPER_CONTENT_MAX_CHARS = _env_int("SCRAPER_CONTENT_MAX_CHARS", 8000)
 
 try:
@@ -219,7 +222,7 @@ class SunstarScraper:
     def scrape_rss_feed(self, max_articles: int = 3) -> List[NormalizedArticle]:
         """Scrape articles from Sunstar RSS feed - primary method."""
         logger.info("🎯 Starting Sunstar RSS feed scraping...")
-        articles = []
+        articles: List[NormalizedArticle] = []
         
         try:
             response = self._make_request(self.RSS_URL)
@@ -242,12 +245,39 @@ class SunstarScraper:
             items = root.findall('.//item')
             logger.info(f"Found {len(items)} items in RSS feed")
 
-            # Limit processing to max_articles for stealth
-            items_to_process = items[:max_articles]
-            logger.info(f"Processing {len(items_to_process)} items (stealth limit)")
-
-            for item in items_to_process:
+            # Preflight: only process items that are not already in DB (saves time + requests)
+            item_rows: List[dict] = []
+            for item in items:
                 try:
+                    title_elem = item.find('title')
+                    link_elem = item.find('link')
+                    if link_elem is None or not link_elem.text:
+                        continue
+                    url = link_elem.text.strip()
+                    if not url:
+                        continue
+                    item_rows.append({"item": item, "url": url, "title": (title_elem.text or "").strip() if title_elem is not None else ""})
+                except Exception:
+                    continue
+
+            rss_urls = unique_canonical_urls([r["url"] for r in item_rows if r.get("url")])
+            to_scrape_urls: List[str] = rss_urls
+            if SUNSTAR_SKIP_EXISTING and rss_urls:
+                to_scrape_urls, _existing = filter_existing_article_urls(rss_urls)
+
+            # Keep only the first N new URLs (stealth limit)
+            to_scrape_urls = to_scrape_urls[:max_articles]
+            logger.info(f"Processing {len(to_scrape_urls)} new RSS items (stealth limit, skip_existing={SUNSTAR_SKIP_EXISTING})")
+
+            url_set = set(to_scrape_urls)
+            for row in item_rows:
+                try:
+                    if len(articles) >= max_articles:
+                        break
+                    item = row["item"]
+                    url = row["url"]
+                    if url not in url_set:
+                        continue
                     # Extract basic info
                     title_elem = item.find('title')
                     link_elem = item.find('link')
@@ -439,8 +469,9 @@ class SunstarScraper:
             
             # Find article links
             article_links = soup.find_all('a', href=True)
+            candidate_urls: List[str] = []
             
-            for link in article_links[:20]:  # Limit to first 20 articles
+            for link in article_links[:40]:  # collect more, we'll filter + dedupe + DB-skip
                 href = link.get('href')
                 if not href:
                     continue
@@ -450,19 +481,43 @@ class SunstarScraper:
                 
                 # Check if it's an article URL
                 if self._is_article_url(article_url):
-                    title = link.get_text(strip=True)
-                    if title and len(title) > 10:  # Filter out short titles
-                        norm_cat, raw_cat = self._extract_sunstar_category(article_url, None)
-                        article = build_article(
-                            source="Sunstar",
-                            title=title,
-                            url=article_url,
-                            content=None,
-                            category=norm_cat,
-                            published_at=None,
-                            raw_category=raw_cat,
-                        )
-                        articles.append(article)
+                    candidate_urls.append(article_url)
+
+            candidate_urls = unique_canonical_urls(candidate_urls)
+            if SUNSTAR_SKIP_EXISTING and candidate_urls:
+                candidate_urls, _existing = filter_existing_article_urls(candidate_urls)
+
+            for article_url in candidate_urls[:20]:
+                title = None
+                try:
+                    # Best-effort: fetch full article if enabled (avoids inserting empty content).
+                    content = self.scrape_article_content(article_url) if SUNSTAR_SECTION_FETCH_FULL else None
+                    # Derive a title from the page if needed.
+                    if SUNSTAR_SECTION_FETCH_FULL:
+                        resp = self._make_request(article_url)
+                        if resp:
+                            s2 = BeautifulSoup(resp.text, "html.parser")
+                            h1 = s2.select_one("h1")
+                            if h1:
+                                title = h1.get_text(" ", strip=True)
+                    if not title:
+                        # fallback to URL slug
+                        title = article_url.rstrip("/").split("/")[-1].replace("-", " ").strip().title()
+
+                    norm_cat, raw_cat = self._extract_sunstar_category(article_url, None)
+                    article = build_article(
+                        source="Sunstar",
+                        title=title,
+                        url=article_url,
+                        content=content or "",
+                        category=norm_cat,
+                        published_at=None,
+                        raw_category=raw_cat,
+                    )
+                    articles.append(article)
+                except Exception as e:
+                    logger.error(f"Error processing section article {article_url}: {e}")
+                    continue
 
         except Exception as e:
             logger.error(f"Error scraping section {section}: {e}")

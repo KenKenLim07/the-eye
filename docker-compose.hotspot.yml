@@ -1,0 +1,49 @@
+services:
+  # Hotspot / flaky DNS fallback:
+  # Run select services on the host network so they use the host resolver path directly
+  # (bypasses Docker's embedded DNS at 127.0.0.11, which can get flaky on some mobile networks).
+  #
+  # Usage:
+  #   docker compose -f docker-compose.yml -f docker-compose.hotspot.yml up -d api worker worker_ml beat
+  #
+  # Notes:
+  # - Redis stays on the default bridge network, but is published to the host on 6379.
+  #   Host-networked services connect via 127.0.0.1:6379.
+  # - Host networking is Linux-only. (Docker Desktop behaves differently.)
+  api:
+    network_mode: host
+    ports: []
+    dns: []
+    dns_opt: []
+    dns_search: []
+    environment:
+      - CELERY_BROKER_URL=redis://127.0.0.1:6379/0
+      - CELERY_RESULT_BACKEND=redis://127.0.0.1:6379/1
+
+  worker:
+    network_mode: host
+    dns: []
+    dns_opt: []
+    dns_search: []
+    environment:
+      - CELERY_BROKER_URL=redis://127.0.0.1:6379/0
+      - CELERY_RESULT_BACKEND=redis://127.0.0.1:6379/1
+
+  worker_ml:
+    network_mode: host
+    dns: []
+    dns_opt: []
+    dns_search: []
+    environment:
+      - CELERY_BROKER_URL=redis://127.0.0.1:6379/0
+      - CELERY_RESULT_BACKEND=redis://127.0.0.1:6379/1
+
+  beat:
+    network_mode: host
+    dns: []
+    dns_opt: []
+    dns_search: []
+    environment:
+      - CELERY_BROKER_URL=redis://127.0.0.1:6379/0
+      - CELERY_RESULT_BACKEND=redis://127.0.0.1:6379/1
+

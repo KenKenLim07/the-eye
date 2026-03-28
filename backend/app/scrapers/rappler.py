@@ -4,6 +4,7 @@ import random
 from typing import List, Optional, Dict, Any, Tuple
 from urllib.parse import urljoin, urlparse, parse_qs
 from dataclasses import dataclass
+from contextlib import ExitStack
 from playwright.sync_api import Browser
 from bs4 import BeautifulSoup
 from app.pipeline.normalize import build_article, NormalizedArticle
@@ -14,6 +15,7 @@ import re
 import urllib.request
 import json
 import httpx
+import html as html_lib
 from app.scrapers.utils import resolve_category_pair
 from email.utils import parsedate_to_datetime
 from app.core.supabase import get_supabase
@@ -29,6 +31,21 @@ def _env_flag(name: str, default: bool = False) -> bool:
 USE_ADV_HEADERS = _env_flag("USE_ADV_HEADERS", False)
 USE_HUMAN_DELAY = _env_flag("USE_HUMAN_DELAY", False)
 USE_URL_FILTER = _env_flag("USE_URL_FILTER", False)
+
+# Fast-path: WordPress REST API (API-first, no Playwright per-article)
+RAPPLER_WP_FASTPATH = _env_flag("RAPPLER_WP_FASTPATH", False)
+try:
+    RAPPLER_WP_MIN_BODY_CHARS = int(os.getenv("RAPPLER_WP_MIN_BODY_CHARS", "600"))
+except Exception:
+    RAPPLER_WP_MIN_BODY_CHARS = 600
+try:
+    RAPPLER_WP_TIMEOUT_CONNECT_S = float(os.getenv("RAPPLER_WP_TIMEOUT_CONNECT_S", "5"))
+except Exception:
+    RAPPLER_WP_TIMEOUT_CONNECT_S = 5.0
+try:
+    RAPPLER_WP_TIMEOUT_READ_S = float(os.getenv("RAPPLER_WP_TIMEOUT_READ_S", "15"))
+except Exception:
+    RAPPLER_WP_TIMEOUT_READ_S = 15.0
 
 # Optional advanced utils
 try:
@@ -208,6 +225,14 @@ class RapplerScraper:
     def _get_random_ua(self) -> str:
         return random.choice(self.USER_AGENTS)
 
+    def _http_timeout(self) -> httpx.Timeout:
+        return httpx.Timeout(
+            connect=RAPPLER_WP_TIMEOUT_CONNECT_S,
+            read=RAPPLER_WP_TIMEOUT_READ_S,
+            write=RAPPLER_WP_TIMEOUT_READ_S,
+            pool=RAPPLER_WP_TIMEOUT_CONNECT_S,
+        )
+
     def _human_delay(self):
         if USE_HUMAN_DELAY and get_human_like_delay is not None:
             delay = get_human_like_delay()
@@ -363,18 +388,123 @@ class RapplerScraper:
         """Sanitize and clean text content."""
         if not text:
             return ""
-        # Remove script/style content
-        text = re.sub(r'<script[^>]*>.*?</script>', '', text, flags=re.DOTALL | re.IGNORECASE)
-        text = re.sub(r'<style[^>]*>.*?</style>', '', text, flags=re.DOTALL | re.IGNORECASE)
-        
-        # Remove HTML tags
-        text = re.sub(r'<[^>]+>', '', text)
-        
-        # Clean up whitespace
-        text = re.sub(r'\s+', ' ', text)
-        text = text.strip()
-        
-        return text
+        s = html_lib.unescape(str(text))
+        # If it looks like HTML, parse it (prevents leaking &lt;p&gt; fragments into DB).
+        if "<" in s and ">" in s:
+            try:
+                soup = BeautifulSoup(s, "html.parser")
+                for el in soup.select("script, style, noscript"):
+                    el.decompose()
+                s = soup.get_text(" ", strip=True)
+            except Exception:
+                # Fallback: strip tags naively
+                s = re.sub(r"<[^>]+>", " ", s)
+        s = re.sub(r"\s+", " ", s).strip()
+        return s
+
+    def _sanitize_html_fragment_to_paragraph_text(self, html_fragment: str) -> str:
+        if not html_fragment:
+            return ""
+        s = html_lib.unescape(str(html_fragment))
+        soup = BeautifulSoup(s, "html.parser")
+        for el in soup.select("script, style, noscript, figure, svg"):
+            el.decompose()
+        parts: List[str] = []
+        for el in soup.select("p, li"):
+            t = el.get_text(" ", strip=True)
+            t = self._sanitize_text(t)
+            if not t or len(t) < 15:
+                continue
+            # Skip boilerplate lines
+            if any(skip in t.lower() for skip in ["subscribe", "newsletter", "advertisement", "follow rappler"]):
+                continue
+            parts.append(t)
+        if parts:
+            return "\n\n".join(parts)
+        return self._sanitize_text(soup.get_text(" ", strip=True))
+
+    def _extract_wp_post_id(self, html: str) -> Optional[str]:
+        """
+        Rappler is WordPress-backed; article pages frequently embed a WP REST URL:
+        `wp-json/wp/v2/posts/<id>`. We use that to fetch the full article body.
+        """
+        if not html:
+            return None
+        for pat in (
+            r"wp-json/wp/v2/posts/(\d+)",
+            r"wp-json\\/wp\\/v2\\/posts\\/(\\d+)",
+        ):
+            try:
+                m = re.search(pat, html, flags=re.IGNORECASE)
+                if m:
+                    return m.group(1)
+            except Exception:
+                continue
+        return None
+
+    def _fetch_json_with_httpx(self, url: str, timeout: Optional[httpx.Timeout] = None) -> Optional[dict]:
+        try:
+            if USE_ADV_HEADERS and get_advanced_stealth_headers is not None:
+                headers = get_advanced_stealth_headers()
+                headers.setdefault("Referer", self.BASE_URL)
+                headers.setdefault("Accept", "application/json")
+            else:
+                headers = {
+                    "User-Agent": self._get_random_ua(),
+                    "Accept": "application/json",
+                    "Accept-Language": "en-US,en;q=0.5",
+                    "Referer": self.BASE_URL,
+                    "Connection": "keep-alive",
+                }
+            with httpx.Client(timeout=timeout or self._http_timeout(), follow_redirects=True) as client:
+                r = client.get(url, headers=headers)
+                r.raise_for_status()
+                return r.json()
+        except Exception as e:
+            logger.warning("HTTP json fetch failed for %s: %s", url, e)
+            return None
+
+    def _scrape_article_wp_fastpath(self, url: str) -> Optional[NormalizedArticle]:
+        if not RAPPLER_WP_FASTPATH:
+            return None
+        # 1) Fetch HTML (cheap) to discover the WP post id.
+        html = self._fetch_with_httpx(url, timeout=int(max(5, RAPPLER_WP_TIMEOUT_READ_S)))
+        if not html:
+            return None
+        post_id = self._extract_wp_post_id(html)
+        if not post_id:
+            return None
+
+        # 2) Fetch the post JSON (API-first content).
+        api_url = (
+            f"{self.BASE_URL}/wp-json/wp/v2/posts/{post_id}"
+            "?_fields=id,link,date,date_gmt,modified_gmt,title,content,excerpt,slug"
+        )
+        post = self._fetch_json_with_httpx(api_url, timeout=self._http_timeout())
+        if not isinstance(post, dict):
+            return None
+
+        title = self._sanitize_text(((post.get("title") or {}) or {}).get("rendered") or "")
+        content_html = (((post.get("content") or {}) or {}).get("rendered") or "")
+        content = self._sanitize_html_fragment_to_paragraph_text(content_html)
+        if not title or len(content) < RAPPLER_WP_MIN_BODY_CHARS:
+            return None
+
+        raw_date = post.get("date_gmt") or post.get("date") or None
+        published_at = self._parse_published_date(raw_date)
+
+        # Use the fetched HTML for category heuristics (keeps existing mapping behavior).
+        soup = BeautifulSoup(html, "html.parser")
+        norm_cat, raw_cat = self._extract_rappler_category(url, soup)
+        return build_article(
+            source="Rappler",
+            title=title,
+            url=url,
+            content=content,
+            category=norm_cat,
+            published_at=published_at,
+            raw_category=raw_cat,
+        )
 
     def _extract_content(self, soup: BeautifulSoup) -> str:
         """Extract article content with advanced filtering."""
@@ -1282,7 +1412,13 @@ class RapplerScraper:
         articles = []
         errors = []
         
-        logger.info(f"Rappler: flags USE_ADV_HEADERS={USE_ADV_HEADERS}, USE_HUMAN_DELAY={USE_HUMAN_DELAY}, USE_URL_FILTER={USE_URL_FILTER}")
+        logger.info(
+            "Rappler: flags USE_ADV_HEADERS=%s USE_HUMAN_DELAY=%s USE_URL_FILTER=%s RAPPLER_WP_FASTPATH=%s",
+            USE_ADV_HEADERS,
+            USE_HUMAN_DELAY,
+            USE_URL_FILTER,
+            RAPPLER_WP_FASTPATH,
+        )
         
         # Discovery (Hybrid: RSS primary, /latest fallback)
         rss_links_raw: List[str] = []
@@ -1336,13 +1472,33 @@ class RapplerScraper:
             logger.info("Candidate: %s", preview)
         
         # Scrape articles
+        http_ok = 0
+        playwright_ok = 0
+        playwright_used = 0
         try:
-            with launch_browser() as browser:
+            with ExitStack() as stack:
+                browser: Optional[Browser] = None
                 for url in candidates:
                     if len(articles) >= max_articles:
                         break
-                    
-                    article = self._scrape_article(url, browser)
+
+                    article: Optional[NormalizedArticle] = None
+
+                    # Fast-path: WordPress API (no Playwright)
+                    if RAPPLER_WP_FASTPATH:
+                        article = self._scrape_article_wp_fastpath(url)
+                        if article:
+                            http_ok += 1
+
+                    # Fallback: Playwright DOM scrape
+                    if article is None:
+                        if browser is None:
+                            browser = stack.enter_context(launch_browser())
+                        playwright_used += 1
+                        article = self._scrape_article(url, browser)
+                        if article:
+                            playwright_ok += 1
+
                     if article:
                         # Ensure URL matches store canonicalization shape
                         try:
@@ -1350,7 +1506,7 @@ class RapplerScraper:
                         except Exception:
                             pass
                         articles.append(article)
-                        logger.info(f"Successfully scraped: {article.title[:50]}...")
+                        logger.info("Successfully scraped: %s...", article.title[:50])
         except Exception as e:
             errors.append(f"Scraping: {e}")
         
@@ -1358,7 +1514,10 @@ class RapplerScraper:
         performance = {
             "duration_s": round(duration, 2),
             "articles_scraped": len(articles),
-            "candidates_found": len(candidates)
+            "candidates_found": len(candidates),
+            "http_ok": http_ok,
+            "playwright_used": playwright_used,
+            "playwright_ok": playwright_ok,
         }
         
         metadata = {

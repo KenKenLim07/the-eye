@@ -160,6 +160,27 @@ Supported `source` values:
 - `sunstar`
 - `manila_times`
 
+### Hotspot DNS note (Linux)
+
+If you’re tethering (iPhone hotspot) and Docker containers start failing with:
+`Temporary failure in name resolution` / `socket.gaierror: [Errno -3]`,
+it usually means Docker’s embedded DNS (`127.0.0.11`) can’t reliably reach upstream DNS on that network.
+
+Fast workaround (Linux only): run key services on the host network so they use the host DNS path:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.hotspot.yml up -d api worker worker_ml beat
+```
+
+This keeps `redis` on the default bridge network, but host-networked services connect via `127.0.0.1:6379`.
+
+If you previously enabled “public DNS” overrides (1.1.1.1 / 8.8.8.8), remove them on hotspots that block public DNS.
+This repo provides an optional override file for that case:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.public-dns.yml up -d
+```
+
 ### ABS-CBN note (Akamai / headed Chromium)
 
 ABS-CBN blocks plain HTTP requests to article pages (often `403`), and may block Playwright **headless** Chromium.
@@ -216,7 +237,122 @@ docker compose exec worker sh -lc 'GMA_NETWORK_DEBUG=1 python -c "from app.scrap
 
 Tip: when `GMA_NETWORK_DEBUG=1`, look for endpoints shaped like:
 - `https://data.gmanetwork.com/<code>/gno/story/<id>.gz` ← full article payload (best)
-If you see a new `<code>`, append it to `GMA_STORY_API_CODES`.
+
+### Inquirer fast-path (HTTP + JSON-LD) + optional HTTP discovery
+
+Inquirer supports a safe, opt-in HTTP fast-path that avoids rendering when JSON-LD is present.
+
+Env flags (default OFF; enable gradually):
+- `INQUIRER_HTTP_FASTPATH=1` try HTTP + JSON-LD extraction per-article (Playwright fallback remains)
+- `INQUIRER_HTTP_DISCOVERY=1` discover candidate links via plain HTTP before falling back to Playwright
+- `INQUIRER_RSS_DISCOVERY=1` discover candidate links via RSS feeds first (fastest)
+- `INQUIRER_RSS_URLS=...` comma-separated RSS feed URLs (defaults to Inquirer section feeds)
+- `INQUIRER_RSS_MAX_AGE_H=48` freshness window for RSS items (defaults to 48h)
+- `INQUIRER_HTTP_MIN_BODY_CHARS=600` minimum body length to accept
+- `INQUIRER_HTTP_TIMEOUT_CONNECT_S=5`, `INQUIRER_HTTP_TIMEOUT_READ_S=15` HTTP timeout tuning
+- `INQUIRER_NETWORK_DEBUG=1` log JSON/XHR endpoints observed while loading a page (default `0`)
+- `INQUIRER_NETWORK_DEBUG_MAX=30` max captured responses (default `30`)
+
+Example:
+
+```bash
+docker compose exec worker sh -lc 'INQUIRER_HTTP_DISCOVERY=1 INQUIRER_HTTP_FASTPATH=1 python -c "from app.scrapers.inquirer import InquirerScraper; r=InquirerScraper().scrape_latest(max_articles=3); print(r.metadata); print(r.errors)"'
+
+# Debug a single Inquirer URL and print observed JSON/XHR endpoints
+docker compose exec worker sh -lc 'INQUIRER_NETWORK_DEBUG=1 python -c "from app.scrapers.inquirer import debug_inquirer_url; print(debug_inquirer_url(\"https://newsinfo.inquirer.net/123456/example\"))"'
+```
+
+### Rappler fast-path (WordPress REST API) + Playwright fallback
+
+Rappler is WordPress-backed. Many article pages embed a public REST endpoint like:
+
+- `https://www.rappler.com/wp-json/wp/v2/posts/<id>` ← full article JSON payload (`content.rendered`, `date_gmt`, etc.)
+
+This repo supports an opt-in **API-first** fast-path:
+- First fetch the article HTML and extract the post id (`wp-json/wp/v2/posts/<id>`)
+- Then fetch the post JSON and convert `content.rendered` (HTML) to clean paragraph text
+- Fallback to Playwright DOM scraping when the fast-path can’t be used
+
+Env flags (default OFF; enable gradually):
+- `RAPPLER_WP_FASTPATH=1` enable the WP REST API fast-path
+- `RAPPLER_WP_MIN_BODY_CHARS=600` minimum body length to accept
+- `RAPPLER_WP_TIMEOUT_CONNECT_S=5`, `RAPPLER_WP_TIMEOUT_READ_S=15` HTTP timeout tuning
+- `RAPPLER_RSS_FRESHNESS_HOURS=48` RSS freshness window (reduces churn on frequent runs)
+
+Examples:
+
+```bash
+# Run Rappler with WP fast-path enabled
+docker compose exec worker sh -lc 'RAPPLER_WP_FASTPATH=1 python -c "from app.scrapers.rappler import RapplerScraper; r=RapplerScraper().scrape_latest(max_articles=3); print(r.performance); print(r.errors)"'
+
+# Spot the WP post id for a single article (what to look for):
+docker compose exec worker sh -lc "python - <<'PY'
+import re, requests
+url='https://www.rappler.com/philippines/visayas/groups-decry-frenchie-mae-cumpio-marielle-domequil-conviction/'
+html=requests.get(url,timeout=20,headers={'User-Agent':'Mozilla/5.0'}).text
+print(re.search(r'wp-json/wp/v2/posts/(\\d+)', html).group(0))
+PY"
+```
+
+### Manila Bulletin fast-path (HTTP + JSON-LD) + Playwright fallback
+
+Manila Bulletin can be Playwright-heavy. This repo supports an opt-in HTTP fast-path:
+- Fetch article HTML over HTTP
+- Extract JSON-LD (`application/ld+json`) and accept it when the body is long enough
+- Fallback to Playwright DOM scraping when JSON-LD is missing/too short
+
+Env flags (default OFF; enable gradually):
+- `MB_HTTP_FASTPATH=1` enable the HTTP fast-path
+- `MB_HTTP_MIN_BODY_CHARS=600` minimum body length to accept
+- `MB_HTTP_TIMEOUT_S=20` HTTP timeout (seconds)
+- `MB_NETWORK_DEBUG=1` log JSON/XHR endpoints observed while loading a page in Playwright (default `0`)
+- `MB_NETWORK_DEBUG_MAX=30` max captured responses (default `30`)
+
+Example:
+
+```bash
+docker compose exec worker sh -lc 'MB_HTTP_FASTPATH=1 python -c "from app.scrapers.manila_bulletin import ManilaBulletinScraper; r=ManilaBulletinScraper().scrape_latest(max_articles=3); print(r.performance); print(r.errors)"'
+
+# Debug a single MB URL and print observed JSON/XHR endpoints
+docker compose exec worker sh -lc 'MB_NETWORK_DEBUG=1 python -c "from app.scrapers.manila_bulletin import debug_mb_url; print(debug_mb_url(\"https://mb.com.ph/...\"))"'
+```
+
+### Manila Times efficiency flags (HTTP-first scraper)
+
+Manila Times is already HTTP-first (no Playwright), but you can reduce wasted work and improve robustness:
+
+- `MANILA_TIMES_SKIP_EXISTING=1` (default `1`) only scrape URLs not already in `public.articles` (avoids re-fetching duplicates)
+- `MANILA_TIMES_JSONLD_FASTPATH=1` (default `1`) prefer JSON-LD fields when present (headline/body/date), with DOM fallback
+- `MANILA_TIMES_JSONLD_MIN_BODY_CHARS=600` minimum JSON-LD body length to accept (default `600`)
+
+Example:
+
+```bash
+docker compose exec worker sh -lc 'MANILA_TIMES_SKIP_EXISTING=1 MANILA_TIMES_JSONLD_FASTPATH=1 python -c "from app.scrapers.manila_times import ManilaTimesScraper; r=ManilaTimesScraper().scrape_latest(max_articles=5); print(r.performance); print(r.errors)"'
+```
+
+### Philstar fast-path (HTTP discovery + HTTP scrape) + Playwright fallback
+
+Philstar supports optional HTTP-first modes to reduce Playwright use:
+
+- `PHILSTAR_HTTP_DISCOVERY=1` discover candidate links via plain HTTP (fallback to Playwright discovery)
+- `PHILSTAR_HTTP_FASTPATH=1` scrape articles via HTTP + JSON-LD/HTML (fallback to Playwright per-article)
+- `PHILSTAR_HTTP_MIN_BODY_CHARS=600` minimum body length to accept (default `600`)
+- `PHILSTAR_HTTP_TIMEOUT_CONNECT_S=5`, `PHILSTAR_HTTP_TIMEOUT_READ_S=15` HTTP timeout tuning
+
+Example:
+
+```bash
+docker compose exec worker sh -lc 'PHILSTAR_HTTP_DISCOVERY=1 PHILSTAR_HTTP_FASTPATH=1 python -c "from app.scrapers.philstar import PhilStarScraper; r=PhilStarScraper().scrape_latest(max_articles=3); print(r.performance); print(r.errors)"'
+```
+
+### Sunstar efficiency flags (RSS-first scraper)
+
+Sunstar already uses RSS as its primary source, but you can reduce wasted work:
+
+- `SUNSTAR_SKIP_EXISTING=1` (default `1`) preflight RSS/section URLs against `public.articles` and skip existing rows
+- `SUNSTAR_SECTION_FETCH_FULL=1` (default `1`) when supplementing via section pages, fetch full article content (avoids inserting empty content)
+- `SUNSTAR_FETCH_FULL_ON_SHORT=1` (default `1`) when RSS content is too short, fetch full article body
 
 Queue a job:
 

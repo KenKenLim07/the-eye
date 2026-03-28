@@ -172,10 +172,27 @@ class GMAScraper:
     def _sanitize_text(self, text: str) -> str:
         if not text:
             return ""
-        text = text.replace('<script>', '').replace('</script>', '')
-        text = text.replace('javascript:', '').replace('data:', '')
-        text = text.replace('<', '&lt;').replace('>', '&gt;')
-        return text.strip()
+        # Normalize HTML entities (e.g. &#039;, &lt;p&gt;...) first.
+        try:
+            text = _html.unescape(text)
+        except Exception:
+            pass
+
+        # Remove obvious script/style payloads and unsafe URI schemes.
+        text = re.sub(r"(?is)<\s*(script|style)\b.*?>.*?<\s*/\s*\1\s*>", " ", text)
+        text = text.replace("javascript:", "").replace("data:", "")
+
+        # Some fast-path payloads include HTML fragments (often in JSON-LD articleBody).
+        # Convert to plain text instead of escaping, so we don't leak tags into the UI.
+        if "<" in text and ">" in text:
+            try:
+                soup = BeautifulSoup(text, "html.parser")
+                text = soup.get_text(" ", strip=True)
+            except Exception:
+                pass
+
+        text = re.sub(r"\s+", " ", text).strip()
+        return text
 
     def _extract_with_fallbacks(self, soup: BeautifulSoup, selectors: List[str]) -> Optional[str]:
         for sel in selectors:

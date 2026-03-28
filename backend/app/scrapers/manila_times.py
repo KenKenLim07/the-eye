@@ -12,9 +12,12 @@ from app.scrapers.utils import resolve_category_pair
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 import re
+import html as html_lib
 from app.core.supabase import get_supabase
 # Feature flags (env-driven) for gradual rollout
 import os
+from app.scrapers.support.db_dedupe import filter_existing_article_urls, unique_canonical_urls
+from app.scrapers.support.structured_data import extract_json_ld_newsarticle
 
 
 def _env_flag(name: str, default: bool = False) -> bool:
@@ -24,6 +27,13 @@ def _env_flag(name: str, default: bool = False) -> bool:
 USE_ADV_HEADERS = _env_flag("USE_ADV_HEADERS", False)
 USE_HUMAN_DELAY = _env_flag("USE_HUMAN_DELAY", False)
 USE_URL_FILTER = _env_flag("USE_URL_FILTER", False)
+
+MANILA_TIMES_SKIP_EXISTING = _env_flag("MANILA_TIMES_SKIP_EXISTING", True)
+MANILA_TIMES_JSONLD_FASTPATH = _env_flag("MANILA_TIMES_JSONLD_FASTPATH", True)
+try:
+    MANILA_TIMES_JSONLD_MIN_BODY_CHARS = int(os.getenv("MANILA_TIMES_JSONLD_MIN_BODY_CHARS", "600"))
+except Exception:
+    MANILA_TIMES_JSONLD_MIN_BODY_CHARS = 600
 
 try:
     from app.scrapers.utils import (
@@ -460,10 +470,32 @@ class ManilaTimesScraper:
         """Sanitize extracted text."""
         if not text:
             return ""
-        
-        # Remove extra whitespace and normalize
-        text = " ".join(text.split())
-        
+        s = html_lib.unescape(str(text))
+
+        # If HTML fragments sneak in, convert to text (prevents &lt;p&gt; leakage).
+        if "<" in s and ">" in s:
+            try:
+                soup = BeautifulSoup(s, "html.parser")
+                for el in soup.select("script, style, noscript"):
+                    el.decompose()
+                parts: List[str] = []
+                for el in soup.select("p, li"):
+                    t = el.get_text(" ", strip=True)
+                    t = re.sub(r"\s+", " ", t).strip()
+                    if t:
+                        parts.append(t)
+                if parts:
+                    s = "\n\n".join(parts)
+                else:
+                    s = soup.get_text(" ", strip=True)
+            except Exception:
+                s = re.sub(r"<[^>]+>", " ", s)
+
+        s = s.replace("\r\n", "\n").replace("\r", "\n")
+        s = re.sub(r"[ \t]+", " ", s)
+        s = re.sub(r"[ \t]*\n[ \t]*", "\n", s)
+        s = re.sub(r"\n{3,}", "\n\n", s)
+
         # Remove common unwanted patterns
         unwanted_patterns = [
             "Advertisement",
@@ -472,13 +504,14 @@ class ManilaTimesScraper:
             "Share this article",
             "Read more:",
             "Continue reading",
-            "Advertisement"
         ]
-        
+        lowered = s.lower()
         for pattern in unwanted_patterns:
-            text = text.replace(pattern, "")
-        
-        return text.strip()
+            if pattern.lower() in lowered:
+                s = s.replace(pattern, "")
+                lowered = s.lower()
+
+        return s.strip()
 
     def _extract_manila_times_category(self, url: str, soup: BeautifulSoup) -> (str, Optional[str]):
         """Infer canonical and raw category for Manila Times.
@@ -576,14 +609,19 @@ class ManilaTimesScraper:
     def _extract_with_fallbacks(self, soup: BeautifulSoup, url: str) -> Optional[NormalizedArticle]:
         """Extract article with multiple fallback strategies."""
         try:
+            jsonld = extract_json_ld_newsarticle(soup) if MANILA_TIMES_JSONLD_FASTPATH else None
+
             # Extract basic fields
-            title = self._extract_title(soup)
-            content = self._extract_content(soup)
-            published_date = self._extract_published_date(soup)
+            title = (jsonld or {}).get("headline") or self._extract_title(soup)
+            content = (jsonld or {}).get("articleBody") or self._extract_content(soup)
+            published_date = (jsonld or {}).get("datePublished") or self._extract_published_date(soup)
             
             # Sanitize content
             if content:
                 content = self._sanitize_text(content)
+            if jsonld and content and len(content) < MANILA_TIMES_JSONLD_MIN_BODY_CHARS:
+                # JSON-LD existed but was too short; fall back to DOM extraction.
+                content = self._sanitize_text(self._extract_content(soup) or "")
             
             # Validate required fields
             if not title or not content:
@@ -620,37 +658,39 @@ class ManilaTimesScraper:
         # Prefer feed discovery (freshest), then enrich with section discovery.
         discovered_feed = self._discover_feed_urls(limit=max_articles * 4)
         discovered_sections = self._discover_latest_urls(limit=max_articles * 4)
-        discovered = []
-        seen = set()
-        for u in (discovered_feed + discovered_sections):
-            if u in seen:
-                continue
-            seen.add(u)
-            discovered.append(u)
+        discovered = unique_canonical_urls(discovered_feed + discovered_sections)
+
         if not discovered:
-            candidate_urls = self.STATIC_ARTICLE_URLS[:max_articles]
-            existing_prefiltered = 0
+            fallback_pool = unique_canonical_urls(self.STATIC_ARTICLE_URLS)
+            new_urls, existing_urls = filter_existing_article_urls(fallback_pool)
+            if MANILA_TIMES_SKIP_EXISTING:
+                candidate_urls = new_urls[:max_articles]
+            else:
+                candidate_urls = (new_urls + [u for u in fallback_pool if u in existing_urls])[:max_articles]
+            existing_prefiltered = len(existing_urls)
+            new_to_scrape = len(new_urls)
         else:
-            window = max(self.CANDIDATE_WINDOW, max_articles * 2)
+            window = max(self.CANDIDATE_WINDOW, max_articles * 4)
             pool = discovered[:window]
-            existing = self._existing_urls(pool)
-            non_existing = [u for u in pool if u not in existing]
+            new_urls, existing_urls = filter_existing_article_urls(pool)
 
             # Duplicate saturation fallback: widen scan if early pool is mostly already ingested.
-            if len(non_existing) < max(1, max_articles // 3) and len(discovered) > window:
+            if len(new_urls) < max_articles and len(discovered) > window:
                 wider = discovered[: min(len(discovered), window * 3)]
-                existing_wider = self._existing_urls(wider)
-                non_existing = [u for u in wider if u not in existing_wider]
-                existing = existing_wider
+                new_urls, existing_urls = filter_existing_article_urls(wider)
+                pool = wider
 
-            # Prioritize unseen URLs first, then fill with known ones if needed.
-            candidate_urls = (non_existing + [u for u in pool if u in existing])[:max_articles]
-            existing_prefiltered = len(existing)
+            if MANILA_TIMES_SKIP_EXISTING:
+                candidate_urls = new_urls[:max_articles]
+            else:
+                candidate_urls = (new_urls + [u for u in pool if u in existing_urls])[:max_articles]
+            existing_prefiltered = len(existing_urls)
+            new_to_scrape = len(new_urls)
 
         logger.info(
             f"{self.name}: Using {len(candidate_urls)} candidate articles "
             f"(feed={len(discovered_feed)}, sections={len(discovered_sections)}, combined={len(discovered)}, "
-            f"prefilter_existing={existing_prefiltered})"
+            f"prefilter_existing={existing_prefiltered}, new_to_scrape={new_to_scrape}, skip_existing={MANILA_TIMES_SKIP_EXISTING})"
         )
         
         for i, url in enumerate(candidate_urls, 1):

@@ -27,12 +27,6 @@ services:
       - "8000:8000"
     depends_on:
       - redis
-    dns:
-      - 1.1.1.1
-      - 8.8.8.8
-      - 8.8.4.4
-      - 9.9.9.9
-    dns_search: []
 
   worker:
     build:
@@ -60,17 +54,13 @@ services:
     depends_on:
       - redis
     shm_size: "1gb"
-    dns:
-      - 8.8.8.8
-      - 8.8.4.4
-      - 1.1.1.1
-    dns_search: []
 
   worker_headed:
     build:
       context: .
       dockerfile: backend/Dockerfile
     container_name: ph-eye-worker-headed
+    profiles: ["headed"]
     init: true
     restart: unless-stopped
     working_dir: /app/backend
@@ -100,11 +90,6 @@ services:
     depends_on:
       - redis
     shm_size: "1gb"
-    dns:
-      - 8.8.8.8
-      - 8.8.4.4
-      - 1.1.1.1
-    dns_search: []
 
   worker_ml:
     build:
@@ -159,11 +144,6 @@ services:
       - ${HOME}/.cache/huggingface:/root/.cache/huggingface
     depends_on:
       - redis
-    dns:
-      - 8.8.8.8
-      - 8.8.4.4
-      - 1.1.1.1
-    dns_search: []
 
   beat:
     build:
@@ -194,9 +174,3 @@ services:
       - redis
       - worker
     shm_size: "1gb"
-    dns:
-      - 1.1.1.1
-      - 8.8.8.8
-      - 8.8.4.4
-      - 9.9.9.9
-    dns_search: []

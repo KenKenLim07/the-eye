@@ -4,17 +4,21 @@ import random
 from typing import List, Optional, Dict, Any, Tuple
 from urllib.parse import urljoin, urlparse
 from dataclasses import dataclass
+from contextlib import ExitStack
 from playwright.sync_api import Browser
 from bs4 import BeautifulSoup
 from app.pipeline.normalize import build_article, NormalizedArticle
 from app.scrapers.base import launch_browser
 from datetime import datetime
 import re
+import html as html_lib
+import httpx
 from app.scrapers.utils import resolve_category_pair
 from app.scrapers.support.db_dedupe import (
     filter_existing_article_urls,
     unique_canonical_urls,
 )
+from app.scrapers.support.structured_data import extract_json_ld_newsarticle
 
 # Feature flags (env-driven) for gradual rollout
 import os
@@ -26,6 +30,22 @@ def _env_flag(name: str, default: bool = False) -> bool:
 USE_ADV_HEADERS = _env_flag("USE_ADV_HEADERS", False)
 USE_HUMAN_DELAY = _env_flag("USE_HUMAN_DELAY", False)
 USE_URL_FILTER = _env_flag("USE_URL_FILTER", False)
+
+# Opt-in HTTP-first fast paths (Playwright fallback remains)
+PHILSTAR_HTTP_DISCOVERY = _env_flag("PHILSTAR_HTTP_DISCOVERY", False)
+PHILSTAR_HTTP_FASTPATH = _env_flag("PHILSTAR_HTTP_FASTPATH", False)
+try:
+    PHILSTAR_HTTP_MIN_BODY_CHARS = int(os.getenv("PHILSTAR_HTTP_MIN_BODY_CHARS", "600"))
+except Exception:
+    PHILSTAR_HTTP_MIN_BODY_CHARS = 600
+try:
+    PHILSTAR_HTTP_TIMEOUT_CONNECT_S = float(os.getenv("PHILSTAR_HTTP_TIMEOUT_CONNECT_S", "5"))
+except Exception:
+    PHILSTAR_HTTP_TIMEOUT_CONNECT_S = 5.0
+try:
+    PHILSTAR_HTTP_TIMEOUT_READ_S = float(os.getenv("PHILSTAR_HTTP_TIMEOUT_READ_S", "15"))
+except Exception:
+    PHILSTAR_HTTP_TIMEOUT_READ_S = 15.0
 
 # Optional advanced utils
 try:
@@ -192,6 +212,129 @@ class PhilStarScraper:
 
         content = "\n\n".join(parts)
         return (content or "")[:15000]
+
+    def _sanitize_text(self, text: str) -> str:
+        if not text:
+            return ""
+        s = html_lib.unescape(str(text))
+        if "<" in s and ">" in s:
+            try:
+                soup = BeautifulSoup(s, "html.parser")
+                for el in soup.select("script, style, noscript"):
+                    el.decompose()
+                parts: List[str] = []
+                for el in soup.select("p, li"):
+                    t = el.get_text(" ", strip=True)
+                    t = re.sub(r"\s+", " ", t).strip()
+                    if t:
+                        parts.append(t)
+                if parts:
+                    s = "\n\n".join(parts)
+                else:
+                    s = soup.get_text(" ", strip=True)
+            except Exception:
+                s = re.sub(r"<[^>]+>", " ", s)
+        s = s.replace("\r\n", "\n").replace("\r", "\n")
+        s = re.sub(r"[ \t]+", " ", s)
+        s = re.sub(r"[ \t]*\n[ \t]*", "\n", s)
+        s = re.sub(r"\n{3,}", "\n\n", s).strip()
+        return s
+
+    def _http_timeout(self) -> httpx.Timeout:
+        return httpx.Timeout(
+            connect=PHILSTAR_HTTP_TIMEOUT_CONNECT_S,
+            read=PHILSTAR_HTTP_TIMEOUT_READ_S,
+            write=PHILSTAR_HTTP_TIMEOUT_READ_S,
+            pool=PHILSTAR_HTTP_TIMEOUT_CONNECT_S,
+        )
+
+    def _http_headers(self) -> Dict[str, str]:
+        if USE_ADV_HEADERS and get_advanced_stealth_headers is not None:
+            headers = get_advanced_stealth_headers()
+            headers.setdefault("Referer", self.BASE_URL)
+            headers.setdefault("Accept", "text/html,application/xhtml+xml")
+            return headers
+        return {
+            "User-Agent": self.USER_AGENT,
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.5",
+            "Referer": self.BASE_URL,
+            "Connection": "keep-alive",
+            "Upgrade-Insecure-Requests": "1",
+        }
+
+    def _fetch_html_http(self, url: str) -> Optional[str]:
+        try:
+            with httpx.Client(timeout=self._http_timeout(), follow_redirects=True) as client:
+                r = client.get(url, headers=self._http_headers())
+                if r.status_code >= 400:
+                    return None
+                return r.text
+        except Exception:
+            return None
+
+    def _discover_candidate_urls_http(self, max_articles: int) -> Tuple[List[str], Dict[str, Any]]:
+        candidates: List[str] = []
+        seen: set[str] = set()
+        section_urls = [self.BASE_URL] + [urljoin(self.BASE_URL, p) for p in self.START_PATHS]
+        sections_scanned = 0
+        for section_url in section_urls:
+            html = self._fetch_html_http(section_url)
+            if not html:
+                continue
+            sections_scanned += 1
+            soup = BeautifulSoup(html, "html.parser")
+            for sel in self.SELECTORS["article_links"]:
+                try:
+                    for a in soup.select(sel):
+                        href = a.get("href")
+                        if not href:
+                            continue
+                        full_url = urljoin(self.BASE_URL, href)
+                        if full_url in seen:
+                            continue
+                        if self._validate_url(full_url):
+                            seen.add(full_url)
+                            candidates.append(full_url)
+                except Exception:
+                    continue
+            if len(candidates) >= max_articles * 4:
+                break
+        return candidates, {
+            "discovery_method": "http",
+            "sections_scanned": sections_scanned,
+            "candidates_found": len(candidates),
+        }
+
+    def _scrape_article_http(self, url: str) -> Optional[NormalizedArticle]:
+        if not PHILSTAR_HTTP_FASTPATH:
+            return None
+        html = self._fetch_html_http(url)
+        if not html:
+            return None
+        soup = BeautifulSoup(html, "html.parser")
+        jsonld = extract_json_ld_newsarticle(soup) or {}
+
+        title = self._sanitize_text(jsonld.get("headline") or self._extract_with_fallbacks(soup, self.SELECTORS["title"]) or "")
+        if not title:
+            return None
+        content = self._sanitize_text(jsonld.get("articleBody") or self._extract_content(soup) or "")
+        if len(content) < PHILSTAR_HTTP_MIN_BODY_CHARS:
+            return None
+
+        published_date = jsonld.get("datePublished") or self._extract_with_fallbacks(soup, self.SELECTORS["published_date"])
+
+        # Category extraction (keep existing logic)
+        norm_cat, raw_cat = self._extract_philstar_category(url, soup)
+        return build_article(
+            source="PhilStar",
+            title=title,
+            url=url,
+            content=content,
+            category=norm_cat,
+            published_at=published_date,
+            raw_category=raw_cat,
+        )
 
     def _new_context(self, browser: Browser):
         """Create browser context with resource blocking."""
@@ -526,13 +669,34 @@ class PhilStarScraper:
         discovery_existing_urls: set[str] = set()
         
         logger.info("Starting PhilStar scraping session")
-        logger.info(f"PhilStar flags USE_ADV_HEADERS={USE_ADV_HEADERS}, USE_HUMAN_DELAY={USE_HUMAN_DELAY}, USE_URL_FILTER={USE_URL_FILTER}")
+        logger.info(
+            "PhilStar flags USE_ADV_HEADERS=%s USE_HUMAN_DELAY=%s USE_URL_FILTER=%s PHILSTAR_HTTP_DISCOVERY=%s PHILSTAR_HTTP_FASTPATH=%s",
+            USE_ADV_HEADERS,
+            USE_HUMAN_DELAY,
+            USE_URL_FILTER,
+            PHILSTAR_HTTP_DISCOVERY,
+            PHILSTAR_HTTP_FASTPATH,
+        )
         
         try:
-            with launch_browser() as browser:
-                article_urls, discover_meta = self._discover_candidate_urls(browser, max_articles=max_articles)
-                logger.info(f"Found {len(article_urls)} candidate article URLs across homepage+sections")
+            with ExitStack() as stack:
+                browser = None
+                context = None
 
+                # Discovery: HTTP-first optionally, otherwise Playwright
+                article_urls: List[str] = []
+                discover_meta: Dict[str, Any] = {"discovery_method": "playwright"}
+                if PHILSTAR_HTTP_DISCOVERY:
+                    try:
+                        article_urls, discover_meta = self._discover_candidate_urls_http(max_articles=max_articles)
+                    except Exception:
+                        article_urls = []
+
+                if not article_urls:
+                    browser = stack.enter_context(launch_browser())
+                    article_urls, discover_meta = self._discover_candidate_urls(browser, max_articles=max_articles)
+
+                logger.info(f"Found {len(article_urls)} candidate article URLs across homepage+sections")
                 if not article_urls:
                     raise Exception("No candidate URLs discovered from homepage/sections")
 
@@ -547,15 +711,40 @@ class PhilStarScraper:
                     len(to_scrape),
                 )
 
-                context = self._new_context(browser)
-                # Scrape each article
+                http_ok = 0
+                playwright_used = 0
+                playwright_ok = 0
+
                 for i, url in enumerate(to_scrape):
                     if len(articles) >= max_articles:
                         break
                     try:
                         logger.info(f"Scraping article {len(articles)+1}/{max_articles}: {url}")
 
-                        article = self._scrape_article(url, context)
+                        article = None
+                        if PHILSTAR_HTTP_FASTPATH:
+                            article = self._scrape_article_http(url)
+                            if article:
+                                http_ok += 1
+
+                        if article is None:
+                            if browser is None:
+                                browser = stack.enter_context(launch_browser())
+                            if context is None:
+                                context = self._new_context(browser)
+                                def _safe_close_ctx():
+                                    try:
+                                        if context:
+                                            context.close()
+                                    except Exception:
+                                        pass
+
+                                stack.callback(_safe_close_ctx)
+                            playwright_used += 1
+                            article = self._scrape_article(url, context)
+                            if article:
+                                playwright_ok += 1
+
                         if article:
                             articles.append(article)
                             logger.info(f"Successfully scraped: {article.title}")
@@ -572,11 +761,6 @@ class PhilStarScraper:
                         logger.error(error_msg)
                         continue
 
-                try:
-                    context.close()
-                except Exception:
-                    pass
-                    
         except Exception as e:
             error_msg = f"Critical scraping error: {str(e)}"
             errors.append(error_msg)

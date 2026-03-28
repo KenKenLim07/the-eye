@@ -4,6 +4,7 @@ import random
 from typing import List, Optional, Dict, Any, Tuple
 from urllib.parse import urljoin, urlparse, urlparse as parse_url, parse_qs
 from dataclasses import dataclass
+from contextlib import ExitStack
 from playwright.sync_api import Browser
 from bs4 import BeautifulSoup
 from app.pipeline.normalize import build_article, NormalizedArticle
@@ -13,6 +14,7 @@ from zoneinfo import ZoneInfo
 import re
 import urllib.request
 import json
+import html as html_lib
 # Feature flags (env-driven) for gradual rollout
 import os
 from app.core.url import canonicalize_url
@@ -20,6 +22,8 @@ from app.scrapers.support.db_dedupe import (
     filter_existing_article_urls,
     unique_canonical_urls,
 )
+from app.scrapers.support.structured_data import extract_json_ld_newsarticle
+from app.scrapers.support.network_debug import install_json_response_logger
 
 
 def _env_flag(name: str, default: bool = False) -> bool:
@@ -29,6 +33,23 @@ def _env_flag(name: str, default: bool = False) -> bool:
 USE_ADV_HEADERS = _env_flag("USE_ADV_HEADERS", False)
 USE_HUMAN_DELAY = _env_flag("USE_HUMAN_DELAY", False)
 USE_URL_FILTER = _env_flag("USE_URL_FILTER", False)
+
+# HTTP fast-path (structured data) to reduce Playwright cost
+MB_HTTP_FASTPATH = _env_flag("MB_HTTP_FASTPATH", False)
+try:
+    MB_HTTP_MIN_BODY_CHARS = int(os.getenv("MB_HTTP_MIN_BODY_CHARS", "600"))
+except Exception:
+    MB_HTTP_MIN_BODY_CHARS = 600
+try:
+    MB_HTTP_TIMEOUT_S = int(os.getenv("MB_HTTP_TIMEOUT_S", "20"))
+except Exception:
+    MB_HTTP_TIMEOUT_S = 20
+
+MB_NETWORK_DEBUG = _env_flag("MB_NETWORK_DEBUG", False)
+try:
+    MB_NETWORK_DEBUG_MAX = int(os.getenv("MB_NETWORK_DEBUG_MAX", "30"))
+except Exception:
+    MB_NETWORK_DEBUG_MAX = 30
 
 try:
     from app.scrapers.utils import (
@@ -209,10 +230,35 @@ class ManilaBulletinScraper:
     def _sanitize_text(self, text: str) -> str:
         if not text:
             return ""
-        text = text.replace("<script>", "").replace("</script>", "")
-        text = text.replace("javascript:", "").replace("data:", "")
-        text = text.replace("<", "&lt;").replace(">", "&gt;")
-        return text.strip()
+        s = html_lib.unescape(str(text))
+        # Strip obvious scheme injections
+        s = s.replace("javascript:", "").replace("data:", "")
+        # If this looks like HTML (common in JSON-LD bodies), convert to plain text.
+        if "<" in s and ">" in s:
+            try:
+                soup = BeautifulSoup(s, "html.parser")
+                for el in soup.select("script, style, noscript"):
+                    el.decompose()
+                # Prefer semantic blocks to preserve paragraph breaks.
+                parts: List[str] = []
+                for el in soup.select("p, li"):
+                    t = el.get_text(" ", strip=True)
+                    t = re.sub(r"\s+", " ", t).strip()
+                    if t:
+                        parts.append(t)
+                if parts:
+                    s = "\n\n".join(parts)
+                else:
+                    s = soup.get_text(" ", strip=True)
+            except Exception:
+                s = re.sub(r"<[^>]+>", " ", s)
+        s = s.replace("\r\n", "\n").replace("\r", "\n")
+        # Collapse whitespace but keep paragraph breaks.
+        s = re.sub(r"[ \t]+", " ", s)
+        s = re.sub(r"[ \t]*\n[ \t]*", "\n", s)
+        s = re.sub(r"\n{3,}", "\n\n", s)
+        s = s.strip()
+        return s
 
     def _find_article_container(self, soup: BeautifulSoup) -> Optional[BeautifulSoup]:
         container_selectors = [
@@ -669,6 +715,52 @@ class ManilaBulletinScraper:
             pass
         return data
 
+    def _scrape_article_http_fastpath(self, url: str) -> Optional[NormalizedArticle]:
+        """
+        Best-effort HTTP-first article extraction (no Playwright).
+        Uses JSON-LD when present, falls back to HTML parsing only when necessary.
+        """
+        if not MB_HTTP_FASTPATH:
+            return None
+        data = self._fetch_url(url, timeout=MB_HTTP_TIMEOUT_S)
+        if not data:
+            return None
+        html = data.decode("utf-8", errors="ignore")
+        soup = BeautifulSoup(html, "html.parser")
+
+        jsonld = extract_json_ld_newsarticle(soup) or self._extract_json_ld(soup)
+        title = (
+            (jsonld.get("headline") if isinstance(jsonld, dict) else None)
+            or self._extract_with_fallbacks(soup, self.SELECTORS["title"])
+            or ""
+        )
+        title = self._sanitize_text(title)
+        if not title:
+            return None
+
+        content_raw = (jsonld.get("articleBody") if isinstance(jsonld, dict) else None) or ""
+        content = self._sanitize_text(content_raw)
+        if len(content) < MB_HTTP_MIN_BODY_CHARS:
+            # Fallback to DOM extraction from static HTML
+            content = self._sanitize_text(self._extract_content(soup))
+
+        if len(content) < MB_HTTP_MIN_BODY_CHARS:
+            return None
+
+        raw_published = (jsonld.get("datePublished") if isinstance(jsonld, dict) else None) or self._extract_with_fallbacks(
+            soup, self.SELECTORS["published_date"]
+        )
+        published_iso = self._parse_published(raw_published)
+
+        return build_article(
+            source="Manila Bulletin",
+            category="General",
+            title=title,
+            url=canonicalize_url(url) or url,
+            content=content,
+            published_at=published_iso,
+        )
+
     def _scrape_article(self, url: str, browser: Browser) -> Optional[NormalizedArticle]:
         # Backward-compat entrypoint; prefer using _scrape_article_with_context.
         try:
@@ -720,6 +812,11 @@ class ManilaBulletinScraper:
                 page = context.new_page()
                 page.set_default_navigation_timeout(30_000)
                 page.set_default_timeout(30_000)
+                dump_json = install_json_response_logger(
+                    page,
+                    enabled=MB_NETWORK_DEBUG,
+                    max_items=max(1, MB_NETWORK_DEBUG_MAX),
+                )
                 if attempt == 0:
                     self._human_delay()
                 try:
@@ -736,6 +833,19 @@ class ManilaBulletinScraper:
                     pass
                 soup = BeautifulSoup(page.content(), "html.parser")
                 jsonld = self._extract_json_ld(soup)
+                if MB_NETWORK_DEBUG:
+                    try:
+                        rows = dump_json()
+                        if rows:
+                            logger.info(
+                                "MB network debug (captured=%s, showing up to 10): %s",
+                                len(rows),
+                                rows[: min(10, len(rows))],
+                            )
+                        else:
+                            logger.info("MB network debug: no JSON/XHR responses captured")
+                    except Exception:
+                        pass
 
                 title = jsonld.get("headline") or self._extract_with_fallbacks(soup, self.SELECTORS["title"]) or ""
                 if not title:
@@ -916,31 +1026,82 @@ class ManilaBulletinScraper:
             logger.warning("MB discovery yielded 0 candidates; check selectors/structure or upstream availability")
 
         # Scrape articles
+        http_ok = 0
+        playwright_used = 0
+        playwright_ok = 0
         try:
-            with launch_browser() as browser:
-                context = self._new_context(browser)
+            with ExitStack() as stack:
+                browser = None
+                context = None
                 for url in to_scrape:
                     if len(articles) >= max_articles:
                         break
-                    art = self._scrape_article_with_context(url, context)
+
+                    art = None
+                    if MB_HTTP_FASTPATH:
+                        art = self._scrape_article_http_fastpath(url)
+                        if art:
+                            http_ok += 1
+
+                    if art is None:
+                        if browser is None:
+                            browser = stack.enter_context(launch_browser())
+                            context = self._new_context(browser)
+                            def _safe_close_ctx():
+                                try:
+                                    if context:
+                                        context.close()
+                                except Exception:
+                                    pass
+
+                            stack.callback(_safe_close_ctx)
+                        playwright_used += 1
+                        art = self._scrape_article_with_context(url, context)
+                        if art:
+                            playwright_ok += 1
+
                     if art:
                         articles.append(art)
-                try:
-                    context.close()
-                except Exception:
-                    pass
         except Exception as e:
             errors.append(str(e))
         
         duration = time.time() - start
-        perf = {'duration_s': round(duration, 2), 'count': len(articles)}
+        perf = {
+            "duration_s": round(duration, 2),
+            "count": len(articles),
+            "http_ok": http_ok,
+            "playwright_used": playwright_used,
+            "playwright_ok": playwright_ok,
+        }
         meta = {
             'domain': 'mb.com.ph',
             'discovered_total': len(discovered),
             'candidates_used': len(to_scrape),
             'max_candidates': self.MAX_CANDIDATES,
             'existing_in_db': len(discovery_existing_urls),
+            "mb_http_fastpath": bool(MB_HTTP_FASTPATH),
         }
         if len(articles) == 0:
             logger.warning("MB scrape produced 0 articles; verify selectors and content extraction")
         return ScrapingResult(articles=articles, errors=errors, performance=perf, metadata=meta) 
+
+
+def debug_mb_url(url: str) -> dict:
+    """
+    Developer helper: scrape a single URL and (optionally) print network debug logs.
+
+    Usage (inside worker container):
+      MB_NETWORK_DEBUG=1 python -c "from app.scrapers.manila_bulletin import debug_mb_url; print(debug_mb_url('https://mb.com.ph/...'))"
+    """
+    scraper = ManilaBulletinScraper()
+    try:
+        with launch_browser() as browser:
+            context = scraper._new_context(browser)
+            art = scraper._scrape_article_with_context(url, context)
+            try:
+                context.close()
+            except Exception:
+                pass
+            return {"ok": bool(art), "title": getattr(art, "title", None)}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}

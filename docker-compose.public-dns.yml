@@ -1,0 +1,66 @@
+services:
+  # Optional: force specific upstream DNS resolvers for containers.
+  # Use only if you have DNS issues on your network.
+  #
+  # Usage:
+  #   docker compose -f docker-compose.yml -f docker-compose.public-dns.yml up -d
+  #
+  # Note: some mobile hotspots block public DNS (1.1.1.1/8.8.8.8). If that happens,
+  # remove this override and let containers use the host resolver, or use the
+  # hotspot/host-network workflow in `docker-compose.hotspot.yml`.
+
+  api:
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+      - 8.8.4.4
+      - 9.9.9.9
+    dns_opt:
+      - single-request-reopen
+      - use-vc
+    dns_search: []
+
+  worker:
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+      - 8.8.4.4
+      - 9.9.9.9
+    dns_opt:
+      - single-request-reopen
+      - use-vc
+    dns_search: []
+
+  worker_headed:
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+      - 8.8.4.4
+      - 9.9.9.9
+    dns_opt:
+      - single-request-reopen
+      - use-vc
+    dns_search: []
+
+  worker_ml:
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+      - 8.8.4.4
+      - 9.9.9.9
+    dns_opt:
+      - single-request-reopen
+      - use-vc
+    dns_search: []
+
+  beat:
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+      - 8.8.4.4
+      - 9.9.9.9
+    dns_opt:
+      - single-request-reopen
+      - use-vc
+    dns_search: []
+
