@@ -52,7 +52,8 @@ async def run_scrape(payload: dict = Body(default={})):
             job = scrape_manila_times_task.delay()
             jobs.append({"source": "manila_times", "task_id": str(job)})
         elif s in ["abs_cbn", "abs-cbn", "abscbn", "abs_cbn_news", "abs-cbn-news"]:
-            job = scrape_abs_cbn_task.apply_async(queue="scrape_headed")
+            # Queue is controlled by Celery routing (see `celery_app.py`).
+            job = scrape_abs_cbn_task.delay()
             jobs.append({"source": "abs_cbn", "task_id": str(job)})
     return {"queued": True, "jobs": jobs}
 

@@ -10,6 +10,14 @@ celery = Celery(
     backend=settings.celery_result_backend,
 )
 
+def _env_flag(name: str, default: bool = False) -> bool:
+    val = os.getenv(name, str(default)).strip().lower()
+    return val in {"1", "true", "yes", "on"}
+
+# ABS-CBN can run without a headed browser now (API content fast-path).
+# Keep a switch to force headed mode if Akamai changes.
+ABS_CBN_QUEUE = "scrape_headed" if _env_flag("ABS_CBN_FORCE_HEADED", False) else "scrape"
+
 # SENIOR DEV SOLUTION: Production-grade configuration
 celery.conf.update(
     task_serializer="json",
@@ -29,8 +37,8 @@ celery.conf.update(
         Queue("celery"),  # fallback/default
     ),
     task_routes={
-        # ABS-CBN is Akamai-sensitive and works best in headed mode (Xvfb).
-        "app.workers.tasks.scrape_abs_cbn_task": {"queue": "scrape_headed"},
+        # ABS-CBN: prefer normal scrape worker (API fast-path). Force headed via ABS_CBN_FORCE_HEADED=1.
+        "app.workers.tasks.scrape_abs_cbn_task": {"queue": ABS_CBN_QUEUE},
         "app.workers.tasks.*": {"queue": "scrape"},
         "app.workers.ml_tasks.*": {"queue": "ml"},
     },
@@ -84,5 +92,5 @@ if os.getenv("ENABLE_ABS_CBN_SCRAPER", "0").strip().lower() in {"1", "true", "ye
     celery.conf.beat_schedule["scrape_abs_cbn"] = {
         "task": "app.workers.tasks.scrape_abs_cbn_task",
         "schedule": schedule(3.0 * 60 * 60),  # 3 hours - heavy/slow, keep gentle
-        "options": {"queue": "scrape_headed"},
+        "options": {"queue": ABS_CBN_QUEUE},
     }

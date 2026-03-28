@@ -80,8 +80,9 @@ Frontend (`.env.local`):
 ```bash
 docker compose up -d redis api worker beat
 
-# Optional (recommended if you want ABS-CBN):
-# ABS-CBN is often blocked in headless mode, so it runs on a separate headed worker (Xvfb).
+# Optional (only if you force headed Playwright for ABS-CBN):
+# By default ABS-CBN uses an API fast-path and does NOT need a headed worker.
+# Start this only when debugging / if ABS-CBN changes and you set `ABS_CBN_FORCE_HEADED=1`.
 docker compose up -d worker_headed
 
 # Linux-only (optional overrides):
@@ -91,7 +92,7 @@ docker compose -f docker-compose.yml -f docker-compose.linux.yml up -d redis api
 ```powershell
 docker compose up -d redis api worker beat
 
-# Optional (recommended if you want ABS-CBN):
+# Optional (only if you force headed Playwright for ABS-CBN):
 docker compose up -d worker_headed
 ```
 
@@ -161,22 +162,43 @@ Supported `source` values:
 
 ### ABS-CBN note (Akamai / headed Chromium)
 
-ABS-CBN is more likely to block Playwright **headless** Chromium. This repo runs ABS-CBN on a dedicated headed worker:
+ABS-CBN blocks plain HTTP requests to article pages (often `403`), and may block Playwright **headless** Chromium.
+
+This repo now supports an **API content fast-path** (preferred): it pulls article bodies from the public OneDomain API (`od2-content-api.abs-cbn.com`) and can run on the normal headless scrape worker without launching a browser.
+
+Deep dive / playbook: `abscbn.md`.
+
+Env flags (optional; defaults shown are what the repo expects):
+- `ABS_CBN_API_DISCOVERY=1` discover links via `od2-content-api` (default `1`)
+- `ABS_CBN_API_LIST_URLS=...` comma-separated list endpoints (default: news/business/technology/sports/entertainment lists)
+- `ABS_CBN_API_CONTENT_FASTPATH=1` build articles from `body_html` (default `1`)
+- `ABS_CBN_API_MIN_BODY_CHARS=600` minimum body length to accept (default `600`)
+
+Headed Playwright remains available as a fallback if ABS-CBN changes:
 - Service: `worker_headed` (runs under `xvfb-run` inside Docker; no browser window appears on your host)
 - Queue: `scrape_headed`
-- Env: `PLAYWRIGHT_HEADLESS=false` (set only on `worker_headed`)
+- Force it by setting `ABS_CBN_FORCE_HEADED=1`
 
-To enable scheduled runs (optional), set `ENABLE_ABS_CBN_SCRAPER=1` in `backend/.env` and keep `worker_headed` running.
+To enable scheduled runs (optional), set `ENABLE_ABS_CBN_SCRAPER=1` in `backend/.env`. You only need `worker_headed` running if you set `ABS_CBN_FORCE_HEADED=1`.
+
+Canary (optional): validate the API endpoints/fields we rely on:
+
+```bash
+python backend/scripts/abs_cbn_api_canary.py
+```
 
 ### GMA fast-path (HTTP + JSON-LD) + network debug
 
-GMA supports an optional fast-path that tries to extract full article text from structured data in the raw HTML (no Playwright rendering), then falls back to Playwright when needed.
+GMA supports an HTTP-first fast-path that avoids rendering:
+- **Best case:** fetch the same article “blob” the site loads over XHR: `https://data.gmanetwork.com/<code>/gno/story/<id>.gz`
+- Fallback: JSON-LD in the raw HTML
+- Final fallback: Playwright DOM scrape (headless)
 
 Env flags (set on the `worker` container or inline in the command):
-- `GMA_HTTP_FASTPATH=1` enables the HTTP+JSON-LD fast-path (default `0`)
+- `GMA_HTTP_FASTPATH=1` enables the HTTP fast-path (default `1` in this repo)
 - `GMA_HTTP_DISCOVERY=1` discovers candidate links via plain HTTP (no Playwright) when fast-path is enabled (default `1`)
 - `GMA_HTTP_MIN_BODY_CHARS=600` minimum JSON-LD body length to accept (default `600`)
-- `GMA_STORY_API_FASTPATH=1` also tries GMA’s internal `data.gmanetwork.com/.../story/<id>.gz` payload when JSON-LD is missing/too short (default `1`)
+- `GMA_STORY_API_FASTPATH=1` tries GMA’s internal `data.gmanetwork.com/.../story/<id>.gz` payload (default `1`)
 - `GMA_STORY_API_CODES=227,394` candidate GMA story API codes to try by story id (default `227,394`)
 - `GMA_HTTP_TIMEOUT_CONNECT_S=5`, `GMA_HTTP_TIMEOUT_READ_S=15` HTTP timeout tuning (defaults shown)
 - `GMA_NETWORK_DEBUG=1` logs JSON/XHR endpoints observed while loading a page (default `0`)
@@ -191,6 +213,10 @@ docker compose exec worker sh -lc 'GMA_HTTP_FASTPATH=1 python -c "from app.scrap
 # Debug a single GMA URL and print observed JSON/XHR endpoints
 docker compose exec worker sh -lc 'GMA_NETWORK_DEBUG=1 python -c "from app.scrapers.gma import debug_gma_url; print(debug_gma_url(\"https://www.gmanetwork.com/news/topstories/nation/123456/example-story/\"))"'
 ```
+
+Tip: when `GMA_NETWORK_DEBUG=1`, look for endpoints shaped like:
+- `https://data.gmanetwork.com/<code>/gno/story/<id>.gz` ← full article payload (best)
+If you see a new `<code>`, append it to `GMA_STORY_API_CODES`.
 
 Queue a job:
 

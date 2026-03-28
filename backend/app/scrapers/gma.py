@@ -37,7 +37,8 @@ USE_HUMAN_DELAY = _env_flag("USE_HUMAN_DELAY", False)
 USE_URL_FILTER = _env_flag("USE_URL_FILTER", False)
 SCRAPER_CONTENT_MAX_CHARS = _env_int("SCRAPER_CONTENT_MAX_CHARS", 8000)
 
-GMA_HTTP_FASTPATH = _env_flag("GMA_HTTP_FASTPATH", False)
+# Default ON: safe HTTP-first with Playwright fallback.
+GMA_HTTP_FASTPATH = _env_flag("GMA_HTTP_FASTPATH", True)
 GMA_HTTP_DISCOVERY = _env_flag("GMA_HTTP_DISCOVERY", True)
 GMA_NETWORK_DEBUG = _env_flag("GMA_NETWORK_DEBUG", False)
 GMA_NETWORK_DEBUG_MAX = _env_int("GMA_NETWORK_DEBUG_MAX", 30)
@@ -350,6 +351,9 @@ class GMAScraper:
         Falls back to Playwright path if JSON-LD is missing/too short.
         """
         try:
+            # Hard guardrail: never scrape archive/listing URLs as articles.
+            if not self._is_probable_article(url):
+                return None
             headers = self._http_headers()
             sess = self._get_http_session()
             timeout = self._http_timeout()
@@ -836,6 +840,9 @@ class GMAScraper:
     def _scrape_article(self, url: str, context) -> Optional[NormalizedArticle]:
         page = None
         try:
+            # Hard guardrail: never scrape archive/listing URLs as articles.
+            if not self._is_probable_article(url):
+                return None
             page = context.new_page()
             self._set_headers(page)
             page.set_default_timeout(30000)
@@ -1007,6 +1014,13 @@ class GMAScraper:
 
                     # Continue below with scraping; keep the context open for fallbacks.
                     candidates = unique_canonical_urls(urls)
+                    # Belt-and-suspenders filter: even if discovery selectors pick up non-articles,
+                    # we never want to scrape or store them.
+                    before = len(candidates)
+                    candidates = [u for u in candidates if self._is_probable_article(u)]
+                    filtered = before - len(candidates)
+                    if filtered:
+                        logger.info("GMA discovery: filtered_out=%s non-article URLs after canonicalization", filtered)
                     to_scrape, existing = filter_existing_article_urls(candidates)
                     discovery_existing_urls = existing
                     logger.info(
@@ -1052,6 +1066,11 @@ class GMAScraper:
             if urls and discovery_meta.get("method") == "http":
                 t_pf0 = time.time()
                 candidates = unique_canonical_urls(urls)
+                before = len(candidates)
+                candidates = [u for u in candidates if self._is_probable_article(u)]
+                filtered = before - len(candidates)
+                if filtered:
+                    logger.info("GMA discovery: filtered_out=%s non-article URLs after canonicalization", filtered)
                 to_scrape, existing = filter_existing_article_urls(candidates)
                 discovery_existing_urls = existing
                 discovery_meta["preflight_s"] = round(time.time() - t_pf0, 2)
