@@ -160,7 +160,7 @@ export default function AboutPage() {
         <section className="space-y-4">
           <SectionTitle
             title="How Each Page Works"
-            subtitle="A quick guide for reading the dashboards and understanding what each view is (and isn’t) claiming."
+            subtitle="A quick guide you can read two ways: plain-English for non-tech viewers, plus technical notes for methods/implementation."
           />
 
           <Tabs defaultValue="trends" className="w-full">
@@ -176,14 +176,36 @@ export default function AboutPage() {
               <Card>
                 <CardHeader>
                   <CardTitle>Home (Latest Feed)</CardTitle>
-                  <CardDescription>Fast browsing with a Quick View for summaries and metadata.</CardDescription>
+                  <CardDescription>Fast browsing with Quick View for context and details.</CardDescription>
                 </CardHeader>
-                <CardContent className="text-sm text-muted-foreground leading-6 space-y-2">
-                  <ul className="list-disc pl-5 space-y-1">
-                    <li>Shows the newest scraped articles, grouped by source.</li>
-                    <li>Quick View lets you skim content and jump to the original article.</li>
-                    <li>Sentiment badges reflect the latest sentiment row stored for the article.</li>
-                  </ul>
+                <CardContent className="grid gap-3 md:grid-cols-2">
+                  <Card className="bg-card/60">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm">Plain-English</CardTitle>
+                      <CardDescription>What you should expect to see.</CardDescription>
+                    </CardHeader>
+                    <CardContent className="text-sm text-muted-foreground leading-6 space-y-2">
+                      <ul className="list-disc pl-5 space-y-1">
+                        <li>The newest headlines from each news source.</li>
+                        <li>Tap Quick View to read a short summary and the article details.</li>
+                        <li>Tap Read original to open the full story from the publisher.</li>
+                      </ul>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="bg-card/60">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm">Technical</CardTitle>
+                      <CardDescription>How it is produced.</CardDescription>
+                    </CardHeader>
+                    <CardContent className="text-sm text-muted-foreground leading-6 space-y-2">
+                      <ul className="list-disc pl-5 space-y-1">
+                        <li>Lists recent rows from <span className="u-mono text-[12px]">articles</span>.</li>
+                        <li>Sentiment badge uses the latest stored sentiment row for that article when available.</li>
+                        <li>Quick View is a UI dialog; it does not modify the original content.</li>
+                      </ul>
+                    </CardContent>
+                  </Card>
                 </CardContent>
               </Card>
             </TabsContent>
@@ -192,17 +214,36 @@ export default function AboutPage() {
               <Card>
                 <CardHeader>
                   <CardTitle>Search</CardTitle>
-                  <CardDescription>Keyword search across articles (with database-side optimizations when enabled).</CardDescription>
+                  <CardDescription>Find articles by keywords, then open Quick View or the original link.</CardDescription>
                 </CardHeader>
-                <CardContent className="text-sm text-muted-foreground leading-6 space-y-2">
-                  <ul className="list-disc pl-5 space-y-1">
-                    <li>Uses Supabase/Postgres queries to retrieve matching articles.</li>
-                    <li>
-                      For best performance at scale, enable Postgres full‑text search (FTS) so the UI can use{" "}
-                      <span className="u-mono text-[12px]">textSearch</span> instead of slow{" "}
-                      <span className="u-mono text-[12px]">ILIKE %...%</span> scans.
-                    </li>
-                  </ul>
+                <CardContent className="grid gap-3 md:grid-cols-2">
+                  <Card className="bg-card/60">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm">Plain-English</CardTitle>
+                      <CardDescription>What it does.</CardDescription>
+                    </CardHeader>
+                    <CardContent className="text-sm text-muted-foreground leading-6 space-y-2">
+                      <ul className="list-disc pl-5 space-y-1">
+                        <li>Type a keyword (person, place, topic) to find related news.</li>
+                        <li>Results help you quickly compare how different sources cover the same topic.</li>
+                        <li>If nothing shows up, try shorter keywords or different spelling.</li>
+                      </ul>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="bg-card/60">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm">Technical</CardTitle>
+                      <CardDescription>How it stays fast.</CardDescription>
+                    </CardHeader>
+                    <CardContent className="text-sm text-muted-foreground leading-6 space-y-2">
+                      <ul className="list-disc pl-5 space-y-1">
+                        <li>Search runs in Postgres (Supabase) against article text fields.</li>
+                        <li>For scale, prefer full‑text search (FTS) over <span className="u-mono text-[12px]">ILIKE</span> scans.</li>
+                        <li>Indexes determine whether search stays snappy or times out.</li>
+                      </ul>
+                    </CardContent>
+                  </Card>
                 </CardContent>
               </Card>
             </TabsContent>
@@ -211,14 +252,36 @@ export default function AboutPage() {
               <Card>
                 <CardHeader>
                   <CardTitle>Trends (Sentiment Over Time)</CardTitle>
-                  <CardDescription>Daily sentiment distribution + averages for a selected period.</CardDescription>
+                  <CardDescription>Shows how the overall “tone” changes day by day.</CardDescription>
                 </CardHeader>
-                <CardContent className="text-sm text-muted-foreground leading-6 space-y-2">
-                  <ul className="list-disc pl-5 space-y-1">
-                    <li>Charts show counts and percentages per day (positive / neutral / negative).</li>
-                    <li>Use period filters (7d/30d) to compare short vs longer coverage patterns.</li>
-                    <li>In demo mode, trends can load from Supabase snapshot tables for speed and reliability.</li>
-                  </ul>
+                <CardContent className="grid gap-3 md:grid-cols-2">
+                  <Card className="bg-card/60">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm">Plain-English</CardTitle>
+                      <CardDescription>How to read it.</CardDescription>
+                    </CardHeader>
+                    <CardContent className="text-sm text-muted-foreground leading-6 space-y-2">
+                      <ul className="list-disc pl-5 space-y-1">
+                        <li>Each day is summarized into Positive, Neutral, and Negative counts.</li>
+                        <li>Spikes can mean a major event (disaster, crime, sports win, policy news).</li>
+                        <li>Use 7 days for recent changes; 30 days for broader patterns.</li>
+                      </ul>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="bg-card/60">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm">Technical</CardTitle>
+                      <CardDescription>How it is computed.</CardDescription>
+                    </CardHeader>
+                    <CardContent className="text-sm text-muted-foreground leading-6 space-y-2">
+                      <ul className="list-disc pl-5 space-y-1">
+                        <li>Each article gets a sentiment label from the NLP pipeline.</li>
+                        <li>Daily totals are aggregated by publish date and label distribution.</li>
+                        <li>In demo mode, the chart reads from snapshot tables for stability on Vercel.</li>
+                      </ul>
+                    </CardContent>
+                  </Card>
                 </CardContent>
               </Card>
             </TabsContent>
@@ -227,17 +290,36 @@ export default function AboutPage() {
               <Card>
                 <CardHeader>
                   <CardTitle>Correlation (Cross‑Source Similarity)</CardTitle>
-                  <CardDescription>A Pearson correlation heatmap across sources using daily average sentiment.</CardDescription>
+                  <CardDescription>Compares how similar different sources feel over the same time window.</CardDescription>
                 </CardHeader>
-                <CardContent className="text-sm text-muted-foreground leading-6 space-y-2">
-                  <ul className="list-disc pl-5 space-y-1">
-                    <li>
-                      Values closer to <span className="u-mono text-[12px]">+1</span> mean two sources move together;{" "}
-                      closer to <span className="u-mono text-[12px]">-1</span> means they move in opposite directions.
-                    </li>
-                    <li>Correlation doesn’t prove causation; it’s a directional signal for “similar tone”.</li>
-                    <li>Use it to spot outliers and investigate days where sources diverge.</li>
-                  </ul>
+                <CardContent className="grid gap-3 md:grid-cols-2">
+                  <Card className="bg-card/60">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm">Plain-English</CardTitle>
+                      <CardDescription>What the heatmap means.</CardDescription>
+                    </CardHeader>
+                    <CardContent className="text-sm text-muted-foreground leading-6 space-y-2">
+                      <ul className="list-disc pl-5 space-y-1">
+                        <li>Brighter/stronger cells mean two sources “move together” more often.</li>
+                        <li>Negative values mean they tend to move in opposite directions.</li>
+                        <li>Use it as a clue, then open articles to see why they differ.</li>
+                      </ul>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="bg-card/60">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm">Technical</CardTitle>
+                      <CardDescription>How similarity is measured.</CardDescription>
+                    </CardHeader>
+                    <CardContent className="text-sm text-muted-foreground leading-6 space-y-2">
+                      <ul className="list-disc pl-5 space-y-1">
+                        <li>Uses Pearson correlation on daily average sentiment scores per source.</li>
+                        <li>Only overlapping days are comparable; missing days reduce confidence.</li>
+                        <li>Correlation is not causation; it is a statistical similarity signal.</li>
+                      </ul>
+                    </CardContent>
+                  </Card>
                 </CardContent>
               </Card>
             </TabsContent>
@@ -246,14 +328,36 @@ export default function AboutPage() {
               <Card>
                 <CardHeader>
                   <CardTitle>Entities (Who/What Is Being Talked About)</CardTitle>
-                  <CardDescription>Top entities by mention volume, with optional average sentiment.</CardDescription>
+                  <CardDescription>Shows the most-mentioned people, organizations, and places.</CardDescription>
                 </CardHeader>
-                <CardContent className="text-sm text-muted-foreground leading-6 space-y-2">
-                  <ul className="list-disc pl-5 space-y-1">
-                    <li>Ranks entities extracted via NER (PERSON / ORG / GPE).</li>
-                    <li>Mentions count reflects frequency, not importance or truth.</li>
-                    <li>Average sentiment is derived from related article sentiment, so it inherits model limitations.</li>
-                  </ul>
+                <CardContent className="grid gap-3 md:grid-cols-2">
+                  <Card className="bg-card/60">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm">Plain-English</CardTitle>
+                      <CardDescription>What rankings show.</CardDescription>
+                    </CardHeader>
+                    <CardContent className="text-sm text-muted-foreground leading-6 space-y-2">
+                      <ul className="list-disc pl-5 space-y-1">
+                        <li>Higher rank means the name/place shows up in more articles.</li>
+                        <li>It measures “how often mentioned,” not whether the topic is good or bad.</li>
+                        <li>Use it to spot dominant topics and compare across time periods.</li>
+                      </ul>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="bg-card/60">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm">Technical</CardTitle>
+                      <CardDescription>How entities are extracted.</CardDescription>
+                    </CardHeader>
+                    <CardContent className="text-sm text-muted-foreground leading-6 space-y-2">
+                      <ul className="list-disc pl-5 space-y-1">
+                        <li>Runs NER to extract PERSON/ORG/GPE tokens from article text.</li>
+                        <li>Aggregates mentions into a ranked list for the selected window.</li>
+                        <li>Average sentiment (when shown) is derived from the related article sentiment rows.</li>
+                      </ul>
+                    </CardContent>
+                  </Card>
                 </CardContent>
               </Card>
             </TabsContent>

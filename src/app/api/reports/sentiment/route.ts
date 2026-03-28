@@ -36,8 +36,8 @@ function safeContextPath(referer: string | null): string | null {
   }
 }
 
-function isValidReportedLabel(v: unknown): v is "positive" | "neutral" | "negative" | "not_news" {
-  return v === "positive" || v === "neutral" || v === "negative" || v === "not_news";
+function isValidReportedLabel(v: unknown): v is "positive" | "neutral" | "negative" | "other" {
+  return v === "positive" || v === "neutral" || v === "negative" || v === "other";
 }
 
 function errorMessage(err: unknown): string {

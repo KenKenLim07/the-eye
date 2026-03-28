@@ -19,7 +19,7 @@ create table if not exists public.sentiment_misclassification_reports (
 
   -- What the user is reporting.
   -- - positive/neutral/negative: sentiment correction
-  -- - not_news: scraper picked up an ad/promo/non-article content
+  -- - other: any other issue (scraper/NER/content quality/etc.)
   reported_label text not null,
   reported_score real null,
   note text null,
@@ -38,7 +38,7 @@ create table if not exists public.sentiment_misclassification_reports (
   reviewed_at timestamptz null,
 
   constraint sentiment_misclassification_reports_reported_label_check
-    check (reported_label in ('positive','neutral','negative','not_news')),
+    check (reported_label in ('positive','neutral','negative','other')),
   constraint sentiment_misclassification_reports_note_len
     check (note is null or char_length(note) <= 200),
   constraint sentiment_misclassification_reports_context_path_len
@@ -105,17 +105,17 @@ alter table public.sentiment_misclassification_reports
 alter table public.sentiment_misclassification_reports
   drop column if exists report_type;
 
--- Backfill null labels (older "not news" rows) to the new explicit label.
+-- Backfill old labels to the new explicit label.
 update public.sentiment_misclassification_reports
-set reported_label = 'not_news'
-where reported_label is null;
+set reported_label = 'other'
+where reported_label is null or reported_label = 'not_news';
 
 alter table public.sentiment_misclassification_reports
   alter column reported_label set not null;
 
 alter table public.sentiment_misclassification_reports
   add constraint sentiment_misclassification_reports_reported_label_check
-    check (reported_label in ('positive','neutral','negative','not_news'));
+    check (reported_label in ('positive','neutral','negative','other'));
 
 -- Tighten note length (drop/re-add).
 alter table public.sentiment_misclassification_reports

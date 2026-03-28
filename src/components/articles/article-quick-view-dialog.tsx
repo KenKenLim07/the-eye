@@ -68,7 +68,7 @@ export default function ArticleQuickViewDialog(props: {
   const reportedStorageKey = articleIdKey ? `ph-eye:reported_sentiment:${articleIdKey}` : null;
 
   const [reportOpen, setReportOpen] = useState(false);
-  const [reportedLabel, setReportedLabel] = useState<"positive" | "neutral" | "negative" | "not_news">("neutral");
+  const [reportedLabel, setReportedLabel] = useState<"positive" | "neutral" | "negative" | "other">("neutral");
   const [reportNote, setReportNote] = useState("");
   const [reportStatus, setReportStatus] = useState<"idle" | "submitting" | "success" | "error">("idle");
   const [reportError, setReportError] = useState<string | null>(null);
@@ -249,7 +249,7 @@ export default function ArticleQuickViewDialog(props: {
                 <DialogHeader>
                   <DialogTitle>Report</DialogTitle>
                   <DialogDescription>
-                    Help us improve our scrapers and NLP (DistilBERT, modified VADER, spaCy) by flagging misclassifications and non-news.
+                    Help us improve PH‑Eye (scrapers + NLP: DistilBERT, modified VADER, spaCy) by flagging issues you notice.
                   </DialogDescription>
                 </DialogHeader>
 
@@ -262,7 +262,7 @@ export default function ArticleQuickViewDialog(props: {
                             { value: "positive", label: "Positive" },
                             { value: "neutral", label: "Neutral" },
                             { value: "negative", label: "Negative" },
-                            { value: "not_news", label: "Ad / not news" },
+                            { value: "other", label: "Other issue" },
                           ] as const
                         ).map((opt) => (
                           <button
@@ -283,7 +283,7 @@ export default function ArticleQuickViewDialog(props: {
                       <Textarea
                         value={reportNote}
                         onChange={(e) => setReportNote(e.target.value)}
-                        placeholder={reportedLabel === "not_news" ? "What did we pick up? (e.g. advertisement/promo)" : "What’s wrong with the classification?"}
+                        placeholder={reportedLabel === "other" ? "Describe the issue (e.g. wrong entity, ad content, broken summary, etc.)" : "What’s wrong with the classification?"}
                         maxLength={REPORT_NOTE_MAX_LEN}
                       />
                       <div className="text-xs text-muted-foreground">{Math.min(REPORT_NOTE_MAX_LEN, reportNote.length)}/{REPORT_NOTE_MAX_LEN}</div>
@@ -342,11 +342,11 @@ export default function ArticleQuickViewDialog(props: {
 
               <DialogContent className="sm:max-w-md">
                 <DialogHeader>
-                  <DialogTitle>Report</DialogTitle>
-                  <DialogDescription>
-                    Help us improve our scrapers and NLP (DistilBERT, modified VADER, spaCy) by flagging misclassifications and non-news.
-                  </DialogDescription>
-                </DialogHeader>
+                <DialogTitle>Report</DialogTitle>
+                <DialogDescription>
+                    Help us improve PH‑Eye (scrapers + NLP: DistilBERT, modified VADER, spaCy) by flagging issues you notice.
+                </DialogDescription>
+              </DialogHeader>
 
                 <div className="space-y-3">
                   <div className="space-y-2">
@@ -357,7 +357,7 @@ export default function ArticleQuickViewDialog(props: {
                           { value: "positive", label: "Positive" },
                           { value: "neutral", label: "Neutral" },
                           { value: "negative", label: "Negative" },
-                          { value: "not_news", label: "Ad / not news" },
+                          { value: "other", label: "Other issue" },
                         ] as const
                       ).map((opt) => (
                         <button
@@ -378,7 +378,7 @@ export default function ArticleQuickViewDialog(props: {
                     <Textarea
                       value={reportNote}
                       onChange={(e) => setReportNote(e.target.value)}
-                      placeholder={reportedLabel === "not_news" ? "What did we pick up? (e.g. advertisement/promo)" : "What’s wrong with the classification?"}
+                      placeholder={reportedLabel === "other" ? "Describe the issue (e.g. wrong entity, ad content, broken summary, etc.)" : "What’s wrong with the classification?"}
                       maxLength={REPORT_NOTE_MAX_LEN}
                     />
                     <div className="text-xs text-muted-foreground">{Math.min(REPORT_NOTE_MAX_LEN, reportNote.length)}/{REPORT_NOTE_MAX_LEN}</div>
