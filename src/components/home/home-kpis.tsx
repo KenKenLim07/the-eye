@@ -22,7 +22,7 @@ type Props = {
   sentiment: Sentiment;
 };
 
-const SESSION_KEY = "ph-vibecheck-ai:kpi_countup_v1";
+const SESSION_KEY = "ph-eye:kpi_countup_v1";
 
 export default function HomeKpis({ totalArticles, articles24h, coveragePct, sentiment }: Props) {
   const [play, setPlay] = useState(false);
@@ -66,7 +66,7 @@ export default function HomeKpis({ totalArticles, articles24h, coveragePct, sent
             <span className="inline-flex h-7 w-7 items-center justify-center rounded-md border bg-background/60" aria-hidden="true">
               <Newspaper className="h-3.5 w-3.5 text-muted-foreground" />
             </span>
-            <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">Database Total</div>
+            <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">Total Articles</div>
           </div>
           <div className="u-serif text-xl sm:text-3xl font-semibold tabular-nums">
             <AnimatedNumber value={totalArticles} animate={play} durationMs={900} className="u-serif" />

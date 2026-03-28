@@ -52,7 +52,7 @@ export default function AboutPage() {
         <section className="space-y-4">
           <SectionTitle
             title="How It Works"
-            subtitle="A simple pipeline: collect → store → analyze → snapshot → visualize. The goal is to keep the system explainable, resilient, and fast enough for demos."
+            subtitle="A simple pipeline: collect → store → analyze → snapshot → visualize. The goal is to keep the system explainable, resilient, and fast."
           />
 
           <div className="grid gap-3 sm:gap-4 md:grid-cols-5">
@@ -410,7 +410,7 @@ export default function AboutPage() {
 
         <section className="space-y-4">
           <SectionTitle
-            title="Notes (Demo Mode vs Full Mode)"
+            title="Notes (The current project stage is a frontend demo running on Vercel, with a backend that can be run locally or deployed separately.)"
             subtitle="PH VibeCheck AI can run as a full stack locally, or as a frontend-only demo that reads precomputed snapshots from Supabase."
           />
           <Card>
