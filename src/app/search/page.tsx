@@ -5,20 +5,12 @@ import { ArticleCardsInteractive } from "@/components/articles/article-cards-int
 import MainLayout from "@/components/layout/main-layout";
 import { SearchHeader } from "@/components/search/search-header";
 import type { Article } from "@/lib/types";
+import { PH_SOURCES, PH_SOURCES_WITH_ALL } from "@/lib/sources";
 
 export const dynamic = "force-dynamic";
 
 const PAGE_SIZE = 24;
-const SOURCES = [
-  "all",
-  "GMA",
-  "Rappler",
-  "Inquirer",
-  "Manila Times",
-  "Philstar",
-  "Sunstar",
-  "Manila Bulletin",
-];
+const SOURCES = ["all", ...PH_SOURCES];
 
 type SearchParams = Promise<{ q?: string; source?: string; page?: string }>;
 
@@ -86,16 +78,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Searc
             action="/search"
             queryDefault={q}
             sourceDefault={safeSource}
-            sources={[
-              { value: "all", label: "All Sources" },
-              { value: "GMA", label: "GMA" },
-              { value: "Rappler", label: "Rappler" },
-              { value: "Inquirer", label: "Inquirer" },
-              { value: "Manila Times", label: "Manila Times" },
-              { value: "Philstar", label: "Philstar" },
-              { value: "Sunstar", label: "Sunstar" },
-              { value: "Manila Bulletin", label: "Manila Bulletin" },
-            ]}
+            sources={PH_SOURCES_WITH_ALL}
           />
 
           <Card>
@@ -150,16 +133,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Searc
           action="/search"
           queryDefault={q}
           sourceDefault={safeSource}
-          sources={[
-            { value: "all", label: "All Sources" },
-            { value: "GMA", label: "GMA" },
-            { value: "Rappler", label: "Rappler" },
-            { value: "Inquirer", label: "Inquirer" },
-            { value: "Manila Times", label: "Manila Times" },
-            { value: "Philstar", label: "Philstar" },
-            { value: "Sunstar", label: "Sunstar" },
-            { value: "Manila Bulletin", label: "Manila Bulletin" },
-          ]}
+          sources={PH_SOURCES_WITH_ALL}
         />
 
         {!rows?.length ? (

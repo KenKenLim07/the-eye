@@ -11,6 +11,10 @@ from app.scrapers.base import launch_browser
 from datetime import datetime
 import re
 from app.scrapers.utils import resolve_category_pair
+from app.scrapers.support.db_dedupe import (
+    filter_existing_article_urls,
+    unique_canonical_urls,
+)
 # Feature flags (env-driven) for gradual rollout
 import os
 
@@ -266,6 +270,31 @@ class GMAScraper:
         except Exception:
             pass
 
+    def _harden_context(self, context):
+        # Same logic as _harden_page, but applied once per context (more efficient).
+        try:
+            allowed_host = urlparse(self.BASE_URL).netloc
+            blocked_extensions = (
+                ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".ico",
+                ".css", ".woff", ".woff2", ".ttf", ".otf",
+            )
+
+            def _handler(route):
+                try:
+                    u = (route.request.url or "").lower()
+                    if u.endswith(blocked_extensions):
+                        return route.abort()
+                    host = urlparse(route.request.url).netloc
+                    if host and allowed_host not in host:
+                        return route.abort()
+                except Exception:
+                    pass
+                return route.continue_()
+
+            context.route("**/*", _handler)
+        except Exception:
+            pass
+
     def _set_headers(self, page):
         if USE_ADV_HEADERS and get_advanced_stealth_headers is not None:
             headers = get_advanced_stealth_headers()
@@ -453,17 +482,15 @@ class GMAScraper:
         return normalized, raw_category
 
 
-    def _scrape_article(self, url: str, browser: Browser) -> Optional[NormalizedArticle]:
+    def _scrape_article(self, url: str, context) -> Optional[NormalizedArticle]:
+        page = None
         try:
-            context = self._new_context(browser)
             page = context.new_page()
-            self._harden_page(page)
             self._set_headers(page)
             page.set_default_timeout(30000)
             page.set_default_navigation_timeout(30000)
             ok = self._goto_with_retry(page, url, wait_until='domcontentloaded')
             if not ok:
-                context.close()
                 return None
             try:
                 page.wait_for_selector('h1', timeout=8000)
@@ -495,11 +522,9 @@ class GMAScraper:
             soup = BeautifulSoup(page.content(), 'html.parser')
             title = self._extract_with_fallbacks(soup, self.SELECTORS["title"]) or ""
             if not title:
-                context.close()
                 return None
             # Skip lotto-related posts by title keywords
             if re.search(r"\b(lotto|swertres|stl|4d|3d|6/\d{2}|pcso)\b", title, re.IGNORECASE):
-                context.close()
                 return None
             content = self._extract_content(soup, url)
             # Retry once if it still looks like an excerpt (common: ends with ... / …).
@@ -530,22 +555,28 @@ class GMAScraper:
                 published_at=published_iso,
                 raw_category=raw_cat,
             )
-            context.close()
             return article
         except Exception as e:
             logger.error(f"GMA v1: failed {url}: {e}")
             return None
+        finally:
+            try:
+                if page is not None:
+                    page.close()
+            except Exception:
+                pass
 
     def scrape_latest(self, max_articles: int = 3) -> ScrapingResult:
         start = time.time()
         articles: List[NormalizedArticle] = []
         errors: List[str] = []
+        discovery_existing_urls: set[str] = set()
         logger.info(f"GMA v1: flags USE_ADV_HEADERS={USE_ADV_HEADERS}, USE_HUMAN_DELAY={USE_HUMAN_DELAY}, USE_URL_FILTER={USE_URL_FILTER}")
         try:
             with launch_browser() as browser:
                 context = self._new_context(browser)
+                self._harden_context(context)
                 page = context.new_page()
-                self._harden_page(page)
                 self._set_headers(page)
                 page.set_default_timeout(30000)
                 page.set_default_navigation_timeout(30000)
@@ -585,14 +616,27 @@ class GMAScraper:
 
                 logger.info(f"GMA v1: found {len(urls)} URLs")
 
-                for i, url in enumerate(urls[:max_articles]):
-                    art = self._scrape_article(url, browser)
+                candidates = unique_canonical_urls(urls)
+                to_scrape, existing = filter_existing_article_urls(candidates)
+                discovery_existing_urls = existing
+                logger.info(
+                    "GMA discovery: raw=%s unique=%s existing_in_db=%s new_to_scrape=%s",
+                    len(urls),
+                    len(candidates),
+                    len(existing),
+                    len(to_scrape),
+                )
+
+                for i, url in enumerate(to_scrape):
+                    if len(articles) >= max_articles:
+                        break
+                    art = self._scrape_article(url, context)
                     if art:
                         articles.append(art)
                         logger.info(f"GMA v1: scraped {art.title}")
                     else:
                         errors.append(f"failed to extract {url}")
-                    if i < len(urls[:max_articles]) - 1:
+                    if len(articles) < max_articles and i < len(to_scrape) - 1:
                         self._human_delay()
 
                 context.close()
@@ -615,6 +659,7 @@ class GMAScraper:
                 "paths_configured": min(max_paths, len(self.START_PATHS)) if "max_paths" in locals() else len(self.START_PATHS),
                 "paths_scanned": paths_scanned if "paths_scanned" in locals() else 0,
                 "urls_discovered": len(urls) if "urls" in locals() else 0,
+                "existing_in_db": len(discovery_existing_urls),
             }
         }
         logger.info(f"GMA v1: completed {len(articles)} articles, {len(errors)} errors in {total:.2f}s")

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
+import { PH_SOURCES } from "@/lib/sources";
 
 interface Article {
   id: string | number;
@@ -17,14 +18,7 @@ export async function GET(req: NextRequest) {
     const limit = Math.min(Number(searchParams.get("limit") || 20), 50);
     
     // Define all news sources
-    const sources = [
-      "GMA",
-      "Rappler", 
-      "Inquirer",
-      "Philstar",
-      "Sunstar",
-      "Manila Bulletin"
-    ];
+    const sources = [...PH_SOURCES];
 
     // Create parallel queries for all sources
     const queries = sources.map(source => 

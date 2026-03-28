@@ -9,6 +9,10 @@ from app.pipeline.normalize import build_article, NormalizedArticle
 from app.scrapers.base import launch_browser
 import random
 from app.scrapers.utils import resolve_category_pair
+from app.scrapers.support.db_dedupe import (
+    filter_existing_article_urls,
+    unique_canonical_urls,
+)
 
 # Feature flags (env-driven) for gradual rollout
 import os
@@ -247,7 +251,8 @@ class InquirerScraper:
     
     def _extract_article_links(self, soup: BeautifulSoup) -> List[str]:
         """Extract article URLs with validation."""
-        urls = set()
+        urls: List[str] = []
+        seen: set[str] = set()
         
         for selector in self.SELECTORS["article_links"]:
             try:
@@ -256,13 +261,14 @@ class InquirerScraper:
                     href = link.get('href')
                     if href:
                         full_url = urljoin(self.BASE_URL, href)
-                        if self._validate_url(full_url):
-                            urls.add(full_url)
+                        if self._validate_url(full_url) and full_url not in seen:
+                            seen.add(full_url)
+                            urls.append(full_url)
             except Exception as e:
                 logger.error(f"Selector '{selector}' error: {e}")
                 continue
                 
-        return list(urls)
+        return urls
     
     def _new_context(self, browser: Browser):
         """Create browser context with resource blocking for better performance."""
@@ -291,10 +297,10 @@ class InquirerScraper:
         
         return context
     
-    def _scrape_article_page(self, url: str, browser: Browser) -> Optional[NormalizedArticle]:
+    def _scrape_article_page(self, url: str, context) -> Optional[NormalizedArticle]:
         """Scrape individual article page with enhanced content extraction."""
+        page = None
         try:
-            context = self._new_context(browser)
             page = context.new_page()
             page.set_extra_http_headers(
                 get_advanced_stealth_headers() if (USE_ADV_HEADERS and get_advanced_stealth_headers is not None) else {
@@ -330,7 +336,6 @@ class InquirerScraper:
             
             if not resp or resp.status >= 400:
                 logger.warning(f"HTTP {resp.status if resp else 'unknown'} for {url}")
-                context.close()
                 return None
             
             # Wait for content to load
@@ -346,7 +351,6 @@ class InquirerScraper:
             title = self._extract_with_fallbacks(soup, self.SELECTORS["title"])
             if not title:
                 logger.warning(f"No title found for {url}")
-                context.close()
                 return None
                 
             # Enhanced content extraction
@@ -368,18 +372,24 @@ class InquirerScraper:
                 raw_category=raw_cat,
             )
             
-            context.close()
             return article
             
         except Exception as e:
             logger.error(f"Failed to scrape {url}: {e}")
             return None
+        finally:
+            try:
+                if page is not None:
+                    page.close()
+            except Exception:
+                pass
     
     def scrape_latest(self, max_articles: int = 10) -> ScrapingResult:
         """Main scraping method with comprehensive error handling and monitoring."""
         start_time = time.time()
         articles = []
         errors = []
+        discovery_existing_urls: set[str] = set()
         
         try:
             with launch_browser() as browser:
@@ -400,11 +410,21 @@ class InquirerScraper:
                     # Extract article links
                     soup = BeautifulSoup(page.content(), 'html.parser')
                     article_urls = self._extract_article_links(soup)
+                    candidates = unique_canonical_urls(article_urls)
+                    to_scrape, existing = filter_existing_article_urls(candidates)
+                    discovery_existing_urls = existing
+                    logger.info(
+                        "Inquirer discovery: raw=%s unique=%s existing_in_db=%s new_to_scrape=%s",
+                        len(article_urls),
+                        len(candidates),
+                        len(existing),
+                        len(to_scrape),
+                    )
                     
                     # Debug: log some URLs found
-                    if article_urls:
-                        logger.info(f"Found {len(article_urls)} article URLs")
-                        logger.info(f"Sample URLs: {article_urls[:3]}")
+                    if candidates:
+                        logger.info(f"Found {len(candidates)} unique candidate URLs")
+                        logger.info(f"Sample URLs: {to_scrape[:3] if to_scrape else candidates[:3]}")
                     else:
                         logger.warning("No article URLs found - checking selectors")
                         # Debug: check what links exist
@@ -414,12 +434,19 @@ class InquirerScraper:
                             sample_links = [link.get('href') for link in all_links[:5]]
                             logger.info(f"Sample links: {sample_links}")
                     
+                    try:
+                        page.close()
+                    except Exception:
+                        pass
+
                     # Scrape each article
-                    for i, url in enumerate(article_urls[:max_articles]):
+                    for i, url in enumerate(to_scrape):
+                        if len(articles) >= max_articles:
+                            break
                         try:
-                            logger.info(f"Scraping article {i+1}/{len(article_urls[:max_articles])}: {url}")
+                            logger.info(f"Scraping article {len(articles)+1}/{max_articles}: {url}")
                             
-                            article = self._scrape_article_page(url, browser)
+                            article = self._scrape_article_page(url, context)
                             if article:
                                 articles.append(article)
                                 logger.info(f"Successfully scraped: {article.title}")
@@ -427,7 +454,7 @@ class InquirerScraper:
                                 errors.append(f"Failed to extract article from {url}")
                             
                             # Stealthy rate limiting between article requests
-                            if i < len(article_urls[:max_articles]) - 1:
+                            if len(articles) < max_articles and i < len(to_scrape) - 1:
                                 self._human_delay()
                                 
                         except Exception as e:
@@ -460,7 +487,10 @@ class InquirerScraper:
             "source": "Philippine Daily Inquirer",
             "scraped_at": time.strftime("%Y-%m-%d %H:%M:%S"),
             "total_articles_found": len(articles),
-            "total_errors": len(errors)
+            "total_errors": len(errors),
+            "discovery": {
+                "existing_in_db": len(discovery_existing_urls),
+            },
         }
         
         logger.info(f"Scraping completed: {len(articles)} articles, {len(errors)} errors in {total_time:.2f}s")

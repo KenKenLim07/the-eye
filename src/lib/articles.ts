@@ -118,7 +118,7 @@ export async function fetchAllArticles(limit: number = 10): Promise<Record<strin
     
     const data = await response.json();
     const initial = data.articles_by_source || {};
-    const canonicalSources = [
+    const requiredSources = [
       "GMA",
       "Rappler",
       "Inquirer",
@@ -127,6 +127,8 @@ export async function fetchAllArticles(limit: number = 10): Promise<Record<strin
       "Sunstar",
       "Manila Bulletin",
     ];
+    const optionalSources = ["ABS-CBN"];
+    const canonicalSources = [...requiredSources, ...optionalSources];
 
     const countFromMap = (map: Record<string, unknown>): number => {
       return Object.values(map).reduce((sum: number, arr: unknown) => {
@@ -136,14 +138,14 @@ export async function fetchAllArticles(limit: number = 10): Promise<Record<strin
 
     // Self-heal once if all sources are empty due to a transient stale cache snapshot.
     const totalInitial = countFromMap(initial);
-    const missingSources = canonicalSources.filter((src) => {
+    const missingSources = requiredSources.filter((src) => {
       const rows = initial[src];
       return !Array.isArray(rows) || rows.length === 0;
     });
-    const nonEmptySourceCount = canonicalSources.length - missingSources.length;
+    const nonEmptySourceCount = requiredSources.length - missingSources.length;
     const shouldRefresh =
       totalInitial === 0 ||
-      (missingSources.length > 0 && nonEmptySourceCount >= canonicalSources.length - 1);
+      (missingSources.length > 0 && nonEmptySourceCount >= requiredSources.length - 1);
 
     if (shouldRefresh) {
       const retry = await fetch(`${backendUrl}/articles/home-optimized?limit_per_source=${limit}&refresh=true`, {
@@ -195,7 +197,8 @@ export async function fetchAllArticlesWithSentiment(limit: number = 10): Promise
     "Sunstar",
     "Manila Bulletin",
     "Manila Times",
-    "Rappler"
+    "Rappler",
+    "ABS-CBN",
   ];
 
   // Resolve backend URL with safe default for local dev

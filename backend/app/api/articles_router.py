@@ -50,8 +50,9 @@ async def get_home_articles(limit_per_source: int = 10, refresh: bool = False):
     sb = get_supabase()
 
     try:
-        # Define canonical sources shown on the homepage
-        sources = [
+        # Define canonical sources shown on the homepage.
+        # ABS-CBN is optional because it is Akamai-sensitive (often blocked unless run in headed mode).
+        required_sources = [
             "GMA",
             "Rappler",
             "Inquirer",
@@ -60,6 +61,10 @@ async def get_home_articles(limit_per_source: int = 10, refresh: bool = False):
             "Sunstar",
             "Manila Bulletin",
         ]
+        optional_sources = [
+            "ABS-CBN",
+        ]
+        sources = required_sources + optional_sources
 
         articles_by_source = {}
         source_errors = {}
@@ -83,8 +88,8 @@ async def get_home_articles(limit_per_source: int = 10, refresh: bool = False):
 
         total_found = sum(len(v or []) for v in articles_by_source.values())
         all_empty = total_found == 0
-        missing_sources = [src for src, rows in articles_by_source.items() if not (rows or [])]
-        partial_empty = 0 < len(missing_sources) < len(sources)
+        missing_sources = [src for src in required_sources if not (articles_by_source.get(src) or [])]
+        partial_empty = 0 < len(missing_sources) < len(required_sources)
 
         result_data = {"articles_by_source": articles_by_source}
 

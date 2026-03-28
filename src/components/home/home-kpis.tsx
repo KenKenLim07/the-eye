@@ -20,11 +20,12 @@ type Props = {
   articles24h: number;
   coveragePct: number | null;
   sentiment: Sentiment;
+  sources: string[];
 };
 
 const SESSION_KEY = "ph-eye:kpi_countup_v1";
 
-export default function HomeKpis({ totalArticles, articles24h, coveragePct, sentiment }: Props) {
+export default function HomeKpis({ totalArticles, articles24h, coveragePct, sentiment, sources }: Props) {
   const [play, setPlay] = useState(false);
 
   useLayoutEffect(() => {
@@ -96,9 +97,9 @@ export default function HomeKpis({ totalArticles, articles24h, coveragePct, sent
             </span>
             <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">Sources</div>
           </div>
-          <div className="u-serif text-xl sm:text-3xl font-semibold tabular-nums">7</div>
+          <div className="u-serif text-xl sm:text-3xl font-semibold tabular-nums">{Math.max(0, sources?.length || 0)}</div>
           <div className="hidden sm:block text-xs text-muted-foreground mt-1">
-            GMA, Rappler, Inquirer, Manila Times, Philstar, Sunstar, Manila Bulletin
+            {(sources || []).join(", ")}
           </div>
         </CardContent>
       </Card>

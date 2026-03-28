@@ -7,7 +7,7 @@ export async function POST() {
     const now = new Date();
     const articles = [
       {
-        source: "ABS-CBN News",
+        source: "ABS-CBN",
         category: "Politics",
         title: "Senate to probe proposed policy changes",
         url: "https://news.abs-cbn.com/mocked-1",
@@ -15,7 +15,7 @@ export async function POST() {
         published_at: now.toISOString(),
       },
       {
-        source: "GMA News Online",
+        source: "GMA",
         category: "Business",
         title: "Peso gains as markets rally",
         url: "https://www.gmanetwork.com/news/mocked-2",
@@ -23,7 +23,7 @@ export async function POST() {
         published_at: now.toISOString(),
       },
       {
-        source: "Philippine Star",
+        source: "Philstar",
         category: "Sports",
         title: "Gilas secures close win in qualifiers",
         url: "https://www.philstar.com/mocked-3",

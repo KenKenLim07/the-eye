@@ -75,10 +75,14 @@ Frontend (`.env.local`):
 - `NEXT_PUBLIC_BACKEND_URL` (default used in code: `http://localhost:8000`)
 - Optional: `NEXT_PUBLIC_ANALYTICS_SOURCE`
 
-2. Start backend services (Redis + API + worker + beat)
+2. Start backend services (Redis + API + workers + beat)
 
 ```bash
 docker compose up -d redis api worker beat
+
+# Optional (recommended if you want ABS-CBN):
+# ABS-CBN is often blocked in headless mode, so it runs on a separate headed worker (Xvfb).
+docker compose up -d worker_headed
 
 # Linux-only (optional overrides):
 docker compose -f docker-compose.yml -f docker-compose.linux.yml up -d redis api worker beat
@@ -86,6 +90,9 @@ docker compose -f docker-compose.yml -f docker-compose.linux.yml up -d redis api
 
 ```powershell
 docker compose up -d redis api worker beat
+
+# Optional (recommended if you want ABS-CBN):
+docker compose up -d worker_headed
 ```
 
 API will be on `http://localhost:8000`.
@@ -151,6 +158,15 @@ Supported `source` values:
 - `rappler`
 - `sunstar`
 - `manila_times`
+
+### ABS-CBN note (Akamai / headed Chromium)
+
+ABS-CBN is more likely to block Playwright **headless** Chromium. This repo runs ABS-CBN on a dedicated headed worker:
+- Service: `worker_headed` (runs under `xvfb-run` inside Docker; no browser window appears on your host)
+- Queue: `scrape_headed`
+- Env: `PLAYWRIGHT_HEADLESS=false` (set only on `worker_headed`)
+
+To enable scheduled runs (optional), set `ENABLE_ABS_CBN_SCRAPER=1` in `backend/.env` and keep `worker_headed` running.
 
 Queue a job:
 

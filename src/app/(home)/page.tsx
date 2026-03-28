@@ -9,6 +9,7 @@ import LatestFeed from "@/components/home/latest-feed";
 import { formatDateTime } from "@/lib/utils/date";
 import HomeKpis from "@/components/home/home-kpis";
 import { unstable_cache } from "next/cache";
+import { PH_SOURCES } from "@/lib/sources";
 
 // In production we often run without a deployed backend; force dynamic so Supabase reads happen at request-time
 // instead of being snapshotted during build (which can result in a "blank" homepage until the next revalidate).
@@ -24,15 +25,7 @@ type HomeStats = {
 };
 
 async function fetchHomeArticlesFromSupabase(limitPerSource: number): Promise<Record<string, Article[]>> {
-  const sources = [
-    "GMA",
-    "Rappler",
-    "Inquirer",
-    "Manila Times",
-    "Philstar",
-    "Sunstar",
-    "Manila Bulletin",
-  ];
+  const sources = [...PH_SOURCES];
 
   const results = await Promise.all(
     sources.map(async (src) => {
@@ -301,6 +294,7 @@ export default async function Home() {
     "Philstar",
     "Sunstar",
     "Manila Bulletin",
+    "ABS-CBN",
   ];
 
   // Normalize function: lowercase and remove non-alphanumerics for resilient matching
@@ -314,6 +308,7 @@ export default async function Home() {
     Philstar: ["philstar", "philstarcom", "philstar\u002Ecom", "philstarcomph"],
     Sunstar: ["sunstar", "sunstarph"],
     "Manila Bulletin": ["manilabulletin", "mb", "manila\u002Ebulletin"],
+    "ABS-CBN": ["abscbn", "abscbnnews", "abscbncom", "newsabscbn"],
   };
 
   // Log raw incoming keys and counts to aid diagnosis
@@ -481,6 +476,7 @@ export default async function Home() {
               negative: sentimentForCard.negative,
               unlabeled: sentimentForCard.unlabeled,
             }}
+            sources={canonicalOrder}
           />
         </div>
 
@@ -529,6 +525,12 @@ export default async function Home() {
             articles={enrichedBySource["Manila Bulletin"] || []} 
             title="Manila Bulletin" 
             sourceValue="Manila Bulletin" 
+            collapsible
+          />
+          <ArticleRowServer
+            articles={enrichedBySource["ABS-CBN"] || []}
+            title="ABS-CBN"
+            sourceValue="ABS-CBN"
             collapsible
           />
         </div>

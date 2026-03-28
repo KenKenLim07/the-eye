@@ -1,6 +1,7 @@
 import MainLayout from "@/components/layout/main-layout";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { PH_SOURCES } from "@/lib/sources";
 
 export default function Loading() {
   return (
@@ -22,7 +23,7 @@ export default function Loading() {
             <Skeleton className="h-4 w-40" />
           </div>
           <div className="flex items-center gap-2 overflow-x-auto pb-1 -mx-1 px-1 sm:flex-wrap sm:overflow-visible sm:pb-0 sm:mx-0 sm:px-0">
-            {Array.from({ length: 7 }).map((_, i) => (
+            {Array.from({ length: PH_SOURCES.length }).map((_, i) => (
               <Skeleton key={i} className="h-11 w-24 shrink-0" />
             ))}
           </div>

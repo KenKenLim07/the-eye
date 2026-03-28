@@ -10,6 +10,7 @@ import { formatDateTime } from "@/lib/utils/date";
 import { supabase } from "@/lib/supabase/client";
 import AnalyticsFiltersSheet from "@/components/analytics/analytics-filters-sheet";
 import ActiveFilters from "@/components/analytics/active-filters";
+import { PH_SOURCES_WITH_ALL } from "@/lib/sources";
 import Link from "next/link";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -46,16 +47,7 @@ type SnapshotRow = {
   max_entities: number | null;
 };
 
-const SOURCES = [
-  { value: "all", label: "All Sources" },
-  { value: "GMA", label: "GMA" },
-  { value: "Inquirer", label: "Inquirer" },
-  { value: "Manila Bulletin", label: "Manila Bulletin" },
-  { value: "Manila Times", label: "Manila Times" },
-  { value: "Rappler", label: "Rappler" },
-  { value: "Sunstar", label: "Sunstar" },
-  { value: "Philstar", label: "Philstar" },
-];
+const SOURCES = PH_SOURCES_WITH_ALL;
 
 const PERIODS = [
   { value: "7d", label: "Last 7 Days" },

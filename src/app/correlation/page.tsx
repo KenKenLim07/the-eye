@@ -10,6 +10,7 @@ import MainLayout from "@/components/layout/main-layout";
 import { supabaseUntyped } from "@/lib/supabase/client";
 import AnalyticsFiltersSheet from "@/components/analytics/analytics-filters-sheet";
 import ActiveFilters from "@/components/analytics/active-filters";
+import { PH_SOURCES_WITH_ALL } from "@/lib/sources";
 import { Skeleton } from "@/components/ui/skeleton";
 
 interface CorrelationData {
@@ -77,16 +78,7 @@ const CorrelationMatrixSkeleton = () => (
   </div>
 );
 
-const SOURCES = [
-  { value: "all", label: "All Sources" },
-  { value: "GMA", label: "GMA" },
-  { value: "Inquirer", label: "Inquirer" },
-  { value: "Manila Bulletin", label: "Manila Bulletin" },
-  { value: "Manila Times", label: "Manila Times" },
-  { value: "Rappler", label: "Rappler" },
-  { value: "Sunstar", label: "Sunstar" },
-  { value: "Philstar", label: "Philstar" }
-];
+const SOURCES = PH_SOURCES_WITH_ALL;
 
 const PERIODS = [
   { value: "7d", label: "Last 7 Days" },

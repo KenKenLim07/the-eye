@@ -15,6 +15,11 @@ import urllib.request
 import json
 # Feature flags (env-driven) for gradual rollout
 import os
+from app.core.url import canonicalize_url
+from app.scrapers.support.db_dedupe import (
+    filter_existing_article_urls,
+    unique_canonical_urls,
+)
 
 
 def _env_flag(name: str, default: bool = False) -> bool:
@@ -665,43 +670,65 @@ class ManilaBulletinScraper:
         return data
 
     def _scrape_article(self, url: str, browser: Browser) -> Optional[NormalizedArticle]:
+        # Backward-compat entrypoint; prefer using _scrape_article_with_context.
         try:
-            attempts = 0
-            last_error: Optional[Exception] = None
-            while attempts < 2:
-                attempts += 1
-                context = browser.new_context(
-                    user_agent=self.USER_AGENT,
-                    extra_http_headers={"Referer": self.BASE_URL},
-                    ignore_https_errors=True,
-                )
-                page = context.new_page()
-                # Block heavy/static resources and third-party requests to reduce timeouts
+            with launch_browser() as browser:
+                context = self._new_context(browser)
                 try:
-                    page.route("**/*", lambda route: (
-                        route.abort()
-                        if any(route.request.url.lower().endswith(ext) for ext in (
-                            ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".ico", ".css", ".woff", ".woff2", ".ttf", ".otf"))
-                        or (not route.request.url.startswith(self.BASE_URL))
-                        else route.continue_()
-                    ))
+                    return self._scrape_article_with_context(url, context)
+                finally:
+                    try:
+                        context.close()
+                    except Exception:
+                        pass
+        except Exception as e:
+            logger.error(f"Manila Bulletin scrape failed for {url}: {e}")
+            return None
+
+    def _new_context(self, browser: Browser):
+        context = browser.new_context(
+            user_agent=self.USER_AGENT,
+            extra_http_headers={"Referer": self.BASE_URL},
+            ignore_https_errors=True,
+        )
+        # Block heavy/static resources and third-party requests to reduce timeouts
+        try:
+            blocked_ext = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".ico", ".css", ".woff", ".woff2", ".ttf", ".otf")
+
+            def _handler(route):
+                try:
+                    u = (route.request.url or "").lower()
+                    if u.endswith(blocked_ext):
+                        return route.abort()
+                    # Keep first-party only (avoids ad/analytics timeouts)
+                    if not (route.request.url or "").startswith(self.BASE_URL):
+                        return route.abort()
                 except Exception:
                     pass
+                return route.continue_()
+
+            context.route("**/*", _handler)
+        except Exception:
+            pass
+        return context
+
+    def _scrape_article_with_context(self, url: str, context) -> Optional[NormalizedArticle]:
+        page = None
+        last_error: Optional[Exception] = None
+        for attempt in range(2):
+            try:
+                page = context.new_page()
                 page.set_default_navigation_timeout(30_000)
                 page.set_default_timeout(30_000)
-                self._human_delay()
+                if attempt == 0:
+                    self._human_delay()
                 try:
                     # Prefer domcontentloaded for speed; load can hang on ads/analytics
                     page.goto(url, wait_until="domcontentloaded")
                 except Exception as e:
                     last_error = e
-                    try:
-                        page.goto(url)
-                        page.wait_for_load_state("domcontentloaded", timeout=15_000)
-                    except Exception as e2:
-                        last_error = e2
-                        context.close()
-                        continue
+                    page.goto(url)
+                    page.wait_for_load_state("domcontentloaded", timeout=15_000)
                 # Attempt to wait for some content to appear but don't block too long
                 try:
                     page.wait_for_selector("article, .entry-content, .post-content", timeout=5_000)
@@ -712,7 +739,6 @@ class ManilaBulletinScraper:
 
                 title = jsonld.get("headline") or self._extract_with_fallbacks(soup, self.SELECTORS["title"]) or ""
                 if not title:
-                    context.close()
                     continue
                 content = self._sanitize_text(jsonld.get("articleBody") or self._extract_content(soup))
                 raw_published = jsonld.get("datePublished") or self._extract_with_fallbacks(soup, self.SELECTORS["published_date"]) or None
@@ -725,15 +751,21 @@ class ManilaBulletinScraper:
                     content=content,
                     published_at=published_iso,
                 )
-                context.close()
                 return article
-            # All attempts failed
-            if last_error:
-                logger.error(f"Manila Bulletin scrape failed for {url}: {last_error}")
-            return None
-        except Exception as e:
-            logger.error(f"Manila Bulletin scrape failed for {url}: {e}")
-            return None
+            except Exception as e:
+                last_error = e
+                continue
+            finally:
+                try:
+                    if page is not None:
+                        page.close()
+                except Exception:
+                    pass
+                page = None
+
+        if last_error:
+            logger.error(f"Manila Bulletin scrape failed for {url}: {last_error}")
+        return None
 
 
     def _discover_links_from_homepage(self, max_links: int = 20) -> List[str]:
@@ -755,6 +787,7 @@ class ManilaBulletinScraper:
         articles: List[NormalizedArticle] = []
         errors: List[str] = []
         discovered: List[str] = []
+        discovery_existing_urls: set[str] = set()
         
         # 1) First try homepage discovery (fastest and most reliable)
         homepage_links = []
@@ -846,13 +879,26 @@ class ManilaBulletinScraper:
         candidates: List[str] = []
         seen = set()
         for u in discovered:
-            if u not in seen and self._validate_url(u):
-                seen.add(u)
-                candidates.append(u)
+            cu = canonicalize_url(u)
+            if cu and cu not in seen and self._validate_url(cu):
+                seen.add(cu)
+                candidates.append(cu)
 
         # Safety cap to avoid over-scraping
         if len(candidates) > self.MAX_CANDIDATES:
             candidates = candidates[:self.MAX_CANDIDATES]
+
+        candidates = unique_canonical_urls(candidates)
+        to_scrape, existing = filter_existing_article_urls(candidates)
+        discovery_existing_urls = existing
+        logger.info(
+            "MB discovery: raw=%s unique=%s existing_in_db=%s new_to_scrape=%s cap=%s",
+            len(discovered),
+            len(candidates),
+            len(existing),
+            len(to_scrape),
+            self.MAX_CANDIDATES,
+        )
 
         # Compact JSON-style summary for easier searching/alerting
         discovery_summary = {
@@ -872,12 +918,17 @@ class ManilaBulletinScraper:
         # Scrape articles
         try:
             with launch_browser() as browser:
-                for url in candidates:
+                context = self._new_context(browser)
+                for url in to_scrape:
                     if len(articles) >= max_articles:
                         break
-                    art = self._scrape_article(url, browser)
+                    art = self._scrape_article_with_context(url, context)
                     if art:
                         articles.append(art)
+                try:
+                    context.close()
+                except Exception:
+                    pass
         except Exception as e:
             errors.append(str(e))
         
@@ -886,8 +937,9 @@ class ManilaBulletinScraper:
         meta = {
             'domain': 'mb.com.ph',
             'discovered_total': len(discovered),
-            'candidates_used': len(candidates),
+            'candidates_used': len(to_scrape),
             'max_candidates': self.MAX_CANDIDATES,
+            'existing_in_db': len(discovery_existing_urls),
         }
         if len(articles) == 0:
             logger.warning("MB scrape produced 0 articles; verify selectors and content extraction")

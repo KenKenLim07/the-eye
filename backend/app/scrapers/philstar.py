@@ -11,6 +11,10 @@ from app.scrapers.base import launch_browser
 from datetime import datetime
 import re
 from app.scrapers.utils import resolve_category_pair
+from app.scrapers.support.db_dedupe import (
+    filter_existing_article_urls,
+    unique_canonical_urls,
+)
 
 # Feature flags (env-driven) for gradual rollout
 import os
@@ -414,10 +418,10 @@ class PhilStarScraper:
         return normalized, raw_category
 
 
-    def _scrape_article(self, url: str, browser: Browser) -> Optional[NormalizedArticle]:
+    def _scrape_article(self, url: str, context) -> Optional[NormalizedArticle]:
         """Scrape individual article."""
+        page = None
         try:
-            context = self._new_context(browser)
             page = context.new_page()
             page.set_extra_http_headers(
                 get_advanced_stealth_headers() if (USE_ADV_HEADERS and get_advanced_stealth_headers is not None) else {
@@ -440,7 +444,6 @@ class PhilStarScraper:
                 pass
                 
             soup = BeautifulSoup(page.content(), 'html.parser')
-            context.close()
             
             # Extract article data
             title = self._extract_with_fallbacks(soup, self.SELECTORS["title"])
@@ -508,12 +511,19 @@ class PhilStarScraper:
         except Exception as e:
             logger.error(f"Failed to scrape {url}: {e}")
             return None
+        finally:
+            try:
+                if page is not None:
+                    page.close()
+            except Exception:
+                pass
 
     def scrape_latest(self, max_articles: int = 3) -> ScrapingResult:
         """Main scraping method."""
         start_time = time.time()
         articles = []
         errors = []
+        discovery_existing_urls: set[str] = set()
         
         logger.info("Starting PhilStar scraping session")
         logger.info(f"PhilStar flags USE_ADV_HEADERS={USE_ADV_HEADERS}, USE_HUMAN_DELAY={USE_HUMAN_DELAY}, USE_URL_FILTER={USE_URL_FILTER}")
@@ -526,12 +536,26 @@ class PhilStarScraper:
                 if not article_urls:
                     raise Exception("No candidate URLs discovered from homepage/sections")
 
-                # Scrape each article
-                for i, url in enumerate(article_urls[:max_articles]):
-                    try:
-                        logger.info(f"Scraping article {i+1}/{len(article_urls[:max_articles])}: {url}")
+                candidates = unique_canonical_urls(article_urls)
+                to_scrape, existing = filter_existing_article_urls(candidates)
+                discovery_existing_urls = existing
+                logger.info(
+                    "PhilStar discovery: raw=%s unique=%s existing_in_db=%s new_to_scrape=%s",
+                    len(article_urls),
+                    len(candidates),
+                    len(existing),
+                    len(to_scrape),
+                )
 
-                        article = self._scrape_article(url, browser)
+                context = self._new_context(browser)
+                # Scrape each article
+                for i, url in enumerate(to_scrape):
+                    if len(articles) >= max_articles:
+                        break
+                    try:
+                        logger.info(f"Scraping article {len(articles)+1}/{max_articles}: {url}")
+
+                        article = self._scrape_article(url, context)
                         if article:
                             articles.append(article)
                             logger.info(f"Successfully scraped: {article.title}")
@@ -539,7 +563,7 @@ class PhilStarScraper:
                             errors.append(f"Failed to extract article from {url}")
 
                         # Stealthy rate limiting between article requests
-                        if i < len(article_urls[:max_articles]) - 1:
+                        if len(articles) < max_articles and i < len(to_scrape) - 1:
                             self._human_delay()
 
                     except Exception as e:
@@ -547,6 +571,11 @@ class PhilStarScraper:
                         errors.append(error_msg)
                         logger.error(error_msg)
                         continue
+
+                try:
+                    context.close()
+                except Exception:
+                    pass
                     
         except Exception as e:
             error_msg = f"Critical scraping error: {str(e)}"
@@ -566,7 +595,10 @@ class PhilStarScraper:
             "scraped_at": time.strftime("%Y-%m-%d %H:%M:%S"),
             "total_articles_found": len(articles),
             "total_errors": len(errors),
-            "discovery": discover_meta if "discover_meta" in locals() else {},
+            "discovery": {
+                **(discover_meta if "discover_meta" in locals() else {}),
+                "existing_in_db": len(discovery_existing_urls),
+            },
         }
         
         logger.info(f"Scraping completed: {len(articles)} articles, {len(errors)} errors in {total_time:.2f}s")

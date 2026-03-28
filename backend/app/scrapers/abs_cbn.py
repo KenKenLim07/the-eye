@@ -40,6 +40,13 @@ USE_ADV_HEADERS = _env_flag("USE_ADV_HEADERS", False)
 USE_HUMAN_DELAY = _env_flag("USE_HUMAN_DELAY", False)
 SCRAPER_CONTENT_MAX_CHARS = _env_int("SCRAPER_CONTENT_MAX_CHARS", 8000)
 
+# Resource blocking knobs (tune without changing code)
+ABS_CBN_BLOCK_STYLESHEETS = _env_flag("ABS_CBN_BLOCK_STYLESHEETS", True)
+ABS_CBN_BLOCK_IMAGES = _env_flag("ABS_CBN_BLOCK_IMAGES", True)
+ABS_CBN_BLOCK_FONTS = _env_flag("ABS_CBN_BLOCK_FONTS", True)
+ABS_CBN_BLOCK_MEDIA = _env_flag("ABS_CBN_BLOCK_MEDIA", True)
+ABS_CBN_BLOCK_TRACKERS = _env_flag("ABS_CBN_BLOCK_TRACKERS", True)
+
 try:
     from app.scrapers.utils import (
         get_advanced_stealth_headers,
@@ -243,15 +250,45 @@ class ABSCBNScraper:
     def _harden_page(self, page):
         """Block tracking and heavy resources."""
         try:
-            page.route("**/*", lambda route: (
-                route.abort() if any([
-                    "google-analytics.com" in route.request.url,
-                    "googletagmanager.com" in route.request.url,
-                    "facebook.com" in route.request.url,
-                    "doubleclick.net" in route.request.url,
-                    route.request.resource_type in ["image", "media", "font"],
-                ]) else route.continue_()
-            ))
+            blocked_types = set()
+            if ABS_CBN_BLOCK_IMAGES:
+                blocked_types.add("image")
+            if ABS_CBN_BLOCK_MEDIA:
+                blocked_types.add("media")
+            if ABS_CBN_BLOCK_FONTS:
+                blocked_types.add("font")
+            if ABS_CBN_BLOCK_STYLESHEETS:
+                blocked_types.add("stylesheet")
+
+            tracker_domains = [
+                "google-analytics.com",
+                "googletagmanager.com",
+                "doubleclick.net",
+                "googlesyndication.com",
+                "adsystem.com",
+                "scorecardresearch.com",
+                "quantserve.com",
+                "facebook.com",
+                "connect.facebook.net",
+                "twitter.com",
+                "t.co",
+                "taboola.com",
+                "outbrain.com",
+            ]
+
+            def _handler(route):
+                try:
+                    u = (route.request.url or "").lower()
+                    rtype = route.request.resource_type
+                    if ABS_CBN_BLOCK_TRACKERS and any(d in u for d in tracker_domains):
+                        return route.abort()
+                    if rtype in blocked_types:
+                        return route.abort()
+                except Exception:
+                    pass
+                return route.continue_()
+
+            page.route("**/*", _handler)
         except:
             pass
     

@@ -34,7 +34,7 @@ services:
       - 9.9.9.9
     dns_search: []
 
-	  worker:
+  worker:
     build:
       context: .
       dockerfile: backend/Dockerfile
@@ -42,26 +42,56 @@ services:
     init: true
     restart: unless-stopped
     working_dir: /app/backend
-	    command: >
-	      sh -c "
-	      exec xvfb-run -a celery -A app.workers.celery_app:celery worker
-	        -l info
-	        -n scrape1@%h
-	        -Q scrape
-	        -c 1
-	        -Ofair
-	        --max-tasks-per-child=1
-	      "
-	    env_file: backend/.env
-	    environment:
-	      - CELERY_BROKER_URL=redis://redis:6379/0
-	      - CELERY_RESULT_BACKEND=redis://redis:6379/1
-	      - CELERYD_PREFETCH_MULTIPLIER=1
-	      - PLAYWRIGHT_HEADLESS=false
-	      # Feature flags for gradual rollout (GMA)
-	      - USE_ADV_HEADERS=true
-	      - USE_HUMAN_DELAY=true
-	      - USE_URL_FILTER=true
+    command: celery -A app.workers.celery_app:celery worker -l info -n scrape1@%h -Q scrape -c 1 -Ofair --max-tasks-per-child=1
+    env_file: backend/.env
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - CELERYD_PREFETCH_MULTIPLIER=1
+      # Feature flags for gradual rollout (GMA)
+      - USE_ADV_HEADERS=true
+      - USE_HUMAN_DELAY=true
+      - USE_URL_FILTER=true
+    volumes:
+      - ./backend:/app/backend
+      - ./:/app
+    depends_on:
+      - redis
+    shm_size: "1gb"
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+      - 1.1.1.1
+    dns_search: []
+
+  worker_headed:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: ph-eye-worker-headed
+    init: true
+    restart: unless-stopped
+    working_dir: /app/backend
+    command: >
+      sh -c "
+      exec xvfb-run -a celery -A app.workers.celery_app:celery worker
+        -l info
+        -n headed1@%h
+        -Q scrape_headed
+        -c 1
+        -Ofair
+        --max-tasks-per-child=1
+      "
+    env_file: backend/.env
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - CELERYD_PREFETCH_MULTIPLIER=1
+      - PLAYWRIGHT_HEADLESS=false
+      # Keep stealth helpers consistent with other scrapers
+      - USE_ADV_HEADERS=true
+      - USE_HUMAN_DELAY=true
+      - USE_URL_FILTER=true
     volumes:
       - ./backend:/app/backend
       - ./:/app

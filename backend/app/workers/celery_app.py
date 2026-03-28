@@ -24,10 +24,13 @@ celery.conf.update(
     # Route scraping and ML work to separate queues so we can run separate workers.
     task_queues=(
         Queue("scrape"),
+        Queue("scrape_headed"),
         Queue("ml"),
         Queue("celery"),  # fallback/default
     ),
     task_routes={
+        # ABS-CBN is Akamai-sensitive and works best in headed mode (Xvfb).
+        "app.workers.tasks.scrape_abs_cbn_task": {"queue": "scrape_headed"},
         "app.workers.tasks.*": {"queue": "scrape"},
         "app.workers.ml_tasks.*": {"queue": "ml"},
     },
@@ -81,4 +84,5 @@ if os.getenv("ENABLE_ABS_CBN_SCRAPER", "0").strip().lower() in {"1", "true", "ye
     celery.conf.beat_schedule["scrape_abs_cbn"] = {
         "task": "app.workers.tasks.scrape_abs_cbn_task",
         "schedule": schedule(3.0 * 60 * 60),  # 3 hours - heavy/slow, keep gentle
+        "options": {"queue": "scrape_headed"},
     }
