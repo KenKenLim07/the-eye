@@ -286,16 +286,9 @@ export default async function Home() {
   const tAfterOptimized = Date.now();
 
   // Normalize backend source keys to canonical labels used in UI
-  const canonicalOrder = [
-    "GMA",
-    "Rappler",
-    "Inquirer",
-    "Manila Times",
-    "Philstar",
-    "Sunstar",
-    "Manila Bulletin",
-    "ABS-CBN",
-  ];
+  // Homepage source order (chips + KPI source list + per-source rows) is driven by PH_SOURCES.
+  // Update src/lib/sources.ts to change the homepage order in one place.
+  const canonicalOrder: string[] = [...PH_SOURCES];
 
   // Normalize function: lowercase and remove non-alphanumerics for resilient matching
   const normalizeName = (s: string) => (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -485,54 +478,15 @@ export default async function Home() {
         </div>
 
         <div className="space-y-8">
-          <ArticleRowServer 
-            articles={enrichedBySource["GMA"] || []} 
-            title="GMA News" 
-            sourceValue="GMA" 
-            collapsible
-          />
-          <ArticleRowServer 
-            articles={enrichedBySource["Rappler"] || []} 
-            title="Rappler" 
-            sourceValue="Rappler" 
-            collapsible
-          />
-          <ArticleRowServer 
-            articles={enrichedBySource["Inquirer"] || []} 
-            title="Inquirer" 
-            sourceValue="Inquirer" 
-            collapsible
-          />
-          <ArticleRowServer 
-            articles={enrichedBySource["Manila Times"] || []} 
-            title="Manila Times" 
-            sourceValue="Manila Times"
-            collapsible
-          />
-          <ArticleRowServer 
-            articles={enrichedBySource["Philstar"] || []} 
-            title="Philstar" 
-            sourceValue="Philstar" 
-            collapsible
-          />
-          <ArticleRowServer 
-            articles={enrichedBySource["Sunstar"] || []} 
-            title="Sunstar" 
-            sourceValue="Sunstar" 
-            collapsible
-          />
-          <ArticleRowServer 
-            articles={enrichedBySource["Manila Bulletin"] || []} 
-            title="Manila Bulletin" 
-            sourceValue="Manila Bulletin" 
-            collapsible
-          />
-          <ArticleRowServer
-            articles={enrichedBySource["ABS-CBN"] || []}
-            title="ABS-CBN"
-            sourceValue="ABS-CBN"
-            collapsible
-          />
+          {canonicalOrder.map((source) => (
+            <ArticleRowServer
+              key={source}
+              articles={enrichedBySource[source] || []}
+              title={source === "GMA" ? "GMA News" : source}
+              sourceValue={source}
+              collapsible
+            />
+          ))}
         </div>
       </div>
     </MainLayout>
