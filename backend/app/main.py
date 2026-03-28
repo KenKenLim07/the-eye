@@ -9,7 +9,7 @@ from app.api.scrape_router import router as scrape_router
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="PH Eye Backend", version="0.1.0")
+    app = FastAPI(title="PH VibeCheck AI Backend", version="0.1.0")
 
     # Keep CORS config identical to previous main.py to avoid frontend breakage.
     app.add_middleware(

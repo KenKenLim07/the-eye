@@ -10,7 +10,7 @@ export default function Header() {
               <div className="h-8 w-8 rounded-lg bg-primary flex items-center justify-center">
                 <span className="text-primary-foreground font-bold text-sm">PH</span>
               </div>
-              <span className="font-semibold text-lg tracking-tight">ph-eye</span>
+              <span className="font-semibold text-lg tracking-tight">PH VibeCheck AI</span>
             </Link>
           </div>
           

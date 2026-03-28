@@ -65,7 +65,7 @@ export default function ArticleQuickViewDialog(props: {
   const content = (article?.content || "").trim();
   const looksLikeExcerpt = /\.\.\.$|…$/.test(content);
   const articleIdKey = article?.id != null ? String(article.id) : null;
-  const reportedStorageKey = articleIdKey ? `ph-eye:reported_sentiment:${articleIdKey}` : null;
+  const reportedStorageKey = articleIdKey ? `ph-vibecheck-ai:reported:${articleIdKey}` : null;
 
   const [reportOpen, setReportOpen] = useState(false);
   const [reportedLabel, setReportedLabel] = useState<"positive" | "neutral" | "negative" | "other">("neutral");
@@ -249,7 +249,7 @@ export default function ArticleQuickViewDialog(props: {
                 <DialogHeader>
                   <DialogTitle>Report</DialogTitle>
                   <DialogDescription>
-                    Help us improve PH‑Eye (scrapers + NLP: DistilBERT, modified VADER, spaCy) by flagging issues you notice.
+                    Help us improve PH VibeCheck AI (scrapers + NLP: DistilBERT, modified VADER, spaCy) by flagging issues you notice.
                   </DialogDescription>
                 </DialogHeader>
 
@@ -344,7 +344,7 @@ export default function ArticleQuickViewDialog(props: {
                 <DialogHeader>
                 <DialogTitle>Report</DialogTitle>
                 <DialogDescription>
-                    Help us improve PH‑Eye (scrapers + NLP: DistilBERT, modified VADER, spaCy) by flagging issues you notice.
+                    Help us improve PH VibeCheck AI (scrapers + NLP: DistilBERT, modified VADER, spaCy) by flagging issues you notice.
                 </DialogDescription>
               </DialogHeader>
 

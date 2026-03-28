@@ -36,7 +36,7 @@ def _assert_ok(name: str, fn):
 
 
 def main(argv: list[str]) -> int:
-    parser = argparse.ArgumentParser(description="PH Eye scrape->verify pipeline test (cross-platform).")
+    parser = argparse.ArgumentParser(description="PH VibeCheck AI scrape->verify pipeline test (cross-platform).")
     parser.add_argument(
         "--backend-url",
         default=os.environ.get("BACKEND_URL", "http://localhost:8000"),
@@ -105,4 +105,3 @@ if __name__ == "__main__":
     except (HTTPError, URLError, TimeoutError, OSError, ValueError) as e:
         print(f"[ERROR] {e}")
         raise
-

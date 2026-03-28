@@ -55,7 +55,7 @@ class InquirerScraper:
     """Production-ready scraper for Philippine Daily Inquirer with security hardening."""
     
     BASE_URL = "https://newsinfo.inquirer.net"
-    USER_AGENT = "Mozilla/5.0 (compatible; PH-Eye-NewsBot/1.0; +https://github.com/your-repo)"
+    USER_AGENT = "Mozilla/5.0 (compatible; PH-VibeCheck-AI-NewsBot/1.0; +https://github.com/your-repo)"
     
     # Rate limiting
     MIN_DELAY = 12.0  # seconds between requests (increased for stealth)

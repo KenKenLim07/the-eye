@@ -83,7 +83,7 @@ class ManilaBulletinScraper:
 
     # Descriptive UA with contact pointer
     USER_AGENT = (
-        "ph-eye-bot/1.0 (+https://example.com/contact) "
+        "ph-vibecheck-ai-bot/1.0 (+https://example.com/contact) "
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/125.0.0.0 Safari/537.36"

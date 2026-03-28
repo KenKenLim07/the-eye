@@ -1,6 +1,6 @@
-# PH Eye
+# PH VibeCheck AI
 
-PH Eye is a full-stack capstone project that continuously collects Philippine online news, runs lightweight NLP (sentiment + NER), and renders dashboards for trends, correlation, entities, and per-source browsing.
+PH VibeCheck AI is a full-stack capstone project that continuously collects Philippine online news, runs lightweight NLP (sentiment + NER), and renders dashboards for trends, correlation, entities, and per-source browsing.
 
 ## Features
 

@@ -51,7 +51,7 @@ def _assert_ok(name: str, retries: int, retry_delay_ms: int, fn) -> None:
 
 
 def main(argv: list[str]) -> int:
-    parser = argparse.ArgumentParser(description="PH Eye backend smoke test (cross-platform).")
+    parser = argparse.ArgumentParser(description="PH VibeCheck AI backend smoke test (cross-platform).")
     parser.add_argument(
         "--backend-url",
         default=os.environ.get("BACKEND_URL", "http://localhost:8000"),
@@ -97,4 +97,3 @@ def main(argv: list[str]) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv[1:]))
-

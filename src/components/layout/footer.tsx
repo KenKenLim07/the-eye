@@ -10,9 +10,9 @@ export default function Footer() {
             <div className="md:col-span-5 space-y-3">
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <div className="u-serif text-xl font-semibold tracking-tight">PH‑Eye</div>
+                  <div className="u-serif text-xl font-semibold tracking-tight">PH VibeCheck AI</div>
                   <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-                    Editorial analytics
+                    News vibe analytics
                   </div>
                 </div>
                 <div className="hidden sm:flex items-center gap-2">
@@ -75,9 +75,7 @@ export default function Footer() {
           </div>
 
           <div className="pt-6 border-t flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <p className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-              © {year} PH‑Eye •
-            </p>
+              <p className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">© {year} PH VibeCheck AI •</p>
             <p className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">
               Built by Jose Marie Lim • Next.js + Supabase
             </p>

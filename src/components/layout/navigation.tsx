@@ -73,8 +73,8 @@ export default function Navigation() {
           <div className="flex h-16 items-center justify-between gap-3">
             <Link href="/" className="flex items-center gap-3">
               <div className="leading-none">
-                <div className="u-serif text-xl font-semibold tracking-tight">PH‑Eye</div>
-                <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">Editorial analytics</div>
+                <div className="u-serif text-xl font-semibold tracking-tight">PH VibeCheck AI</div>
+                <div className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground">News vibe analytics</div>
               </div>
             </Link>
 
@@ -152,7 +152,7 @@ export default function Navigation() {
                   <SheetHeader className="pb-3">
                     <div className="space-y-0.5">
                       <SheetTitle className="u-serif text-lg u-sheet-stagger-item" style={{ "--i": 0 } as CSSVarProperties}>
-                        PH‑Eye
+                        PH VibeCheck AI
                       </SheetTitle>
                       <div
                         className="u-mono text-[10px] uppercase tracking-widest text-muted-foreground u-sheet-stagger-item"

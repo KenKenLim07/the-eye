@@ -32,8 +32,8 @@ const fontCode = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "Philippine News - Latest Headlines",
-  description: "Latest headlines aggregated from top Philippine news sources",
+  title: "PH VibeCheck AI",
+  description: "Philippine news vibe analytics — sentiment, trends, correlation, and entities across top sources.",
 };
 
 export default function RootLayout({

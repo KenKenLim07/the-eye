@@ -22,7 +22,7 @@ type Props = {
   sentiment: Sentiment;
 };
 
-const SESSION_KEY = "ph-eye:kpi_countup_v1";
+const SESSION_KEY = "ph-vibecheck-ai:kpi_countup_v1";
 
 export default function HomeKpis({ totalArticles, articles24h, coveragePct, sentiment }: Props) {
   const [play, setPlay] = useState(false);

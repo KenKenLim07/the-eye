@@ -7,8 +7,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export const metadata: Metadata = {
-  title: "About • PH‑Eye",
-  description: "How PH‑Eye collects news, runs sentiment/NER, and powers Trends, Correlation, and Entities dashboards.",
+  title: "About • PH VibeCheck AI",
+  description: "How PH VibeCheck AI collects news, runs sentiment/NER, and powers Trends, Correlation, and Entities dashboards.",
 };
 
 function SectionTitle({ title, subtitle }: { title: string; subtitle?: string }) {
@@ -26,10 +26,10 @@ export default function AboutPage() {
       <div className="space-y-10">
         <header className="space-y-4">
           <div className="space-y-2">
-            <h1 className="u-serif text-3xl sm:text-4xl font-semibold tracking-tight">About PH‑Eye</h1>
+            <h1 className="u-serif text-3xl sm:text-4xl font-semibold tracking-tight">About PH VibeCheck AI</h1>
             <p className="text-sm sm:text-base text-muted-foreground leading-6 max-w-3xl">
-              PH‑Eye is an editorial analytics platform that aggregates Philippine news, runs lightweight NLP (sentiment
-              + named entities), and renders dashboards to help you understand coverage patterns across sources.
+              PH VibeCheck AI is an editorial analytics platform that aggregates Philippine news, runs lightweight NLP
+              (sentiment + named entities), and renders dashboards to help you understand coverage patterns across sources.
             </p>
           </div>
 
@@ -109,7 +109,7 @@ export default function AboutPage() {
         <section className="space-y-4">
           <SectionTitle
             title="Engines (Sentiment + NER)"
-            subtitle="PH‑Eye uses a hybrid sentiment approach and a standard NER model so outputs are explainable and comparable across sources."
+            subtitle="PH VibeCheck AI uses a hybrid sentiment approach and a standard NER model so outputs are explainable and comparable across sources."
           />
 
           <div className="grid gap-4 md:grid-cols-3">
@@ -125,7 +125,7 @@ export default function AboutPage() {
               </CardHeader>
               <CardContent className="text-sm text-muted-foreground leading-6 space-y-3">
                 <p>
-                  For Tagalog/Taglish-heavy text, PH‑Eye can prefer VADER with a lightweight PH lexicon patch. For more
+                  For Tagalog/Taglish-heavy text, PH VibeCheck AI can prefer VADER with a lightweight PH lexicon patch. For more
                   English-heavy text, it can fall back to DistilBERT sentiment to reduce false-neutral outputs.
                 </p>
                 <ul className="list-disc pl-5 space-y-1">
@@ -411,7 +411,7 @@ export default function AboutPage() {
         <section className="space-y-4">
           <SectionTitle
             title="Notes (Demo Mode vs Full Mode)"
-            subtitle="PH‑Eye can run as a full stack locally, or as a frontend-only demo that reads precomputed snapshots from Supabase."
+            subtitle="PH VibeCheck AI can run as a full stack locally, or as a frontend-only demo that reads precomputed snapshots from Supabase."
           />
           <Card>
             <CardContent className="pt-6 text-sm text-muted-foreground leading-6 space-y-2">
