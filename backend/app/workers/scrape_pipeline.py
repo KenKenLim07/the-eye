@@ -6,7 +6,7 @@ from typing import Any, Callable, Mapping
 from app.observability.logs import finalize_run, start_run
 from app.core.supabase import get_supabase
 from app.pipeline.store import insert_articles
-from app.workers.ml_tasks import analyze_articles_task
+from app.workers.ml_tasks import analyze_articles_task, sync_article_sentiment_public_task
 
 logger = logging.getLogger(__name__)
 
@@ -150,6 +150,22 @@ def run_scrape_task(
                     missing_existing_ids = [aid for aid in existing_ids if aid not in analyzed_set]
                 except Exception as e:
                     logger.warning("Failed to check existing_ids sentiment coverage (will skip): %s", e)
+
+                # Repair: if bias_analysis exists but the public cache table is missing rows,
+                # sync the latest sentiment into `article_sentiment_public` (no ML compute).
+                try:
+                    pub = (
+                        sb.table("article_sentiment_public")
+                        .select("article_id")
+                        .in_("article_id", existing_ids)
+                        .execute()
+                    )
+                    pub_set = {int(r.get("article_id")) for r in (pub.data or []) if r.get("article_id") is not None}
+                    missing_public = [aid for aid in existing_ids if aid not in pub_set]
+                    if missing_public:
+                        sync_article_sentiment_public_task.apply_async(args=[missing_public], queue="ml")
+                except Exception as e:
+                    logger.warning("Failed to repair article_sentiment_public for existing_ids (skip): %s", e)
 
             analyze_ids = inserted_ids + missing_existing_ids
             if analyze_ids:

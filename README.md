@@ -168,6 +168,30 @@ ABS-CBN is more likely to block Playwright **headless** Chromium. This repo runs
 
 To enable scheduled runs (optional), set `ENABLE_ABS_CBN_SCRAPER=1` in `backend/.env` and keep `worker_headed` running.
 
+### GMA fast-path (HTTP + JSON-LD) + network debug
+
+GMA supports an optional fast-path that tries to extract full article text from structured data in the raw HTML (no Playwright rendering), then falls back to Playwright when needed.
+
+Env flags (set on the `worker` container or inline in the command):
+- `GMA_HTTP_FASTPATH=1` enables the HTTP+JSON-LD fast-path (default `0`)
+- `GMA_HTTP_DISCOVERY=1` discovers candidate links via plain HTTP (no Playwright) when fast-path is enabled (default `1`)
+- `GMA_HTTP_MIN_BODY_CHARS=600` minimum JSON-LD body length to accept (default `600`)
+- `GMA_STORY_API_FASTPATH=1` also tries GMA’s internal `data.gmanetwork.com/.../story/<id>.gz` payload when JSON-LD is missing/too short (default `1`)
+- `GMA_STORY_API_CODES=227,394` candidate GMA story API codes to try by story id (default `227,394`)
+- `GMA_HTTP_TIMEOUT_CONNECT_S=5`, `GMA_HTTP_TIMEOUT_READ_S=15` HTTP timeout tuning (defaults shown)
+- `GMA_NETWORK_DEBUG=1` logs JSON/XHR endpoints observed while loading a page (default `0`)
+- `GMA_NETWORK_DEBUG_MAX=30` max captured responses (default `30`)
+
+Examples:
+
+```bash
+# Run GMA with the fast-path enabled
+docker compose exec worker sh -lc 'GMA_HTTP_FASTPATH=1 python -c "from app.scrapers.gma import GMAScraper; r=GMAScraper().scrape_latest(max_articles=1); print(r.metadata); print(r.errors)"'
+
+# Debug a single GMA URL and print observed JSON/XHR endpoints
+docker compose exec worker sh -lc 'GMA_NETWORK_DEBUG=1 python -c "from app.scrapers.gma import debug_gma_url; print(debug_gma_url(\"https://www.gmanetwork.com/news/topstories/nation/123456/example-story/\"))"'
+```
+
 Queue a job:
 
 ```bash

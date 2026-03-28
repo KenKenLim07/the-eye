@@ -17,6 +17,78 @@ def _chunked(items: list, size: int) -> list[list]:
         return [items]
     return [items[i : i + size] for i in range(0, len(items), size)]
 
+def _latest_by_article_id(rows: list[dict]) -> dict[int, dict]:
+    """
+    Pick the most recent row per article_id using created_at (fallback to insertion order).
+    """
+    out: dict[int, dict] = {}
+    for r in rows or []:
+        try:
+            aid = int(r.get("article_id"))
+        except Exception:
+            continue
+        prev = out.get(aid)
+        if prev is None:
+            out[aid] = r
+            continue
+        a = str(r.get("created_at") or "")
+        b = str(prev.get("created_at") or "")
+        if a and (not b or a > b):
+            out[aid] = r
+    return out
+
+
+@shared_task(bind=True, max_retries=3, default_retry_delay=60)
+def sync_article_sentiment_public_task(self, article_ids: list[int]):
+    """
+    Backfill/repair helper:
+    - Reads latest sentiment rows from `bias_analysis`
+    - Upserts them into `article_sentiment_public`
+
+    This avoids re-running ML when `bias_analysis` already exists but the public cache is missing.
+    """
+    sb = get_supabase()
+    try:
+        fetch_chunk = int(os.getenv("ML_FETCH_CHUNK_SIZE") or "50")
+        upsert_chunk = int(os.getenv("ML_UPSERT_CHUNK_SIZE") or "500")
+
+        # Fetch bias_analysis rows (chunked).
+        rows: list[dict] = []
+        for batch in _chunked(article_ids, fetch_chunk):
+            res = (
+                sb.table("bias_analysis")
+                .select("article_id,sentiment_label,sentiment_score,created_at,model_type")
+                .eq("model_type", "sentiment")
+                .in_("article_id", batch)
+                .execute()
+            )
+            rows.extend(res.data or [])
+
+        latest = _latest_by_article_id(rows)
+        now_iso = datetime.now(timezone.utc).isoformat()
+        payload = []
+        for aid, r in latest.items():
+            payload.append(
+                {
+                    "article_id": int(aid),
+                    "sentiment_label": r.get("sentiment_label"),
+                    "sentiment_score": r.get("sentiment_score"),
+                    "updated_at": now_iso,
+                }
+            )
+
+        upserted = 0
+        if payload:
+            for batch in _chunked(payload, upsert_chunk):
+                ins = sb.table("article_sentiment_public").upsert(batch, on_conflict="article_id").execute()
+                upserted += len(ins.data or [])
+
+        return {"ok": True, "requested": len(article_ids), "found": len(payload), "upserted": upserted}
+    except Exception as e:
+        if self.request.retries < self.max_retries:
+            raise self.retry(exc=e, countdown=60 * (2 ** self.request.retries))
+        return {"ok": False, "error": str(e), "requested": len(article_ids), "found": 0, "upserted": 0}
+
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
 def analyze_articles_task(self, article_ids: list[int]):

@@ -12,8 +12,8 @@ type Props = {
   title?: string;
   source: string;
   period: string;
-  sources: Option[];
-  periods: Option[];
+  sources: ReadonlyArray<Option>;
+  periods: ReadonlyArray<Option>;
   disableSource?: boolean;
   disablePeriod?: boolean;
   onApply: (next: { source: string; period: string }) => void;
@@ -122,4 +122,3 @@ export default function AnalyticsFiltersSheet({
     </Sheet>
   );
 }
-

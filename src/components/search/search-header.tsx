@@ -14,7 +14,7 @@ export function SearchHeader(props: {
   sourceName?: string;
   queryDefault?: string;
   sourceDefault?: string;
-  sources?: SourceOption[];
+  sources?: ReadonlyArray<SourceOption>;
   rightMeta?: React.ReactNode;
 }) {
   const {

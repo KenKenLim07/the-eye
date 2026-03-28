@@ -114,16 +114,16 @@ class RapplerScraper:
             ".latest a[href*='/']",
             "section[aria-label*='Latest'] a[href*='/']",
             "section[aria-label*='Latest News'] a[href*='/']",
-            "section:has(h2:contains('Latest News')) a[href]",
-            "section:has(h2:contains('Latest news')) a[href]",
-            "section:has(h2:contains('Latest')) a[href]",
-            "h2:contains('Latest News') ~ * a[href*='/']",
+            "section:has(h2:-soup-contains('Latest News')) a[href]",
+            "section:has(h2:-soup-contains('Latest news')) a[href]",
+            "section:has(h2:-soup-contains('Latest')) a[href]",
+            "h2:-soup-contains('Latest News') ~ * a[href*='/']",
             
             # TARGET: Thematic blocks (Philippine tropical cyclones, UAAP, House, flood control)
-            "section:has(h2:contains('Philippine tropical cyclones')) a[href*='/']",
-            "section:has(h2:contains('UAAP')) a[href*='/']",
-            "section:has(h2:contains('House of Representatives')) a[href*='/']",
-            "section:has(h2:contains('flood control')) a[href*='/']",
+            "section:has(h2:-soup-contains('Philippine tropical cyclones')) a[href*='/']",
+            "section:has(h2:-soup-contains('UAAP')) a[href*='/']",
+            "section:has(h2:-soup-contains('House of Representatives')) a[href*='/']",
+            "section:has(h2:-soup-contains('flood control')) a[href*='/']",
             
             # TARGETED SELECTORS FOR LATEST ARTICLES - SURGICAL APPROACH
             # Catch specific article patterns found on latest page
