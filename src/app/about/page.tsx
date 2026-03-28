@@ -181,7 +181,7 @@ export default function AboutPage() {
                 <CardContent className="grid gap-3 md:grid-cols-2">
                   <Card className="bg-card/60">
                     <CardHeader className="pb-2">
-                      <CardTitle className="text-sm">Plain-English</CardTitle>
+                      <CardTitle className="text-sm">How it works</CardTitle>
                       <CardDescription>What you should expect to see.</CardDescription>
                     </CardHeader>
                     <CardContent className="text-sm text-muted-foreground leading-6 space-y-2">
@@ -219,7 +219,7 @@ export default function AboutPage() {
                 <CardContent className="grid gap-3 md:grid-cols-2">
                   <Card className="bg-card/60">
                     <CardHeader className="pb-2">
-                      <CardTitle className="text-sm">Plain-English</CardTitle>
+                      <CardTitle className="text-sm">How it works</CardTitle>
                       <CardDescription>What it does.</CardDescription>
                     </CardHeader>
                     <CardContent className="text-sm text-muted-foreground leading-6 space-y-2">
@@ -257,7 +257,7 @@ export default function AboutPage() {
                 <CardContent className="grid gap-3 md:grid-cols-2">
                   <Card className="bg-card/60">
                     <CardHeader className="pb-2">
-                      <CardTitle className="text-sm">Plain-English</CardTitle>
+                      <CardTitle className="text-sm">How it works</CardTitle>
                       <CardDescription>How to read it.</CardDescription>
                     </CardHeader>
                     <CardContent className="text-sm text-muted-foreground leading-6 space-y-2">
@@ -295,7 +295,7 @@ export default function AboutPage() {
                 <CardContent className="grid gap-3 md:grid-cols-2">
                   <Card className="bg-card/60">
                     <CardHeader className="pb-2">
-                      <CardTitle className="text-sm">Plain-English</CardTitle>
+                      <CardTitle className="text-sm">How it works</CardTitle>
                       <CardDescription>What the heatmap means.</CardDescription>
                     </CardHeader>
                     <CardContent className="text-sm text-muted-foreground leading-6 space-y-2">
@@ -333,7 +333,7 @@ export default function AboutPage() {
                 <CardContent className="grid gap-3 md:grid-cols-2">
                   <Card className="bg-card/60">
                     <CardHeader className="pb-2">
-                      <CardTitle className="text-sm">Plain-English</CardTitle>
+                      <CardTitle className="text-sm">How it works</CardTitle>
                       <CardDescription>What rankings show.</CardDescription>
                     </CardHeader>
                     <CardContent className="text-sm text-muted-foreground leading-6 space-y-2">
@@ -341,6 +341,10 @@ export default function AboutPage() {
                         <li>Higher rank means the name/place shows up in more articles.</li>
                         <li>It measures “how often mentioned,” not whether the topic is good or bad.</li>
                         <li>Use it to spot dominant topics and compare across time periods.</li>
+                        <li>
+                          If you see an entity sentiment score, it’s an average based on the sentiment of articles
+                          where that entity was mentioned.
+                        </li>
                       </ul>
                     </CardContent>
                   </Card>
@@ -354,7 +358,14 @@ export default function AboutPage() {
                       <ul className="list-disc pl-5 space-y-1">
                         <li>Runs NER to extract PERSON/ORG/GPE tokens from article text.</li>
                         <li>Aggregates mentions into a ranked list for the selected window.</li>
-                        <li>Average sentiment (when shown) is derived from the related article sentiment rows.</li>
+                        <li>
+                          Entity sentiment is computed by linking each entity mention back to the articles it appears
+                          in, then averaging those articles’ sentiment scores/labels.
+                        </li>
+                        <li>
+                          Because it’s derived from article sentiment, entity sentiment can be noisy (especially for
+                          mixed or purely factual reporting).
+                        </li>
                       </ul>
                     </CardContent>
                   </Card>
