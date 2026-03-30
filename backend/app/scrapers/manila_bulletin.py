@@ -52,6 +52,12 @@ except Exception:
     MB_NETWORK_DEBUG_MAX = 30
 
 try:
+    MB_CONTENT_MIN_CHARS = int(os.getenv("MB_CONTENT_MIN_CHARS", "250"))
+except Exception:
+    MB_CONTENT_MIN_CHARS = 250
+MB_CONTENT_MIN_CHARS = max(1, MB_CONTENT_MIN_CHARS)
+
+try:
     from app.scrapers.utils import (
         get_advanced_stealth_headers,
         get_human_like_delay,
@@ -260,6 +266,43 @@ class ManilaBulletinScraper:
         s = s.strip()
         return s
 
+    def _post_process_content(self, content: str) -> str:
+        """
+        Manila Bulletin pages sometimes include non-article UI text (e.g. "Related Tags")
+        or duplicate lead sections (e.g. "At A Glance"). Normalize to clean plain text.
+        """
+        s = (content or "").strip()
+        if not s:
+            return ""
+
+        # Remove leading UI labels.
+        s = re.sub(r"^\s*At A Glance\s+", "", s, flags=re.IGNORECASE)
+
+        paras = [p.strip() for p in re.split(r"\n{2,}", s) if p.strip()]
+
+        # Strip a leading "Related Tags" block (header + tag list).
+        if paras and paras[0].lower() == "related tags":
+            paras = paras[1:]
+            if paras and len(paras[0]) <= 120 and not re.search(r"[.!?]", paras[0]):
+                paras = paras[1:]
+
+        # Drop any remaining "Related Tags" paragraphs.
+        paras = [p for p in paras if p.strip().lower() != "related tags"]
+
+        # De-duplicate exact/repeated paragraphs (common when a lead summary repeats).
+        seen: set[str] = set()
+        deduped: List[str] = []
+        for p in paras:
+            key = re.sub(r"[^a-z0-9]+", "", p.lower())
+            if not key:
+                continue
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(p)
+
+        return "\n\n".join(deduped).strip()
+
     def _find_article_container(self, soup: BeautifulSoup) -> Optional[BeautifulSoup]:
         container_selectors = [
             "article",
@@ -286,7 +329,7 @@ class ManilaBulletinScraper:
         # Score by total text length of <p> inside
         def score(el: BeautifulSoup) -> int:
             try:
-                text = "\n".join(p.get_text(" ", strip=True) for p in el)
+                text = "\n".join(p.get_text(" ", strip=True) for p in el.select("p"))
                 return len(text)
             except Exception:
                 return 0
@@ -329,7 +372,7 @@ class ManilaBulletinScraper:
         container = self._find_article_container(soup) or soup
         parts: List[str] = []
         try:
-            paragraphs = container
+            paragraphs = container.select("p, li")
         except Exception:
             paragraphs = []
         def should_skip_text(txt: str) -> bool:
@@ -422,6 +465,7 @@ class ManilaBulletinScraper:
                     content = ("\n\n".join(lines))[:1500]
             except Exception:
                 pass
+        content = self._post_process_content(content)
         # Cap to avoid oversized rows
         return (content or "")[:20000]
 
@@ -739,10 +783,10 @@ class ManilaBulletinScraper:
             return None
 
         content_raw = (jsonld.get("articleBody") if isinstance(jsonld, dict) else None) or ""
-        content = self._sanitize_text(content_raw)
+        content = self._post_process_content(self._sanitize_text(content_raw))
         if len(content) < MB_HTTP_MIN_BODY_CHARS:
             # Fallback to DOM extraction from static HTML
-            content = self._sanitize_text(self._extract_content(soup))
+            content = self._post_process_content(self._sanitize_text(self._extract_content(soup)))
 
         if len(content) < MB_HTTP_MIN_BODY_CHARS:
             return None
@@ -850,7 +894,17 @@ class ManilaBulletinScraper:
                 title = jsonld.get("headline") or self._extract_with_fallbacks(soup, self.SELECTORS["title"]) or ""
                 if not title:
                     continue
-                content = self._sanitize_text(jsonld.get("articleBody") or self._extract_content(soup))
+                content = self._post_process_content(
+                    self._sanitize_text(jsonld.get("articleBody") or self._extract_content(soup))
+                )
+                if len(content) < MB_CONTENT_MIN_CHARS:
+                    logger.warning(
+                        "MB: extracted too-short content (len=%s, min=%s) for %s",
+                        len(content),
+                        MB_CONTENT_MIN_CHARS,
+                        url,
+                    )
+                    continue
                 raw_published = jsonld.get("datePublished") or self._extract_with_fallbacks(soup, self.SELECTORS["published_date"]) or None
                 published_iso = self._parse_published(raw_published)
                 article = build_article(
@@ -1102,6 +1156,10 @@ def debug_mb_url(url: str) -> dict:
                 context.close()
             except Exception:
                 pass
-            return {"ok": bool(art), "title": getattr(art, "title", None)}
+            return {
+                "ok": bool(art),
+                "title": getattr(art, "title", None),
+                "content_len": len(getattr(art, "content", None) or ""),
+            }
     except Exception as e:
         return {"ok": False, "error": str(e)}

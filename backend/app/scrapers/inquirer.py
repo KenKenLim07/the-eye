@@ -90,7 +90,12 @@ class InquirerScraper:
     """Production-ready scraper for Philippine Daily Inquirer with security hardening."""
     
     BASE_URL = "https://newsinfo.inquirer.net"
-    USER_AGENT = "Mozilla/5.0 (compatible; PH-VibeCheck-AI-NewsBot/1.0; +https://github.com/your-repo)"
+    # Use a stable, realistic UA. Some publishers aggressively block obvious bot identifiers.
+    USER_AGENT = (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/125.0.0.0 Safari/537.36"
+    )
     
     # Rate limiting
     MIN_DELAY = 12.0  # seconds between requests (increased for stealth)
@@ -132,6 +137,8 @@ class InquirerScraper:
         self.session_start = time.time()
         self.request_count = 0
         self._http_session: Optional[requests.Session] = None
+        self._last_http_status: Optional[int] = None
+        self._last_error: Optional[str] = None
 
     def _get_http_session(self) -> requests.Session:
         if self._http_session is None:
@@ -219,9 +226,11 @@ class InquirerScraper:
     def _human_delay(self):
         """Random delay to mimic human browsing behavior."""
         if USE_HUMAN_DELAY and get_human_like_delay is not None:
-            delay = get_human_like_delay()
+            delay = float(get_human_like_delay())
         else:
             delay = random.uniform(self.MIN_DELAY, self.MAX_DELAY)
+        # Guardrails: never go below the scraper's configured minimum.
+        delay = max(self.MIN_DELAY, min(delay, self.MAX_DELAY))
         logger.info(f"Waiting {delay:.1f}s before next request (stealth mode)")
         time.sleep(delay)
         
@@ -316,11 +325,15 @@ class InquirerScraper:
 
         Returns None when content is missing/too short so caller can fall back to Playwright.
         """
+        self._last_http_status = None
+        self._last_error = None
         try:
             sess = self._get_http_session()
             timeout = (INQUIRER_HTTP_TIMEOUT_CONNECT_S, INQUIRER_HTTP_TIMEOUT_READ_S)
             r = sess.get(url, headers=self._http_headers(url), timeout=timeout)
+            self._last_http_status = int(r.status_code)
             if r.status_code >= 400:
+                self._last_error = f"HTTP {r.status_code}"
                 return None
             soup = BeautifulSoup(r.text or "", "html.parser")
 
@@ -363,7 +376,8 @@ class InquirerScraper:
                 published_at=published_raw,
                 raw_category=raw_cat,
             )
-        except Exception:
+        except Exception as e:
+            self._last_error = str(e)
             return None
     
     def _extract_with_fallbacks(self, soup: BeautifulSoup, selector_list: List[str], 
@@ -430,7 +444,7 @@ class InquirerScraper:
             combined = ' '.join(content_parts)
             if SCRAPER_CONTENT_MAX_CHARS > 0 and len(combined) > SCRAPER_CONTENT_MAX_CHARS:
                 combined = combined[:SCRAPER_CONTENT_MAX_CHARS].rstrip() + "…"
-            logger.info(f"Extracted {len(content_parts)} content parts, total length: {len(combined)}")
+            logger.debug("Extracted %s content parts, total length: %s", len(content_parts), len(combined))
             return combined
         else:
             logger.warning(f"Could not extract any content from {url}")
@@ -487,6 +501,8 @@ class InquirerScraper:
     def _scrape_article_page(self, url: str, context) -> Optional[NormalizedArticle]:
         """Scrape individual article page with enhanced content extraction."""
         page = None
+        self._last_http_status = None
+        self._last_error = None
         try:
             page = context.new_page()
             dump_network = install_json_response_logger(
@@ -527,7 +543,10 @@ class InquirerScraper:
                         raise e
             
             if not resp or resp.status >= 400:
-                logger.warning(f"HTTP {resp.status if resp else 'unknown'} for {url}")
+                status = int(resp.status) if resp else None
+                self._last_http_status = status
+                self._last_error = f"HTTP {status if status is not None else 'unknown'}"
+                logger.warning(f"HTTP {status if status is not None else 'unknown'} for {url}")
                 return None
             
             # Wait for content to load
@@ -542,6 +561,7 @@ class InquirerScraper:
             # Extract article data with enhanced content extraction
             title = self._extract_with_fallbacks(soup, self.SELECTORS["title"])
             if not title:
+                self._last_error = "missing_title"
                 logger.warning(f"No title found for {url}")
                 return None
                 
@@ -565,8 +585,13 @@ class InquirerScraper:
                 except Exception:
                     pass
             
-            # Log what we found for debugging
-            logger.info(f"Article {url}: Title='{title}', Content length={len(content_text) if content_text else 0}")
+            # Log what we found for debugging (keep info output clean; use debug level).
+            logger.debug(
+                "Article %s: Title=%r Content length=%s",
+                url,
+                title,
+                len(content_text) if content_text else 0,
+            )
             
             # Build normalized article
             norm_cat, raw_cat = resolve_category_pair(url, soup)
@@ -583,6 +608,7 @@ class InquirerScraper:
             return article
             
         except Exception as e:
+            self._last_error = str(e)
             logger.error(f"Failed to scrape {url}: {e}")
             return None
         finally:
@@ -613,13 +639,15 @@ class InquirerScraper:
             # Discovery (HTTP optional) + DB preflight
             # -------------------------
             logger.info("Starting Inquirer scraping session")
+            stop_on_block = _env_flag("INQUIRER_STOP_ON_BLOCK", False)
             logger.info(
-                "Inquirer flags USE_ADV_HEADERS=%s USE_HUMAN_DELAY=%s USE_URL_FILTER=%s INQUIRER_HTTP_FASTPATH=%s INQUIRER_HTTP_DISCOVERY=%s",
+                "Inquirer flags USE_ADV_HEADERS=%s USE_HUMAN_DELAY=%s USE_URL_FILTER=%s INQUIRER_HTTP_FASTPATH=%s INQUIRER_HTTP_DISCOVERY=%s INQUIRER_STOP_ON_BLOCK=%s",
                 USE_ADV_HEADERS,
                 USE_HUMAN_DELAY,
                 USE_URL_FILTER,
                 INQUIRER_HTTP_FASTPATH,
                 INQUIRER_HTTP_DISCOVERY,
+                stop_on_block,
             )
 
             t_discovery0 = time.time()
@@ -695,14 +723,30 @@ class InquirerScraper:
             # -------------------------
             context = None
             browser_cm = None
+            block_streak = 0
+            http_fastpath_disabled = False
+            blocked_hosts: set[str] = set()
+            goal_count = min(max_articles, len(to_scrape))
+            attempted = 0
             try:
                 for i, url in enumerate(to_scrape):
                     if len(articles) >= max_articles:
                         break
 
-                    article = None
+                    host = (urlparse(url).netloc or "").lower()
+                    if host and host in blocked_hosts:
+                        # Host previously returned 403/429 in Playwright during this run.
+                        # Skip remaining URLs from this host to avoid hammering while blocked.
+                        continue
 
-                    if INQUIRER_HTTP_FASTPATH:
+                    attempted += 1
+                    logger.info("Inquirer: Scraping article %s/%s: %s", attempted, goal_count, url)
+
+                    article = None
+                    self._last_http_status = None
+                    self._last_error = None
+
+                    if INQUIRER_HTTP_FASTPATH and not http_fastpath_disabled:
                         t0 = time.time()
                         article = self._scrape_article_http(url)
                         timings["http_article_s"].append(round(time.time() - t0, 3))
@@ -710,7 +754,16 @@ class InquirerScraper:
                             timings["http_ok"] += 1
                             articles.append(article)
                             logger.info("Inquirer HTTP: scraped '%s' | content_len=%s", article.title, len(article.content or ""))
+                            block_streak = 0
                             continue
+                        if self._last_http_status in {403, 429}:
+                            # Many publishers will block non-browser HTTP requests but still allow real browser navigation.
+                            # When that happens, disable HTTP fast-path for this run and fall back to Playwright.
+                            http_fastpath_disabled = True
+                            logger.warning(
+                                "Inquirer HTTP: blocked (status=%s). Disabling HTTP fast-path and falling back to Playwright for the rest of this run.",
+                                self._last_http_status,
+                            )
 
                     # Playwright fallback (lazy-init)
                     if context is None:
@@ -726,11 +779,39 @@ class InquirerScraper:
                         timings["playwright_ok"] += 1
                         articles.append(article)
                         logger.info("Inquirer PW: scraped '%s' | content_len=%s", article.title, len(article.content or ""))
+                        block_streak = 0
                         # Only delay when we actually use Playwright (expensive + more bot-sensitive).
                         if len(articles) < max_articles and i < len(to_scrape) - 1:
                             self._human_delay()
                     else:
-                        errors.append(f"Failed to extract article from {url}")
+                        if self._last_http_status is not None:
+                            errors.append(f"HTTP {self._last_http_status} for {url}")
+                        elif self._last_error:
+                            errors.append(f"{self._last_error} for {url}")
+                        else:
+                            errors.append(f"Failed to extract article from {url}")
+
+                        if self._last_http_status in {403, 429}:
+                            block_streak += 1
+                            if host:
+                                blocked_hosts.add(host)
+                            logger.warning(
+                                "Inquirer PW: block signal (status=%s, streak=%s). Cooling down before next URL.",
+                                self._last_http_status,
+                                block_streak,
+                            )
+                            if stop_on_block:
+                                errors.append("Inquirer: blocked (403/429). Stopping early; rerun later.")
+                                break
+                            if block_streak >= 3:
+                                errors.append("Inquirer: blocked (too many 403/429). Stopping early; rerun later.")
+                                break
+                            # Keep the cooldown "human-like" but not excessively long.
+                            self._human_delay()
+                        else:
+                            # Avoid rapid-fire retries on failures.
+                            block_streak = 0
+                            time.sleep(2.0)
 
             finally:
                 try:

@@ -391,6 +391,27 @@ $taskId = $run.jobs[0].task_id
 Invoke-RestMethod "http://localhost:8000/scrape/status/$taskId"
 ```
 
+## Backfill Helpers (Catch-up Scrape + ML)
+
+When your laptop/containers were offline (school/vacation), scheduled scrapes won’t run and you can miss links that fall off “latest” pages.
+
+Use these two helpers in order:
+
+1) **Scrape catch-up (ingest-only; no ML queued)** — re-run scrapers sequentially with a higher cap and insert missed `articles` rows:
+
+```bash
+./scrape_backfill.sh 7 80
+```
+
+2) **ML backfill (queues ML tasks)** — enqueue sentiment/NER analysis for recent articles missing `bias_analysis` rows:
+
+```bash
+./backfill.sh 7 200
+
+# Dry run (no tasks queued; only prints missing IDs)
+./backfill.sh 7 200 --dry-run
+```
+
 ## Legacy Root Tools (Archived)
 
 Older one-off scripts (tests, beat monitors, etc.) were moved out of the repo root into `archive/legacy/root_tools/` to keep the root clean. The supported verification flow is `backend/scripts/smoke_test.ps1` and `backend/scripts/pipeline_test.ps1`.
@@ -474,3 +495,18 @@ supabase gen types typescript --project-id <PROJECT_ID> --schema public | Out-Fi
   - Exclude `node_modules/` and `.next/` in your editor, and avoid recursive searches over them.
 - Missing days / partial coverage:
   - Scrapers depend on uptime and site stability. Power interruptions, rate limits, and HTML changes can create gaps.
+  - Catch up after downtime (scrape-only, no ML queued):
+    ```bash
+    ./scrape_backfill.sh 7 80
+    ```
+  - Then (optional) queue ML for recent articles:
+    ```bash
+    ./backfill.sh 7 200
+    ```
+- Inquirer starts returning `HTTP 403` during catch-up:
+  - This is typically a temporary anti-bot / rate-limit wall after too many article page hits.
+  - The catch-up runner will stop early (and Inquirer is capped to 15 articles per run) to avoid hammering the site.
+  - Retry later (dedupe will skip what you already ingested):
+    ```bash
+    ./scrape_backfill.sh 7 80 --sources=inquirer
+    ```
