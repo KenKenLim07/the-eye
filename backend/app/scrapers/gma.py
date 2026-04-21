@@ -48,6 +48,10 @@ GMA_STORY_API_FASTPATH = _env_flag("GMA_STORY_API_FASTPATH", True)
 GMA_STORY_API_CODES = os.getenv("GMA_STORY_API_CODES", "227,394").strip()
 GMA_HTTP_TIMEOUT_CONNECT_S = _env_int("GMA_HTTP_TIMEOUT_CONNECT_S", 5)
 GMA_HTTP_TIMEOUT_READ_S = _env_int("GMA_HTTP_TIMEOUT_READ_S", 15)
+# If HTTP discovery yields too few URLs (flaky network/blocking), fall back to Playwright discovery.
+# Default 0 (disabled) to avoid slowing down normal runs; set in catch-up/backfill flows.
+GMA_HTTP_DISCOVERY_MIN_URLS = _env_int("GMA_HTTP_DISCOVERY_MIN_URLS", 0)
+GMA_DISCOVERY_DEBUG = _env_flag("GMA_DISCOVERY_DEBUG", False)
 
 # Optional advanced utils
 try:
@@ -319,6 +323,8 @@ class GMAScraper:
         """
         urls: list[str] = []
         seen: set[str] = set()
+        paths_failed = 0
+        status_errors: dict[int, int] = {}
         try:
             try:
                 max_paths = int(os.getenv("GMA_MAX_START_PATHS", str(len(self.START_PATHS))))
@@ -334,6 +340,10 @@ class GMAScraper:
                 try:
                     r = sess.get(section_url, headers=headers, timeout=timeout)
                     if r.status_code >= 400:
+                        paths_failed += 1
+                        status_errors[r.status_code] = status_errors.get(r.status_code, 0) + 1
+                        if GMA_DISCOVERY_DEBUG:
+                            logger.warning("GMA HTTP discovery: status=%s for %s", r.status_code, section_url)
                         continue
                     soup = BeautifulSoup(r.text or "", "html.parser")
                     seeded = self._extract_article_links(soup)
@@ -349,6 +359,9 @@ class GMAScraper:
                     if len(urls) >= max_articles * 4:
                         break
                 except Exception:
+                    paths_failed += 1
+                    if GMA_DISCOVERY_DEBUG:
+                        logger.warning("GMA HTTP discovery: error fetching %s", section_url)
                     continue
                 # keep HTTP discovery lightweight; avoid long stealth sleeps
                 time.sleep(random.uniform(0.15, 0.45))
@@ -357,6 +370,8 @@ class GMAScraper:
                 "method": "http",
                 "paths_configured": min(max_paths, len(self.START_PATHS)),
                 "paths_scanned": paths_scanned,
+                "paths_failed": paths_failed,
+                "status_errors": status_errors,
                 "urls_discovered": len(urls),
             }
         except Exception as e:
@@ -968,6 +983,10 @@ class GMAScraper:
                 t0 = time.time()
                 urls, discovery_meta = self._discover_urls_http(max_articles=max_articles)
                 discovery_meta["discovery_s"] = round(time.time() - t0, 2)
+                if GMA_HTTP_DISCOVERY_MIN_URLS and len(urls) < max(0, int(GMA_HTTP_DISCOVERY_MIN_URLS)):
+                    discovery_meta["http_discovery_too_few_urls"] = True
+                    discovery_meta["http_discovery_min_urls"] = int(GMA_HTTP_DISCOVERY_MIN_URLS)
+                    urls = []
 
             # If HTTP discovery found nothing (or disabled), use Playwright discovery.
             if not urls:
@@ -1139,6 +1158,8 @@ class GMAScraper:
                             art = self._scrape_article(url, context)
                             if art:
                                 articles.append(art)
+                            else:
+                                errors.append(f"failed to extract {url}")
                         try:
                             context.close()
                         except Exception:

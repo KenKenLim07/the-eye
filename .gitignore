@@ -45,6 +45,12 @@ playwright-report/
 blob-report/
 playwright/.local-browsers
 
+# Local caches (keep repo portable; optionally copy to USB for offline demos)
+.cache/
+
 # Reference-only: UI/UX Pro Max kit (do not ship/deploy)
 ui-ux-pro-max-skill-*/
 ui-ux-pro-max-skill-2.5.0/
+
+# Thesis hardbound build outputs (generated)
+thesis-hardbound/dist/

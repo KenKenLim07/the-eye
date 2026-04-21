@@ -1,0 +1,5 @@
+services:
+  # Defense/demo-friendly overrides for low-to-mid spec laptops:
+  # - reduce CPU usage for Torch/Transformers worker
+  worker_ml:
+    command: celery -A app.workers.celery_app:celery worker -l info -n ml1@%h -Q ml -c 1 -Ofair --max-tasks-per-child=25

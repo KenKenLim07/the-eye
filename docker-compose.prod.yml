@@ -10,6 +10,7 @@ services:
       - "6379:6379"
 
   api:
+    image: ph-eye-backend:local
     build:
       context: .
       dockerfile: backend/Dockerfile
@@ -35,6 +36,7 @@ services:
     dns_search: []
 
   worker:
+    image: ph-eye-backend:local
     build:
       context: .
       dockerfile: backend/Dockerfile
@@ -62,6 +64,7 @@ services:
     dns_search: []
 
   worker_headed:
+    image: ph-eye-backend:local
     build:
       context: .
       dockerfile: backend/Dockerfile
@@ -99,6 +102,7 @@ services:
     dns_search: []
 
   worker_ml:
+    image: ph-eye-backend:local
     build:
       context: .
       dockerfile: backend/Dockerfile
@@ -143,10 +147,13 @@ services:
       - ML_PROGRESS_EVERY=25
       # Persist HF weights/cache across restarts
       - HF_HOME=/root/.cache/huggingface
+      # Optional: set to 1 to force offline-only loads (requires cache pre-warmed)
+      - TRANSFORMERS_OFFLINE=${TRANSFORMERS_OFFLINE:-0}
+      - HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-0}
       # Reduce SST-2 over-polarization on news-style reporting prefaces
       - DISTILBERT_NEUTRALIZE_REPORTING=1
     volumes:
-      - ${HOME}/.cache/huggingface:/root/.cache/huggingface
+      - ./.cache/huggingface:/root/.cache/huggingface
     depends_on:
       - redis
     dns:
@@ -157,6 +164,7 @@ services:
     dns_search: []
 
   beat:
+    image: ph-eye-backend:local
     build:
       context: .
       dockerfile: backend/Dockerfile

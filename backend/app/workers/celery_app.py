@@ -86,11 +86,12 @@ celery.conf.beat_schedule = {
     },
 }
 
-# Optional: ABS-CBN is Akamai-sensitive and typically needs headed Chromium (Xvfb) for reliability.
-# Keep it off by default so demo builds don't become flaky/heavy.
-if os.getenv("ENABLE_ABS_CBN_SCRAPER", "0").strip().lower() in {"1", "true", "yes", "on"}:
+# ABS-CBN: enabled by default (can be disabled via env).
+# Note: ABS-CBN can be Akamai-sensitive; force headed mode via ABS_CBN_FORCE_HEADED=1
+# which routes to the `scrape_headed` queue (requires a worker consuming that queue).
+if os.getenv("ENABLE_ABS_CBN_SCRAPER", "1").strip().lower() in {"1", "true", "yes", "on"}:
     celery.conf.beat_schedule["scrape_abs_cbn"] = {
         "task": "app.workers.tasks.scrape_abs_cbn_task",
-        "schedule": schedule(3.0 * 60 * 60),  # 3 hours - heavy/slow, keep gentle
+        "schedule": schedule(2.0 * 60 * 60),  # 2 hours - keep gentle
         "options": {"queue": ABS_CBN_QUEUE},
     }

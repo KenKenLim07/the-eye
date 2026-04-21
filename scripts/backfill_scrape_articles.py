@@ -102,6 +102,10 @@ def _configure_env_for_catchup(*, days: int) -> None:
     # ABS-CBN RSS window: widen to cover the catch-up range.
     os.environ["ABS_CBN_RSS_MAX_AGE_H"] = str(max(24, days * 24))
 
+    # GMA: on flaky networks, HTTP discovery can return very few URLs without error.
+    # If that happens, fall back to Playwright discovery to seed more candidates.
+    os.environ.setdefault("GMA_HTTP_DISCOVERY_MIN_URLS", "20")
+
 
 @dataclass
 class SourceRunSummary:

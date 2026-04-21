@@ -1,0 +1,176 @@
+{
+  "ok": true,
+  "input_csv": "reports/benchmark_sample_2026-03-25_2026-03-31.csv",
+  "items_total": 200,
+  "items_used": 200,
+  "items_skipped": 0,
+  "label_set": [
+    "positive",
+    "neutral",
+    "negative"
+  ],
+  "kappa": 0.573990163045583,
+  "kappa_n": 200,
+  "runtime_settings": {
+    "VADER_PH_PATCH": "1",
+    "VADER_NEUTRAL_BAND": "0.16",
+    "TAGALOG_SIGNAL_THRESHOLD": "0.15",
+    "DISTILBERT_MODEL_ID": "distilbert-base-uncased-finetuned-sst-2-english",
+    "DISTILBERT_NEUTRAL_MIN_CONF": "0.60",
+    "HF_HOME": "/root/.cache/huggingface",
+    "TRANSFORMERS_CACHE": null,
+    "HF_HUB_CACHE": null,
+    "BENCHMARK_TEXT_CLEAN": "off"
+  },
+  "text_cleaning_summary": null,
+  "models": {
+    "vader": {
+      "accuracy": 0.58,
+      "macro_f1": 0.5282281525455897,
+      "per_class": {
+        "positive": {
+          "precision": 0.68,
+          "recall": 0.6732673267326733,
+          "f1": 0.6766169154228856,
+          "support": 101
+        },
+        "neutral": {
+          "precision": 0.2608695652173913,
+          "recall": 0.3333333333333333,
+          "f1": 0.2926829268292683,
+          "support": 36
+        },
+        "negative": {
+          "precision": 0.6666666666666666,
+          "recall": 0.5714285714285714,
+          "f1": 0.6153846153846154,
+          "support": 63
+        }
+      },
+      "confusion_matrix_labels": [
+        "positive",
+        "neutral",
+        "negative"
+      ],
+      "confusion_matrix": [
+        [
+          68,
+          21,
+          12
+        ],
+        [
+          18,
+          12,
+          6
+        ],
+        [
+          14,
+          13,
+          36
+        ]
+      ]
+    },
+    "distilbert": {
+      "accuracy": 0.555,
+      "macro_f1": 0.44940843701198635,
+      "per_class": {
+        "positive": {
+          "precision": 0.7424242424242424,
+          "recall": 0.48514851485148514,
+          "f1": 0.5868263473053892,
+          "support": 101
+        },
+        "neutral": {
+          "precision": 0.75,
+          "recall": 0.08333333333333333,
+          "f1": 0.15,
+          "support": 36
+        },
+        "negative": {
+          "precision": 0.45384615384615384,
+          "recall": 0.9365079365079365,
+          "f1": 0.6113989637305699,
+          "support": 63
+        }
+      },
+      "confusion_matrix_labels": [
+        "positive",
+        "neutral",
+        "negative"
+      ],
+      "confusion_matrix": [
+        [
+          49,
+          1,
+          51
+        ],
+        [
+          13,
+          3,
+          20
+        ],
+        [
+          4,
+          0,
+          59
+        ]
+      ]
+    },
+    "hybrid": {
+      "accuracy": 0.555,
+      "macro_f1": 0.4615441269045056,
+      "per_class": {
+        "positive": {
+          "precision": 0.7424242424242424,
+          "recall": 0.48514851485148514,
+          "f1": 0.5868263473053892,
+          "support": 101
+        },
+        "neutral": {
+          "precision": 0.6666666666666666,
+          "recall": 0.1111111111111111,
+          "f1": 0.19047619047619047,
+          "support": 36
+        },
+        "negative": {
+          "precision": 0.453125,
+          "recall": 0.9206349206349206,
+          "f1": 0.6073298429319371,
+          "support": 63
+        }
+      },
+      "confusion_matrix_labels": [
+        "positive",
+        "neutral",
+        "negative"
+      ],
+      "confusion_matrix": [
+        [
+          49,
+          1,
+          51
+        ],
+        [
+          13,
+          4,
+          19
+        ],
+        [
+          4,
+          1,
+          58
+        ]
+      ]
+    }
+  },
+  "hybrid_routes": {
+    "counts": {
+      "distilbert": 194,
+      "vader": 6
+    },
+    "accuracy_by_route": {
+      "distilbert": 0.5515463917525774,
+      "vader": 0.6666666666666666
+    }
+  }
+}

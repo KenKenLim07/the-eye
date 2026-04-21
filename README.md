@@ -359,7 +359,7 @@ Queue a job:
 ```bash
 curl -sS -X POST "http://localhost:8000/scrape/run" \
   -H "Content-Type: application/json" \
-  -d '{"source":"inquirer"}'
+  -d '{"source":"gma"}'
 
 # Queue multiple scrapers at once
 curl -s -X POST "http://localhost:8000/scrape/run" \
