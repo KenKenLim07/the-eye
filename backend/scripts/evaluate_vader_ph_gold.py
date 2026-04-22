@@ -23,6 +23,42 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
+from sklearn.metrics import accuracy_score, confusion_matrix, precision_recall_fscore_support
+
+LABELS_3 = ["positive", "neutral", "negative"]
+LABELS_BIN = ["positive", "negative"]
+
+
+def _compute_metrics(y_true: list[str], y_pred: list[str], *, labels: list[str]) -> dict[str, object]:
+    acc = float(accuracy_score(y_true, y_pred))
+    pr, rc, f1, sup = precision_recall_fscore_support(
+        y_true,
+        y_pred,
+        labels=labels,
+        zero_division=0,
+    )
+    macro_f1 = float(sum(f1) / len(f1)) if f1 is not None and len(f1) else 0.0
+    cm = confusion_matrix(y_true, y_pred, labels=labels).tolist()
+    per_class: dict[str, dict[str, object]] = {}
+    for i, lab in enumerate(labels):
+        per_class[lab] = {
+            "precision": float(pr[i]),
+            "recall": float(rc[i]),
+            "f1": float(f1[i]),
+            "support": int(sup[i]),
+        }
+    return {"accuracy": acc, "macro_f1": macro_f1, "per_class": per_class, "labels": labels, "confusion": cm}
+
+
+def _default_setting_name(model: str, ph_patch: str) -> str:
+    if model == "vader":
+        return "VADER+PH patch (on)" if ph_patch == "on" else "VADER (patch off)"
+    if model == "distilbert":
+        return "DistilBERT (SST-2)"
+    if model == "hybrid":
+        return "Hybrid router"
+    return model
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Evaluate Taglish VADER patch on an offline gold set.")
@@ -44,6 +80,23 @@ def main() -> None:
         help="Path to the gold set JSON.",
     )
     parser.add_argument("--show", type=int, default=10, help="Show up to N misclassified examples.")
+    parser.add_argument(
+        "--labels",
+        choices=["auto", "3", "binary"],
+        default="auto",
+        help="Label set to score against: auto (infer), 3 (pos/neu/neg), binary (pos/neg).",
+    )
+    parser.add_argument(
+        "--latex",
+        choices=["off", "row"],
+        default="off",
+        help="Print a LaTeX table row (default: off).",
+    )
+    parser.add_argument(
+        "--setting",
+        default=None,
+        help="Optional LaTeX row label (default: inferred from model + patch flag).",
+    )
     parser.add_argument(
         "--vader-neutral-band",
         type=float,
@@ -123,6 +176,8 @@ def main() -> None:
     wrong: list[dict[str, str]] = []
     patch_meta_sample = None
     route_counts = Counter()
+    y_true_list: list[str] = []
+    y_pred_list: list[str] = []
 
     for it in items:
         text = str((it or {}).get("text") or "").strip()
@@ -153,6 +208,8 @@ def main() -> None:
                 "ph_patch_error": m.get("ph_patch_error"),
             }
         total += 1
+        y_true_list.append(label)
+        y_pred_list.append(pred)
         y_true[label] += 1
         y_pred[pred] += 1
         confusion[(label, pred)] += 1
@@ -171,10 +228,27 @@ def main() -> None:
             )
 
     acc = (correct / total) if total else 0.0
+    if args.labels == "3":
+        label_set = LABELS_3
+    elif args.labels == "binary":
+        label_set = LABELS_BIN
+    else:
+        # Auto: if the gold set has no neutral labels, score as binary.
+        label_set = LABELS_BIN if ("neutral" not in set(y_true_list)) else LABELS_3
+
+    metrics = _compute_metrics(y_true_list, y_pred_list, labels=label_set) if total else None
+    neutral_pred_rate = (sum(1 for p in y_pred_list if p == "neutral") / total) if total else 0.0
+
     print("=== Sentiment Gold Set Report ===")
     print(f"Model: {args.model}")
     print(f"Items evaluated: {total}")
-    print(f"Accuracy: {acc:.3f} ({correct}/{total})")
+    if metrics:
+        print(f"Accuracy: {metrics['accuracy']:.3f} ({correct}/{total})")
+        print(f"Macro-F1: {metrics['macro_f1']:.3f} (labels={','.join(label_set)})")
+        if label_set == LABELS_BIN:
+            print(f"Neutral-pred rate: {neutral_pred_rate:.3f}")
+    else:
+        print(f"Accuracy: {acc:.3f} ({correct}/{total})")
     if patch_meta_sample is not None:
         print()
         print("PH patch status (sample)")
@@ -187,12 +261,20 @@ def main() -> None:
     print(f"True dist: {dict(y_true)}")
     print(f"Pred dist: {dict(y_pred)}")
     print()
-    print("Confusion (true -> pred):")
-    for t in ("positive", "neutral", "negative"):
-        row = []
-        for p in ("positive", "neutral", "negative"):
-            row.append(f"{t}->{p}:{confusion[(t, p)]}")
-        print("  " + " | ".join(row))
+    if metrics:
+        print("Confusion (rows=true, cols=pred):")
+        labels = metrics["labels"]
+        cm = metrics["confusion"]
+        print("  labels:", ", ".join(str(x) for x in labels))
+        for row in cm:
+            print("  " + " ".join(f"{int(x):4d}" for x in row))
+    else:
+        print("Confusion (true -> pred):")
+        for t in ("positive", "neutral", "negative"):
+            row = []
+            for p in ("positive", "neutral", "negative"):
+                row.append(f"{t}->{p}:{confusion[(t, p)]}")
+            print("  " + " | ".join(row))
 
     if wrong and args.show:
         print()
@@ -207,6 +289,20 @@ def main() -> None:
                 elif r:
                     route_bits = f" [{r}]"
             print(f"- {ex['true']} -> {ex['pred']} (score={ex['score']}){route_bits}: {ex['text']}")
+
+    if args.latex == "row" and metrics:
+        setting = (args.setting or "").strip() or _default_setting_name(args.model, args.ph_patch)
+        per = metrics["per_class"]
+        if label_set == LABELS_3:
+            row = (
+                f"{setting} & {metrics['accuracy']:.3f} & {metrics['macro_f1']:.3f} & "
+                f"{per['positive']['f1']:.3f} & {per['neutral']['f1']:.3f} & {per['negative']['f1']:.3f} \\\\"
+            )
+        else:
+            row = f"{setting} & {metrics['accuracy']:.3f} & {metrics['macro_f1']:.3f} & {neutral_pred_rate:.3f} \\\\"
+        print()
+        print("=== LaTeX Row (copy/paste) ===")
+        print(row)
 
 
 if __name__ == "__main__":

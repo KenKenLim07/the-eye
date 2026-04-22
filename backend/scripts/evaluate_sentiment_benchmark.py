@@ -256,6 +256,12 @@ def main() -> None:
         default=str(BACKEND_ROOT / "reports" / "sentiment_benchmark_2026-03-25_2026-03-31.json"),
         help="Output JSON path.",
     )
+    parser.add_argument(
+        "--latex",
+        choices=["on", "off"],
+        default="off",
+        help="Print LaTeX tables at the end (default: off).",
+    )
     args = parser.parse_args()
 
     csv_path = Path(args.file)
@@ -517,12 +523,13 @@ def main() -> None:
         print()
 
     print(f"Wrote JSON: {out_path}")
-    print()
-    print("=== LaTeX Table (copy/paste) ===")
-    print(_make_latex_table(results))
-    print()
-    print("=== LaTeX Table (Binary subset; copy/paste) ===")
-    print(_make_latex_table_binary(results))
+    if args.latex == "on":
+        print()
+        print("=== LaTeX Table (copy/paste) ===")
+        print(_make_latex_table(results))
+        print()
+        print("=== LaTeX Table (Binary subset; copy/paste) ===")
+        print(_make_latex_table_binary(results))
 
 
 if __name__ == "__main__":
