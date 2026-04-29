@@ -125,3 +125,4 @@ This thesis is organized as follows:
 - Chapter 4 presents the design and methodology, including data collection and normalization, NLP analysis approach, and evaluation procedures.
 - Chapter 5 reports the results and discussion, including benchmark outcomes, sentiment distributions, temporal trends, cross-source correlation, and entity-level patterns.
 - Chapter 6 concludes the study with limitations and recommendations.
+- Appendices provide reproducibility commands, evaluation assets, selected source-code excerpts, sample reports, and a quick-start user guide.

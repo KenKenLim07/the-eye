@@ -13,6 +13,7 @@ mkdir -p "$(dirname "$OUT")"
 
 # Concatenate chapters in a stable order.
 CHAPTERS=(
+  thesis-hardbound/chapters/00_front_matter.md
   thesis-hardbound/chapters/00_abstract.md
   thesis-hardbound/chapters/01_introduction.md
   thesis-hardbound/chapters/02_related_work.md
@@ -22,6 +23,11 @@ CHAPTERS=(
   thesis-hardbound/chapters/06_conclusion_recommendations.md
   thesis-hardbound/chapters/A_appendix_commands_repro.md
   thesis-hardbound/chapters/B_appendix_lexicon_eval_assets.md
+  thesis-hardbound/chapters/C_appendix_source_code.md
+  thesis-hardbound/chapters/D_appendix_evaluation_tools.md
+  thesis-hardbound/chapters/E_appendix_samples_reports.md
+  thesis-hardbound/chapters/F_appendix_user_guide.md
+  thesis-hardbound/chapters/G_appendix_curriculum_vitae.md
 )
 
 PANDOC_IMAGE="${PANDOC_IMAGE:-pandoc/core:3.1}"

@@ -11,6 +11,7 @@ services:
 
   api:
     image: ph-eye-backend:local
+    pull_policy: never
     build:
       context: .
       dockerfile: backend/Dockerfile
@@ -37,6 +38,7 @@ services:
 
   worker:
     image: ph-eye-backend:local
+    pull_policy: never
     build:
       context: .
       dockerfile: backend/Dockerfile
@@ -65,6 +67,7 @@ services:
 
   worker_headed:
     image: ph-eye-backend:local
+    pull_policy: never
     build:
       context: .
       dockerfile: backend/Dockerfile
@@ -103,6 +106,7 @@ services:
 
   worker_ml:
     image: ph-eye-backend:local
+    pull_policy: never
     build:
       context: .
       dockerfile: backend/Dockerfile
@@ -165,6 +169,7 @@ services:
 
   beat:
     image: ph-eye-backend:local
+    pull_policy: never
     build:
       context: .
       dockerfile: backend/Dockerfile

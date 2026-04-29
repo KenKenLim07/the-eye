@@ -1,6 +1,9 @@
-# Appendix A — Reproducibility Commands
+# Appendix A — Reproducibility and Run Commands
 
 This appendix lists practical commands used to run, evaluate, and backfill PH VibeCheck AI in the Dockerized development environment. Paths are written relative to the repository root.
+
+Prerequisites and initial setup (clone + required `.env` files) are documented in:
+- `thesis-hardbound/chapters/F_appendix_user_guide.md`
 
 ## Start the stack
 
@@ -104,6 +107,13 @@ Host-side cache preparation (recommended before long builds/downloads):
 
 ```bash
 mkdir -p ~/.cache/huggingface
+```
+
+Windows (PowerShell) equivalent:
+
+```powershell
+# Create the Hugging Face cache directory under your user profile
+New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\\.cache\\huggingface" | Out-Null
 ```
 
 ## Backfill / rescore sentiment (Celery enqueue)

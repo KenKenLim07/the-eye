@@ -14,9 +14,11 @@ This folder contains internal documentation for the PH Eye project.
 ## Index
 
 - [ML AI Integration](./ML_AI_INTEGRATION.md)
+- [Accuracy Evaluation](./ACCURACY_EVALUATION.md)
 - [Layout System](./LAYOUT_SYSTEM.md)
 - [AI Summarization Quick Start](./SUMMARIZATION_QUICK_START.md)
 - [AI Summarization Implementation](./AI_SUMMARIZATION_IMPLEMENTATION.md)
+- [Borrowed Laptop Setup Guide](./BORROWED_LAPTOP_SETUP_GUIDE.md)
+- [Windows Defense Runbook](./WINDOWS_DEFENSE_RUNBOOK.md)
 
 Last updated: March 2026
-

@@ -1,4 +1,4 @@
-# Appendix B — Lexicon and Evaluation Assets
+# Appendix B — Evaluation Datasets and Lexicon Patch
 
 This appendix documents the PH lexicon patch and benchmark assets used by the hybrid sentiment engine. These artifacts are versioned to support reproducibility and thesis-defensible evaluation.
 

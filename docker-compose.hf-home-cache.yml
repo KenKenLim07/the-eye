@@ -1,0 +1,10 @@
+services:
+  # Optional override: use the host user's Hugging Face cache (~/.cache/huggingface)
+  # instead of the repo-local ./\.cache/huggingface folder.
+  #
+  # Useful on your original dev machine if you already have models downloaded.
+  # Not recommended for "USB/portable" demos.
+  worker_ml:
+    volumes:
+      - ${HOME}/.cache/huggingface:/root/.cache/huggingface
+
