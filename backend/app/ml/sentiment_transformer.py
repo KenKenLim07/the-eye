@@ -92,7 +92,18 @@ def _load_ph_hint_tokens() -> set[str]:
             return _PH_HINT_TOKENS
         try:
             here = os.path.dirname(__file__)
-            path = os.path.join(here, "vader_ph_lexicon.v1.json")
+            # Keep consistent with `app.ml.bias` patch file selection for A/B tests.
+            custom = (os.getenv("VADER_PH_PATCH_FILE") or "").strip()
+            if custom:
+                from pathlib import Path
+
+                p = Path(custom)
+                if not p.is_absolute():
+                    backend_root = Path(__file__).resolve().parents[2]
+                    p = backend_root / p
+                path = str(p)
+            else:
+                path = os.path.join(here, "vader_ph_lexicon.v1.json")
             import json
 
             payload = json.load(open(path, "r", encoding="utf-8")) or {}

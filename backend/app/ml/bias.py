@@ -27,7 +27,21 @@ def _load_vader_ph_patch() -> dict[str, Any]:
     global _VADER_PH_PATCH_CACHE
     if _VADER_PH_PATCH_CACHE is not None:
         return _VADER_PH_PATCH_CACHE
-    path = os.path.join(os.path.dirname(__file__), "vader_ph_lexicon.v1.json")
+    # Allow overriding the patch file for A/B tests without changing code.
+    # Example:
+    #   VADER_PH_PATCH=1 VADER_PH_PATCH_FILE=app/ml/vader_ph_lexicon.v2.json
+    custom = (os.getenv("VADER_PH_PATCH_FILE") or "").strip()
+    if custom:
+        from pathlib import Path
+
+        p = Path(custom)
+        if not p.is_absolute():
+            # Resolve relative to backend root (backend/).
+            backend_root = Path(__file__).resolve().parents[2]
+            p = backend_root / p
+        path = str(p)
+    else:
+        path = os.path.join(os.path.dirname(__file__), "vader_ph_lexicon.v1.json")
     with open(path, "r", encoding="utf-8") as f:
         _VADER_PH_PATCH_CACHE = json.load(f) or {}
     return _VADER_PH_PATCH_CACHE
