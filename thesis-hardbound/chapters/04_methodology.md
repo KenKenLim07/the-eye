@@ -1,211 +1,244 @@
 # Design and Methodology
 
-This chapter presents the methodology used to design, develop, and evaluate PH VibeCheck AI. It covers (1) the development process, (2) data collection and normalization, (3) the NLP analysis approach, and (4) evaluation procedures used to benchmark the hybrid sentiment engine in a Philippine news setting.
+This chapter presents the methodology used to design, develop, and evaluate PH VibeCheck AI. It covers the development process, requirements and process modeling, data collection and normalization, system architecture and storage design, the NLP analysis approach, and evaluation procedures used to benchmark the hybrid sentiment engine in a Philippine news setting. Technologies introduced in Chapter III are applied here as operational procedures.
 
 ## Research Design
 
 The study follows a **developmental and descriptive** research design: it designs and implements a working end-to-end system, then evaluates its behavior using controlled gold sets and a manually labeled benchmark on real news text. Quantitative results are reported as *signal-quality* metrics (accuracy, macro-F1, confusion patterns) rather than as definitive measures of media bias.
 
+## Requirements Modeling
+
+### Functional Requirements
+
+1. **Automated web scraping** — Collect articles from eight Philippine news outlets (ABS-CBN, GMA News Online, Inquirer, Manila Bulletin, Manila Times, Philstar, Rappler, and SunStar) on scheduled intervals.
+2. **Data normalization** — Extract and clean title and body text; remove boilerplate; retain source, canonical URL, publication time, and category when available.
+3. **Duplicate detection** — Prevent redundant ingestion through URL canonicalization and database preflight checks.
+4. **Hybrid sentiment analysis** — Assign positive, neutral, or negative labels using a Tagalog/Taglish-extended VADER pathway and a DistilBERT SST-2 pathway [12, 23, 24].
+5. **Named entity recognition** — Extract PERSON, ORG, and GPE entities using spaCy [20].
+6. **Data visualization** — Provide dashboards for article search, sentiment trends, cross-source correlation, and entity-level summaries.
+7. **Reproducible storage** — Persist articles and analysis outputs with upsert semantics to support rescoring without duplicate rows.
+
+### Non-Functional Requirements
+
+1. **Responsiveness** — Scraping and NLP execute asynchronously so API and dashboard requests remain responsive.
+2. **Scalability** — Modular scrapers and separate task queues allow new sources and workloads to be added without redesigning the entire platform.
+3. **Reliability** — Redis-backed task queuing and PostgreSQL ACID storage support recovery from transient scraper or worker failures.
+4. **Maintainability** — Per-source scraper modules can be updated independently when publisher layouts change.
+5. **Reproducibility** — Model versions, routing metadata, and evaluation scripts are versioned and documented for thesis reporting.
+
+*(Insert Figure: Context diagram of PH VibeCheck AI showing User/Researcher, External News Sources, and the system boundary.)*
+
+*(Insert Figure: Data flow diagram — Level 0/1 showing ingestion, analysis, storage, and visualization.)*
+
+*(Insert Figure: System flowchart and program flowchart for article ingestion and hybrid sentiment processing.)*
+
 ## Development Approach (Iterative SDLC)
 
 PH VibeCheck AI was developed using an iterative, sprint-based approach. Iteration is essential for web-based news monitoring systems because source websites change layout and access patterns over time. Each iteration refined one or more modules (scrapers, preprocessing, ML scoring, storage, and dashboards), followed by verification on real collected articles.
 
-*(Figure X: Iterative development approach used in the project (design → build → test → review → launch). Insert diagram here.)*
-
-Figure X illustrates the iterative SDLC cycle used to guide development and refinement of the system. This approach supports rapid fixes when scraper behavior changes and provides a repeatable loop for validating output quality before deployment.
+*(Figure 4.0: Iterative development approach used in the project — Design → Build → Test → Review → Launch.)*
 
 The sprint cycle can be summarized as:
-1. **Design:** refine module boundaries, database interactions, API logic, and visualization requirements.
-2. **Build:** implement or update scrapers, preprocessing routines, the hybrid sentiment engine, and dashboards.
-3. **Test:** run targeted checks using recently collected articles and offline gold sets.
-4. **Review:** inspect outputs (scraped text quality, sentiment behavior, and dashboard correctness).
-5. **Launch:** deploy the updated version and monitor operational results to inform the next iteration.
+
+1. **Design** — Refine module boundaries, database interactions, API logic, and visualization requirements.
+2. **Build** — Implement or update scrapers, preprocessing routines, the hybrid sentiment engine, and dashboards.
+3. **Test** — Run targeted checks using recently collected articles and offline gold sets.
+4. **Review** — Inspect outputs (scraped text quality, sentiment behavior, and dashboard correctness).
+5. **Launch** — Deploy the updated version and monitor operational results to inform the next iteration.
 
 ## Data Sources and Inclusion Criteria
 
-The system collects articles from a fixed set of Philippine news sources implemented as scraper modules in the backend. Sources are treated as the primary unit of comparison for outlet-level trends and correlation analysis. For evaluation reporting, this thesis follows the snapshot window used in the updated system artifact:
-- **Observation window:** March 25, 2026 to March 31, 2026 (PH local time, Asia/Manila)
+The system collects articles from a fixed set of Philippine news sources implemented as separate scraper modules. Sources are treated as the primary unit of comparison for outlet-level trends and correlation analysis.
 
-This fixed window supports consistent comparisons across sources and enables repeatable benchmark reporting.
+**Observation window for reported results:** March 25, 2026 to March 31, 2026 (PH local time, Asia/Manila).
 
-The implemented sources are:
-- ABS-CBN
-- GMA News Online
-- Inquirer
-- Manila Bulletin
-- Manila Times
-- Philstar
-- Rappler
-- SunStar
+The implemented sources are: ABS-CBN, GMA News Online, Inquirer, Manila Bulletin, Manila Times, Philstar, Rappler, and SunStar.
+
+Inclusion criteria: primarily English-language news articles with occasional Taglish code-switching. Opinion/editorial URLs are filtered by source-specific rules where possible; residual opinion-style articles are treated as noise. Non-news elements (advertisements, navigation boilerplate, comment sections) are excluded during extraction.
 
 ## Collection and Normalization
 
-Scrapers discover candidate article URLs, fetch article pages, and normalize extracted content into a consistent schema suitable for downstream NLP analysis. Normalization focuses on:
-- capturing the canonical URL and source,
-- extracting title and cleaned article content,
-- retaining timestamps when available, and
-- producing comparable text inputs across sources.
+### Single-article pipeline flow
 
-Where sources require dynamic rendering, headless browser automation can be used to render pages before extraction. The system is designed to remain resilient under source-specific layout changes by keeping scrapers modular and independently maintainable.
+The end-to-end lifecycle of one article proceeds as follows:
 
-For analytics correctness, publication timestamps are normalized to timezone-aware UTC values before storage. When a source provides a timestamp without an explicit offset, the pipeline assumes Asia/Manila local time to avoid systematic day-bucket skew in trend aggregation.
+1. **Discovery** — Seed candidate URLs from HTTP section pages, RSS feeds, or JSON list endpoints per outlet; canonicalize and de-duplicate URLs.
+2. **Database preflight** — Check existing rows in the `articles` table; skip already-ingested URLs during continuous runs.
+3. **Content extraction** — Attempt network-first extraction (JSON-LD, site JSON payloads, HTML parsing). If content is incomplete or blocked, fall back to Playwright browser rendering.
+4. **Normalization and storage** — Normalize title, body, source, category, and timezone-aware `published_at`; insert into PostgreSQL via Supabase.
+5. **Asynchronous ML enqueue** — Enqueue new article IDs on the ML task queue, decoupling NLP from scraping and API latency.
+6. **Sentiment and entity extraction** — ML workers run hybrid sentiment scoring and spaCy NER; persist model metadata for audit.
+7. **Upsert analysis outputs** — Upsert sentiment rows into `bias_analysis` keyed by `(article_id, model_version, model_type='sentiment')`. Upsert `article_sentiment_public` for fast frontend reads.
+8. **Aggregation and visualization** — API endpoints compute trend, correlation, and entity summaries; frontend dashboards render results.
+
+### Network-first scraping with browser fallback
+
+Modern news sites vary in delivery mechanism. The scraping layer uses a **network-first, browser-fallback** strategy:
+
+- **Network-first discovery** — Lightweight HTTP listings, RSS, or public JSON endpoints seed candidate URLs without launching a browser.
+- **Network-first extraction** — Structured metadata (e.g., JSON-LD `NewsArticle`) or site JSON payloads supply full article bodies when available.
+- **Playwright fallback** — When extraction fails (blocked pages, partial excerpts, hydration delays), headless browser automation renders the page and re-extracts text.
+
+Candidate URLs are canonicalized and de-duplicated early. A database preflight step prevents redundant scraping during continuous ingestion.
+
+### Source-specific adaptations
+
+**ABS-CBN** — Uses JSON API discovery (OneDomain content API), RSS supplementation, and HTTP/JSON-LD fast paths. Playwright fallback handles Akamai-sensitive routes; optional resource blocking and headed execution modes improve stability on protected pages.
+
+**GMA News Online** — HTTP section discovery seeds URLs; many articles expose a story JSON payload on `data.gmanetwork.com` for direct body retrieval. Playwright fallback applies when bodies remain incomplete or discovery volume is insufficient.
+
+Scraper modules are isolated per outlet so layout changes on one site do not destabilize the entire pipeline.
+
+### Timestamp and URL normalization
+
+Publication timestamps without explicit timezone offsets are normalized to UTC using an Asia/Manila assumption to prevent day-bucket skew in trend views. URLs are canonicalized before insertion to eliminate duplicate rows from tracking parameters or trivial variants.
+
+## Asynchronous Processing and Scheduling
+
+Scraping and NLP analysis are separated from the API request–response path. Celery workers perform scraping and machine learning asynchronously; Redis provides broker and cache support. Celery Beat schedules per-source collection at configured intervals (e.g., roughly hourly for high-frequency outlets, more conservative intervals for bot-sensitive sources).
+
+**Separate task queues:**
+
+- **Scrape queue** — Article discovery and extraction tasks.
+- **ML queue** — Sentiment scoring and entity extraction.
+
+This separation prevents long-running transformer inference from blocking ingestion and allows independent concurrency tuning per worker type. If a source task fails or times out, retry logic applies without blocking other sources; the API serves pre-stored rows rather than waiting for background completion.
+
+## Database Design and Storage Semantics
+
+*(Insert Figure: Entity-relationship diagram for `articles`, `bias_analysis`, `article_sentiment_public`, and related entities.)*
+
+Articles are stored as normalized records. Sentiment outputs use **upsert** semantics so rescoring overwrites rather than duplicates:
+
+- **`bias_analysis`** — Internal sentiment rows keyed by `(article_id, model_version, model_type)` with full `model_metadata` (route, thresholds, sub-model details).
+- **`article_sentiment_public`** — Lightweight cache for frontend coverage badges and fast sentiment display.
+
+Production writes use a single active model version (e.g., `sentiment_hybrid_v1`) to prevent double-counting in dashboard aggregation.
+
+### Indexing for news-scale analytics
+
+Repeated dashboard queries over growing tables motivated these indexing strategies:
+
+- **Full-text search** — `search_tsv` column with trigger-maintained `tsvector` (`simple` configuration for mixed Tagalog/English).
+- **Trigram indexes (optional)** — GIN indexes for `ILIKE` substring search when required.
+- **Correlation indexes** — Composite indexes for date-range filtering by source and latest-sentiment-per-article patterns.
+
+Executable SQL scripts document these indexes for reproducible deployment.
 
 ## Conceptual Design and System Architecture
 
-From a design perspective, PH VibeCheck AI follows a **pipeline** architecture: ingestion, analysis, storage, and visualization are separated into modules that can evolve independently. This separation is important for real-world news monitoring because failures are often source-specific (e.g., a single site changes layout), while the rest of the system should continue operating.
-
-At a high level, the system’s block flow can be summarized as:
-1. **Ingestion:** discover URLs per source, fetch content, normalize fields, and store articles.
-2. **Analysis:** compute sentiment and extract entities asynchronously in the background.
-3. **Persistence:** upsert analysis outputs with stable keys and maintain a public cache for the UI.
-4. **Visualization:** query aggregated signals (trends, correlation, entities) and support drill-down to articles.
-
-The detailed system diagram and the single-article lifecycle are presented in Chapter 3 (Technicality of the Project). In this chapter, the focus is on the methodological choices and procedures that govern how the pipeline is executed and evaluated.
-
-To satisfy hardbound reporting conventions for software-development theses, the following diagrams will be included in the final manuscript:
-- a **system block diagram** (module-level view of ingestion → analysis → storage → dashboards),
-- an **algorithm/flow diagram** for the hybrid sentiment decision path (route → score → neutral handling), and
-- an **evaluation workflow diagram** (gold sets → manual benchmark → drift checks).
-
-## Algorithmic Procedures (Operational View)
-
-Although the project integrates multiple components, its core behavior can be described as a small set of deterministic procedures that execute repeatedly during continuous runs and backfills.
+PH VibeCheck AI follows a **pipeline** architecture: ingestion, analysis, storage, and visualization are decoupled modules. The system block diagram and dashboard interface are presented in Chapter III (Figures 2 and 3). This chapter specifies the procedures that govern execution and evaluation.
 
 ![Hybrid sentiment procedure: compute Tagalog-signal, route to VADER+PH vs DistilBERT SST-2, apply bounded-input constraints and neutral handling, then persist outputs and routing metadata.](figures/method-hybrid-sentiment-flow.png){#fig:method-hybrid-flow}
 
-Figure X summarizes the operational decision path used in the hybrid sentiment engine. Articles with stronger Tagalog/Taglish signals are routed to the localized VADER pathway, while English-heavy articles are routed to the DistilBERT (SST-2) pathway; both paths apply conservative bounding/neutral handling before producing a final label and score.
-
-For auditability and reproducibility, the system records the selected route and key routing/model metadata together with the stored sentiment outputs, enabling later inspection of why a particular pathway was used for an article.
-
-### Scraping procedure (network-first → browser fallback)
-
-For each source, the scraper follows a layered strategy:
-1. **Seed URL candidates** from lightweight endpoints (HTTP section listings, RSS, or JSON list endpoints).
-2. **Canonicalize and de-duplicate** URLs before scraping.
-3. **DB preflight**: check which URLs already exist and skip them early.
-4. **Extract content via network-first parsing** (structured metadata / site JSON payloads / HTML parsing).
-5. **Fallback to Playwright rendering** when the extracted body is missing/incomplete or blocked, then re-extract text.
-6. **Normalize and store** the article (title, cleaned content, timestamps) for downstream analysis.
-
-This strategy improves throughput during catch-up windows by avoiding browser rendering for every item, while still retaining a correctness fallback for dynamic or bot-protected pages.
-
-### Hybrid sentiment procedure (route → score → neutral handling)
-
-The sentiment engine uses two scoring pathways and an explicit routing decision:
-1. Compute a lightweight **Tagalog-signal ratio** on the input text (based on a fixed set of Tagalog/Taglish tokens and patterns).
-2. **Route** the article to the most appropriate engine:
-   - Tagalog/Taglish-heavy → VADER + PH patch [@hutto2014vader]
-   - English-heavy → DistilBERT SST-2 polarity scoring [@sanh2019distilbert; @devlin2018bert; @socher2013sst]
-3. Apply **bounded-input constraints** for long-form stability (truncation/clipping for transformer inputs; chunk/weight strategy for long articles).
-4. Map raw model outputs to a three-class label set using:
-   - a neutral band around zero for VADER, and
-   - confidence-based abstention into neutral for the binary SST-2 transformer baseline.
-
-Routing decisions and key sub-model metadata are persisted so model behavior can be audited and explained in evaluation.
-
-### Entity extraction procedure (entity-centric aggregation)
-
-Entity extraction is applied per stored article:
-1. Run NER to extract entity spans and labels (PERSON/ORG/GPE) [@nadeau2007ner].
-2. Normalize and store extracted entities in a queryable representation.
-3. Compute aggregates for dashboards such as top entities by frequency and average sentiment of associated articles.
-
-### Storage semantics (upsert to avoid double counting)
-
-To ensure stable analytics across rescoring and backfills:
-1. Articles are stored with canonical URLs to prevent duplicate rows caused by trivial URL variants.
-2. Analysis outputs are written with upsert semantics using stable uniqueness keys (so re-runs overwrite instead of duplicating).
-3. A public cache table is maintained for fast UI reads (latest sentiment per article) while preserving richer internal metadata for audit and evaluation.
-
 ## NLP Analysis Method (Hybrid Sentiment + NER)
 
-Sentiment is computed using a hybrid engine that combines a Tagalog/Taglish-extended VADER pathway [@hutto2014vader] with a DistilBERT SST-2 transformer pathway [@sanh2019distilbert; @devlin2018bert; @socher2013sst]. A lightweight language-signal heuristic routes each article to the most appropriate pathway (Taglish-heavy → VADER+PH; English-heavy → DistilBERT).
+### Hybrid engine overview
 
-Named Entity Recognition (NER) is applied to extract persons, organizations, and locations (PERSON/ORG/GPE), enabling entity-level frequency ranking and associated sentiment summaries [@nadeau2007ner]. Entity outputs are used as exploratory signals to guide qualitative review rather than as definitive judgments.
+Sentiment combines a Tagalog/Taglish-extended VADER pathway [12] with a DistilBERT SST-2 transformer pathway [6, 23, 24] implemented via the Transformers library [31]. A lightweight Tagalog-signal heuristic routes each article:
 
-As a preprocessing principle, the system avoids aggressive “cleaning” that could change meaning (e.g., stripping punctuation globally). Instead, it applies only limited deterministic normalization where it is needed for model behavior (e.g., VADER phrase substitution and contrast handling in the Taglish patch), and otherwise relies on the underlying tokenizers (VADER rules and transformer tokenization) to handle punctuation and whitespace.
+- **Taglish-heavy** → VADER + Philippine lexicon patch
+- **English-heavy** → DistilBERT on CPU
+
+Reporting-preface patterns (e.g., “According to…”) can be routed to VADER or neutralized when transformer confidence is low.
+
+### VADER long-form weighting
+
+VADER was designed for short social text [12]; long articles can dilute polarity. The implementation:
+
+- Splits input into title and body (when a title/body separator is present).
+- Segments the body into sentence-based chunks (max ~700 characters per chunk).
+- Computes compound scores for title, lead chunks, and body chunks.
+- Aggregates with fixed weights (default: title 0.25, lead 0.35, body 0.40) into a single compound score in $[-1, 1]$.
+- Maps labels using a configurable neutral band (`VADER_NEUTRAL_BAND`, e.g., 0.16).
+
+### Philippine Tagalog/Taglish lexicon patch
+
+The PH patch (`ph_taglish_v1`) extends VADER with:
+
+- **248** lexicon terms
+- **53** multi-word phrase rules
+- Conservative negations, boosters, and Tagalog contrast-word normalization
+
+The patch is applied once per worker process; version and application status are recorded in `model_metadata`.
+
+### DistilBERT: CPU inference with truncation and neutralization
+
+The transformer path uses `distilbert-base-uncased-finetuned-sst-2-english` (SST-2 [24]). The researchers did **not** fine-tune DistilBERT on Philippine news; the model is used as a pretrained binary polarity estimator.
+
+- **Input bounds** — Character clipping (`DISTILBERT_MAX_CHARS`) and token truncation (`DISTILBERT_MAX_LENGTH`).
+- **Neutral handling** — Low-confidence predictions map to neutral via `DISTILBERT_NEUTRAL_MIN_CONF` (default 0.60).
+- **Reporting preface neutralization** — Short factual lead-ins can be neutralized when no strong sentiment tokens follow.
+
+### Hybrid router
+
+The router computes a Tagalog-signal ratio from token hits against a fixed Tagalog/Taglish token set. When the ratio exceeds `TAGALOG_SIGNAL_THRESHOLD` (default 0.06–0.15 depending on deployment config), the article is routed to VADER+PH; otherwise DistilBERT is used. Failover paths exist if either engine errors. Routing decisions and metadata are persisted for evaluation and audit.
+
+### Named entity recognition
+
+spaCy extracts PERSON, ORG, and GPE entities [20]. Outputs are normalized and aggregated for entity frequency ranking and associated sentiment summaries. Entity signals are exploratory indicators, not definitive judgments about bias or intent.
+
+### Preprocessing principle
+
+The system avoids aggressive global text cleaning that could alter meaning. Limited deterministic normalization applies only where required (VADER phrase substitution and contrast handling in the PH patch); otherwise VADER rules and transformer tokenization handle punctuation and whitespace.
 
 ## Evaluation Procedures
 
-Evaluation is designed to be thesis-defensible and reproducible, and to reflect two realities of Philippine news text: (1) code-switching and locally frequent expressions, and (2) long-form, factual reporting where neutrality must be handled carefully. To address these, the study uses three complementary evaluation strategies:
-1. **Offline gold sets** to validate specific linguistic edge cases under controlled settings.
-2. **Manual benchmark on real news** to measure end-to-end accuracy on authentic article text with human labels.
-3. **Drift checks on recent real articles** to ensure model updates produce explainable, inspectable changes in production-like data.
+Evaluation reflects two realities of Philippine news text: code-switching with locally frequent expressions, and long-form factual reporting where neutrality must be handled carefully. Three complementary strategies are used:
 
-*(Figure X: Evaluation workflow (gold sets → manual benchmark with two annotators + adjudication + kappa → drift checks → reports/tables). Insert diagram here.)*
+1. **Offline gold sets** — Controlled linguistic edge cases.
+2. **Manual benchmark on real news** — End-to-end accuracy on authentic articles.
+3. **Drift checks on recent articles** — Operational sanity checks after model changes.
 
-Figure X summarizes the evaluation workflow from controlled tests to real-news benchmarking and operational drift checks. Using multiple evaluation layers reduces the risk of overfitting to a small gold set while ensuring that changes observed on production-like data remain explainable.
+*(Insert Figure: Evaluation workflow — gold sets → manual benchmark with two annotators + adjudication + κ → drift checks → reports.)*
 
-Across evaluations, the core quantitative metrics are accuracy and confusion matrices. For the manual benchmark, the study also reports macro-averaged precision/recall/F1 across the three sentiment classes and measures inter-annotator agreement using Cohen’s kappa [@cohen1960kappa].
+Core metrics: accuracy, macro-F1, confusion matrices. Inter-annotator agreement uses Cohen's kappa [3].
 
-### Offline Gold Sets (Definition)
+### Offline gold sets
 
-The project includes:
-- **Taglish/Tagalog gold set:** `backend/app/ml/vader_ph_eval.v1.json` ($n=130$; 3-class: positive/neutral/negative).
-- **English-only gold set (transformer baseline):** `backend/app/ml/distilbert_en_gold.v1.json` ($n=94$; binary positive/negative).
+- **Taglish/Tagalog gold set** — 130 labeled short sentences (positive/neutral/negative); validates the PH lexicon patch in isolation.
+- **English-only gold set** — 100 (or 94) labeled sentences derived from the manual benchmark with low Tagalog signal; documents binary DistilBERT behavior.
 
-These sets are intended to stress key phenomena relevant to Philippine news: code-switching, Tagalog negation, contrast constructions, and PH news tokens.
+### Gold set evaluation procedure
 
-### Gold Set Evaluation Procedure
+Gold sets are evaluated with a reproducible script that reports accuracy, label distributions, confusion summaries, and misclassified examples. Tunable parameters include `VADER_NEUTRAL_BAND`, `TAGALOG_SIGNAL_THRESHOLD`, and `DISTILBERT_NEUTRAL_MIN_CONF`.
 
-Gold set evaluation is run using `backend/scripts/evaluate_vader_ph_gold.py`, which supports evaluating VADER, DistilBERT, and the hybrid router on a fixed labeled set. The script reports:
-- overall accuracy,
-- label distributions (true vs predicted),
-- a 3×3 confusion summary (positive/neutral/negative),
-- and a short list of misclassified examples for qualitative inspection.
+### Manual benchmark protocol (real news, 3-class)
 
-The script supports evaluating VADER, DistilBERT, and the hybrid router under controlled configurations. Key tunable parameters include:
-- `VADER_NEUTRAL_BAND` (neutral zone width for VADER label mapping),
-- `TAGALOG_SIGNAL_THRESHOLD` (routing threshold for hybrid selection),
-- `DISTILBERT_NEUTRAL_MIN_CONF` (confidence threshold for abstaining into neutral).
+A stratified sample of articles is drawn from the seven-day observation window. Two annotators label independently (positive/neutral/negative); disagreements are adjudicated into a final label. SunStar is excluded from the benchmark sample by default due to regional-language content that complicates consistent annotation.
 
-In addition, the evaluation harness can enable or disable specific Tagalog contrast handling behaviors (e.g., mapping contrast words such as *pero* into VADER’s contrast logic) to quantify their effect under identical data and thresholds.
+Inter-annotator agreement is measured with Cohen's kappa [3] on annotator labels before adjudication. Model evaluation compares VADER+PH patch, DistilBERT with confidence neutralization, and the hybrid router using accuracy and macro-F1.
 
-### Manual Benchmark Protocol (Real News, 3-Class)
+A complementary binary subset evaluation (positive vs. negative only, excluding neutral ground truth) can be reported for strict SST-2 comparability.
 
-To evaluate end-to-end behavior on real articles, the study constructs a manually labeled benchmark from the same observation window. The benchmark is exported from the database as a stratified sample using `backend/scripts/export_sentiment_benchmark_sample.py`, with a target sample size of $n=200$ and a minimum per-source quota (default 20) to ensure multi-source coverage. The export window is specified in PH local dates and converted to UTC for database filtering.
+### Drift checks on real articles
 
-Because some outlets can contain regional-language content that is not consistently handled by English-only sentiment baselines, the benchmark export excludes SunStar by default for label consistency (while SunStar remains supported by the system for live ingestion and dashboard views).
+Drift evaluation samples recent stored articles and compares a legacy single-pass VADER baseline against the current model path. Drift reports score deltas, label-shift percentages, and top-changed examples. Drift is an operational audit tool, not a substitute for labeled accuracy.
 
-#### Annotation workflow
+## Hardware and Software Environment
 
-The labeling workflow follows the protocol documented in `docs/sentiment_benchmark_labeling.md`:
-1. **Two annotators label independently** using three classes (positive/neutral/negative).
-2. Each annotator writes their decision into separate columns (`label_a`, `label_b`).
-3. **Adjudication** resolves disagreements into a final label (`label_final`) used as the reference label for model evaluation.
+**Hardware (development and deployment):** Standard x86_64 computer with sufficient RAM for Docker containers, Playwright browser instances, and CPU-based transformer inference (minimum 8 GB RAM recommended for concurrent workers).
 
-Inter-annotator agreement is measured using Cohen’s kappa on `label_a` versus `label_b` [@cohen1960kappa].
+**Software environment:**
 
-#### Model evaluation on the benchmark sample
-
-Benchmark evaluation is run using `backend/scripts/evaluate_sentiment_benchmark.py`. The script:
-- reads the labeled CSV (title + body text),
-- optionally applies conservative scraper-noise cleaning before inference (to remove repeated boilerplate and obvious concatenation artifacts),
-- computes accuracy, macro-F1, per-class precision/recall/F1, and confusion matrices for each model variant (VADER, DistilBERT, Hybrid),
-- reports hybrid route counts and route-level accuracy (e.g., VADER route vs DistilBERT route), and
-- outputs a JSON report and pre-formatted LaTeX tables for thesis reporting.
-
-The results used in Chapter 5 are taken from the generated JSON report under `backend/reports/` (e.g., `backend/reports/sentiment_benchmark_2026-03-25_2026-03-31.json`).
-
-Because SST-2 is a binary objective, the benchmark tool also reports an additional “binary subset” evaluation where neutral ground-truth rows are excluded and neutral predictions are treated as errors. This makes abstention behavior visible while allowing a direct positive-vs-negative comparison when needed.
-
-### Drift Checks on Real Articles
-
-Offline gold sets are limited in size and coverage; therefore, the project also runs drift evaluation on sampled real articles stored in the database. Drift checks are run using:
-- `backend/scripts/evaluate_vader_longform.py`
-
-This script compares a legacy baseline (single-pass VADER over full text) against a selected “new path” model (VADER long-form, DistilBERT, or hybrid), reporting:
-- score drift statistics and mean absolute delta,
-- label distribution shifts and percent changed labels,
-- and the most-changed examples to support qualitative inspection.
-
-The drift perspective is a safety mechanism: it reduces the risk that an update improves a small benchmark but causes unexpected behavior across real news text.
-
-Importantly, drift results are not treated as “accuracy” outcomes; rather, they function as an operational sanity check that surfaces large changes for audit and explanation.
+| Component | Version (repo-pinned) |
+|-----------|----------------------|
+| Python | 3.x (backend container) |
+| FastAPI | 0.104.1 |
+| Celery | 5.3.6 |
+| Redis | 5.0.4 |
+| Playwright | 1.46.0 |
+| spaCy | 3.7.4 |
+| transformers | 4.39.3 |
+| Next.js | 15.x |
+| Node.js | 20.x |
 
 ## Reproducibility and Offline Operation
 
-To keep evaluation repeatable across machines and networks, the system supports:
-- **Dockerized execution** of evaluation scripts inside the ML worker container, ensuring consistent dependencies and model code paths.
-- **Offline transformer loading** when the Hugging Face model weights are cached locally (via `HF_HOME` cache directory and `HF_HUB_OFFLINE=1` / `TRANSFORMERS_OFFLINE=1`), reducing reliance on network availability during thesis runs.
-- **Configurable thresholds via environment variables** (e.g., neutral bands and routing thresholds) so that reported results can be reproduced by re-running the same commands with the same settings (see Appendix A).
+To keep evaluation repeatable:
+
+- **Dockerized execution** — Evaluation scripts run inside the ML worker container for consistent dependencies.
+- **Offline transformer loading** — Hugging Face weights cached via `HF_HOME`; `HF_HUB_OFFLINE` / `TRANSFORMERS_OFFLINE` enable network-independent runs.
+- **Configurable thresholds** — Environment variables document production and evaluation settings (see Appendix A).
+
+The PH VibeCheck AI source code and evaluation scripts are publicly available to support replication on newly collected data, subject to publisher content licensing constraints.

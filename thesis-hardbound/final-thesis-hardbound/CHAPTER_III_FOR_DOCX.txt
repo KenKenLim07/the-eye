@@ -1,10 +1,10 @@
-# CHAPTER III — Technical Background
+CHAPTER III
 
-## Technical Background
+Technical Background
 
 The researchers reviewed related studies in sentiment analysis, named entity recognition, and Philippine media monitoring, and assessed suitable technologies for building an automated news analytics platform. Additional tools were evaluated during development to improve reliability under dynamic websites, multilingual and code-switched text, continuous scheduled ingestion, and reproducible storage. The selected stack combines a modular web application, asynchronous background workers, relational persistence, and a hybrid natural language processing pipeline adapted to Philippine online news.
 
-## Technicality of the Project
+Technicality of the Project
 
 The researchers assessed technologies suitable for continuous Philippine news ingestion, multilingual sentiment analysis, and interactive monitoring. PH VibeCheck AI is a system designed to automate the collection, processing, and visualization of sentiment and entity-level signals from major Philippine online news outlets. Its goal is to support scalable exploratory analysis of reporting tone across sources while allowing verification through drill-down to individual articles.
 
@@ -12,124 +12,123 @@ The technical complexity of the project lies not in a single algorithm, but in c
 
 The application includes scheduled article ingestion from multiple outlets, hybrid sentiment analysis with a Philippine Tagalog/Taglish VADER extension, fine-tuned DistilBERT classification for English-heavy text, named entity extraction, and interactive dashboards for search, temporal trends, cross-source comparison, and entity-level summaries. Processed outputs are stored in a relational database, including analyzed article records that support aggregation and reproducible reporting. Detailed procedures are presented in Chapter IV; analytical results are reported in Chapter V.
 
-## Details of the Technologies Used
+Details of the Technologies Used
 
 The following technologies were utilized in the development and deployment of PH VibeCheck AI. Each entry states the general definition of the technology, followed by its role in this study.
 
-**Computer** — an electronic device capable of receiving, storing, processing, and outputting data according to programmed instructions [32].
+Computer — an electronic device capable of receiving, storing, processing, and outputting data according to programmed instructions [32].
 
 In this study, computers host the development environment, Docker containers for the API and worker services, and local execution of scraping and machine learning tasks. They provide the computational resources required for browser automation, transformer inference on CPU, and interactive dashboard access during development and deployment.
 
-**Visual Studio Code** — a source-code editor that integrates editing, debugging, and project management for multi-language software development [33].
+Visual Studio Code — a source-code editor that integrates editing, debugging, and project management for multi-language software development [33].
 
 In this study, Visual Studio Code serves as the primary integrated development environment for implementing backend services, scraper modules, NLP components, frontend pages, and configuration files that constitute the PH VibeCheck AI platform.
 
-**Python** — a high-level programming language widely used for web services, data processing, automation, and machine learning applications [34].
+Python — a high-level programming language widely used for web services, data processing, automation, and machine learning applications [34].
 
 In this study, Python implements the FastAPI backend, Celery task workers, news scrapers, hybrid sentiment engine, entity extraction routines, and evaluation scripts that support thesis benchmarking and reproducibility.
 
-**Docker** — a platform for packaging applications and dependencies into portable containers that run consistently across environments [35].
+Docker — a platform for packaging applications and dependencies into portable containers that run consistently across environments [35].
 
 In this study, Docker containerizes the API service, scraping workers, machine learning workers, scheduler, and supporting services so that the pipeline can be deployed and reproduced with stable runtime dependencies.
 
-**Next.js** — a React-based framework for building server-rendered and client-rendered web applications with structured routing and optimized delivery [36].
+Next.js — a React-based framework for building server-rendered and client-rendered web applications with structured routing and optimized delivery [36].
 
 In this study, Next.js implements the PH VibeCheck AI frontend, including the Home, Search, Trends, Correlation, Entities, and About views used for monitoring and exploratory analysis of collected news data.
 
-**React** — a JavaScript library for constructing component-based user interfaces [37].
+React — a JavaScript library for constructing component-based user interfaces [37].
 
 In this study, React provides the component model underlying the Next.js dashboard interface, including article listings, navigation, modal inspection, and chart containers.
 
-**TypeScript** — a typed superset of JavaScript that supports safer development through static type checking [38].
+TypeScript — a typed superset of JavaScript that supports safer development through static type checking [38].
 
 In this study, TypeScript is used in the frontend codebase to improve maintainability of dashboard components, API client logic, and shared data structures passed to visualization modules.
 
-**Tailwind CSS** — a utility-first stylesheet framework for composing responsive interface layouts [39].
+Tailwind CSS — a utility-first stylesheet framework for composing responsive interface layouts [39].
 
 In this study, Tailwind CSS supports consistent spacing, typography, and responsive layout across dashboard pages, including mobile-adapted navigation and article feed presentation.
 
-**Recharts** — a charting library for React used to render line, bar, and related visualizations from structured data [40].
+Recharts — a charting library for React used to render line, bar, and related visualizations from structured data [40].
 
 In this study, Recharts renders sentiment trend timelines, distribution views, and related analytical charts that summarize stored article outputs over user-selected time windows.
 
-**Vercel** — a cloud platform for deploying and serving frontend web applications [41].
+Vercel — a cloud platform for deploying and serving frontend web applications [41].
 
 In this study, Vercel hosts the Next.js dashboard so that researchers and users can access monitoring views through a deployed web interface linked to the backend and database services.
 
-**FastAPI** — a Python web framework for building high-performance HTTP APIs with automatic request validation and OpenAPI documentation [42].
+FastAPI — a Python web framework for building high-performance HTTP APIs with automatic request validation and OpenAPI documentation [42].
 
 In this study, FastAPI exposes REST endpoints for article retrieval, analytics summaries, machine learning utilities, and operational controls, separating user-facing reads from background ingestion and analysis tasks.
 
-**Uvicorn** — an ASGI server implementation used to run asynchronous Python web applications [43].
+Uvicorn — an ASGI server implementation used to run asynchronous Python web applications [43].
 
 In this study, Uvicorn serves the FastAPI application inside the API container, enabling concurrent request handling for dashboard queries while workers process scraping and NLP jobs separately.
 
-**Playwright** — a browser automation framework for programmatic control of Chromium-based rendering and interaction [44].
+Playwright — a browser automation framework for programmatic control of Chromium-based rendering and interaction [44].
 
 In this study, Playwright provides the fallback extraction path when network-first scraping cannot retrieve complete article bodies from JavaScript-rendered or access-restricted Philippine news pages.
 
-**BeautifulSoup4** — a Python library for parsing HTML and XML documents into traversable document trees [45].
+BeautifulSoup4 — a Python library for parsing HTML and XML documents into traversable document trees [45].
 
 In this study, BeautifulSoup4 supports network-first article extraction by parsing static HTML, structured metadata, and embedded content before browser fallback is invoked.
 
-**Celery and Celery Beat** — a distributed task queue system and its periodic scheduler for executing background jobs outside the main application process [46].
+Celery and Celery Beat — a distributed task queue system and its periodic scheduler for executing background jobs outside the main application process [46].
 
 In this study, Celery workers execute scraping and machine learning tasks asynchronously on dedicated queues, while Celery Beat triggers per-source collection schedules that maintain continuous news ingestion without manual intervention.
 
-**Redis** — an in-memory data store used as a message broker, result backend, and lightweight cache [47].
+Redis — an in-memory data store used as a message broker, result backend, and lightweight cache [47].
 
 In this study, Redis queues Celery tasks between the API or scheduler and worker processes, stores task results where needed, and supports caching of repeated analytics queries to improve dashboard responsiveness.
 
-**PostgreSQL** — a relational database management system providing ACID-compliant storage, indexing, and query support [48].
+PostgreSQL — a relational database management system providing ACID-compliant storage, indexing, and query support [48].
 
 In this study, PostgreSQL stores normalized article records, analyzed articles with sentiment and entity outputs, and operational logs that underpin trend aggregation, search, and cross-source comparison.
 
-**Supabase** — a managed platform that provides PostgreSQL hosting together with client libraries and access controls for application integration [49].
+Supabase — a managed platform that provides PostgreSQL hosting together with client libraries and access controls for application integration [49].
 
 In this study, Supabase hosts the production database, including analyzed articles and related tables, supports row-level security for internal records, and enables selected direct reads from the frontend for responsive article listings.
 
-**NLTK and vaderSentiment** — Python libraries for natural language processing and lexicon-based sentiment scoring, including bundled access to the VADER sentiment lexicon [50, 51].
+NLTK and vaderSentiment — Python libraries for natural language processing and lexicon-based sentiment scoring, including bundled access to the VADER sentiment lexicon [50, 51].
 
 In this study, these libraries supply the runtime for the VADER analyzer, including an offline-friendly initialization path when standard NLTK lexicon downloads are unavailable in containerized workers.
 
-**VADER** — a rule-based sentiment model that computes compound polarity scores from a lexicon, grammatical heuristics, and intensification rules designed for social and short-form text [12].
+VADER — a rule-based sentiment model that computes compound polarity scores from a lexicon, grammatical heuristics, and intensification rules designed for social and short-form text [12].
 
 In this study, VADER is extended with a Philippine Tagalog/Taglish lexicon patch and long-form weighting for news articles. Articles with stronger Tagalog/Taglish signal are routed through this pathway within the hybrid sentiment engine described in Chapter IV.
 
-**Hugging Face Transformers** — a library and ecosystem for loading and running pretrained transformer models for natural language processing tasks [31].
+Hugging Face Transformers — a library and ecosystem for loading and running pretrained transformer models for natural language processing tasks [31].
 
 In this study, the Transformers library loads a fine-tuned DistilBERT sentiment classifier on CPU, applies token truncation for long articles, and supports offline model caching for reproducible evaluation runs.
 
-**DistilBERT** — a distilled transformer encoder derived from BERT, designed to reduce model size and inference cost while retaining much of BERT's language understanding capability [6, 23].
+DistilBERT — a distilled transformer encoder derived from BERT, designed to reduce model size and inference cost while retaining much of BERT's language understanding capability [6, 23].
 
 In this study, a fine-tuned DistilBERT model scores English-heavy news text for sentiment polarity [6, 23]. Because the model produces binary polarity outputs, neutrality is introduced through confidence-based thresholding before results are stored in the hybrid pipeline and written to analyzed articles.
 
-**spaCy** — an industrial-strength natural language processing library that provides pretrained pipelines for tokenization, tagging, and named entity recognition [52].
+spaCy — an industrial-strength natural language processing library that provides pretrained pipelines for tokenization, tagging, and named entity recognition [52].
 
 In this study, spaCy extracts PERSON, ORG, and GPE entities from stored article text to support entity frequency ranking and entity-level sentiment summaries within the observation window [20].
 
-**NumPy** — a fundamental Python package for numerical computing with multidimensional arrays and vectorized operations [53].
+NumPy — a fundamental Python package for numerical computing with multidimensional arrays and vectorized operations [53].
 
 In this study, NumPy supports numerical operations inside machine learning inference and metric computation during benchmark evaluation.
 
-**pandas** — a Python library for tabular data manipulation, filtering, and export [54].
+pandas — a Python library for tabular data manipulation, filtering, and export [54].
 
 In this study, pandas handles manual benchmark samples exported for annotation and ingests labeled results for accuracy, macro-F1, and confusion-matrix reporting.
 
-**SciPy** — a Python library for scientific and technical computing, including statistical routines [55].
+SciPy — a Python library for scientific and technical computing, including statistical routines [55].
 
 In this study, SciPy supports statistical computations used in analytics and evaluation workflows where numerical libraries beyond core array operations are required.
 
-**scikit-learn** — a machine learning library providing classification metrics and evaluation utilities [56].
+scikit-learn — a machine learning library providing classification metrics and evaluation utilities [56].
 
 In this study, scikit-learn computes accuracy, precision, recall, F1, and macro-F1 for gold-set and manual benchmark evaluations reported in Chapter V.
 
-### Technology Stack Justification
+Technology Stack Justification
 
-| Goal | Technologies Used | Justification |
-|------|-------------------|---------------|
-| Scalability | Celery, Redis, FastAPI | Separates heavy ingestion and NLP from API requests; supports concurrent dashboard access. |
-| Modularity | Supabase, Next.js | Separates persistence, API logic, and presentation for independent maintenance. |
-| NLP coverage | VADER [12], fine-tuned DistilBERT [23], spaCy [20] | Combines lexicon-based Taglish handling, transformer-based English polarity scoring, and entity extraction. |
-| Performance | Playwright, Redis | Network-first scraping with browser fallback; cached reads for repeated analytics queries. |
-| Reliability | PostgreSQL, Docker | ACID storage with upsert semantics; reproducible containerized deployment. |
+Goal | Technologies Used | Justification
+Scalability | Celery, Redis, FastAPI | Separates heavy ingestion and NLP from API requests; supports concurrent dashboard access.
+Modularity | Supabase, Next.js | Separates persistence, API logic, and presentation for independent maintenance.
+NLP coverage | VADER [12], fine-tuned DistilBERT [23], spaCy [20] | Combines lexicon-based Taglish handling, transformer-based English polarity scoring, and entity extraction.
+Performance | Playwright, Redis | Network-first scraping with browser fallback; cached reads for repeated analytics queries.
+Reliability | PostgreSQL, Docker | ACID storage with upsert semantics; reproducible containerized deployment.

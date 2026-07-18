@@ -1,0 +1,197 @@
+<mxfile host="app.diagrams.net">
+  <diagram name="Program Flowchart" id="program-flowchart-ph-vibecheck">
+    <mxGraphModel dx="1800" dy="1200" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2000" pageHeight="2100" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- START / END -->
+        <mxCell id="start" parent="1" style="ellipse;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;" value="Start" vertex="1">
+          <mxGeometry x="470" y="30" width="100" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="end" parent="1" style="ellipse;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;" value="End" vertex="1">
+          <mxGeometry x="1040" y="1880" width="100" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- CONNECTORS -->
+        <mxCell id="conn1" parent="1" style="ellipse;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;" value="1" vertex="1">
+          <mxGeometry x="1070" y="1780" width="40" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="conn2" parent="1" style="ellipse;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;" value="2" vertex="1">
+          <mxGeometry x="120" y="220" width="40" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- INGESTION PIPELINE -->
+        <mxCell id="proc-trigger" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;" value="Receive Scheduled&lt;br&gt;Scrape Trigger" vertex="1">
+          <mxGeometry x="420" y="110" width="200" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="proc-discover" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;" value="Discover Candidate URLs" vertex="1">
+          <mxGeometry x="420" y="190" width="200" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="io-url" parent="1" style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fixedSize=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;" value="Article URL" vertex="1">
+          <mxGeometry x="430" y="270" width="180" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="d-dup" parent="1" style="rhombus;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;" value="is duplicate&lt;br&gt;URL?" vertex="1">
+          <mxGeometry x="445" y="360" width="150" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="ok-dup" parent="1" style="ellipse;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;" value="Successful&lt;br&gt;Duplicate Skipped" vertex="1">
+          <mxGeometry x="140" y="500" width="170" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="proc-extract" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;" value="Extract Content via&lt;br&gt;HTTP / JSON / HTML" vertex="1">
+          <mxGeometry x="620" y="490" width="200" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="d-complete" parent="1" style="rhombus;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;" value="is content&lt;br&gt;complete?" vertex="1">
+          <mxGeometry x="645" y="590" width="150" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="proc-playwright" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;" value="Playwright Browser&lt;br&gt;Extraction" vertex="1">
+          <mxGeometry x="900" y="680" width="180" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="io-article" parent="1" style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fixedSize=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;" value="Article Text and Metadata" vertex="1">
+          <mxGeometry x="610" y="730" width="220" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="proc-store" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;" value="Normalize and Store Article" vertex="1">
+          <mxGeometry x="620" y="820" width="200" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="proc-enqueue" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;" value="Enqueue ML Analysis Task" vertex="1">
+          <mxGeometry x="620" y="910" width="200" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- HYBRID SENTIMENT PIPELINE -->
+        <mxCell id="proc-signal" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;" value="Compute Tagalog Signal" vertex="1">
+          <mxGeometry x="620" y="1000" width="200" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="d-taglish" parent="1" style="rhombus;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;" value="is Taglish-&lt;br&gt;heavy?" vertex="1">
+          <mxGeometry x="645" y="1090" width="150" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="proc-vader" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;" value="VADER + PH Lexicon&lt;br&gt;Sentiment Scoring" vertex="1">
+          <mxGeometry x="380" y="1230" width="200" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="proc-distil" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;" value="DistilBERT SST-2&lt;br&gt;Sentiment Scoring" vertex="1">
+          <mxGeometry x="860" y="1230" width="200" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="proc-ner" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;" value="Extract Entities with spaCy" vertex="1">
+          <mxGeometry x="620" y="1340" width="200" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="io-analysis" parent="1" style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fixedSize=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;" value="Sentiment Label and Entity Data" vertex="1">
+          <mxGeometry x="600" y="1430" width="240" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="proc-upsert" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;" value="Upsert Analysis Outputs&lt;br&gt;to Database" vertex="1">
+          <mxGeometry x="610" y="1520" width="220" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="ok-success" parent="1" style="ellipse;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;" value="Successful&lt;br&gt;Article Processing" vertex="1">
+          <mxGeometry x="630" y="1620" width="180" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="d-another" parent="1" style="rhombus;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;" value="is another&lt;br&gt;article?" vertex="1">
+          <mxGeometry x="645" y="1730" width="150" height="90" as="geometry" />
+        </mxCell>
+
+        <!-- EDGES: main spine -->
+        <mxCell id="e-start-trigger" edge="1" parent="1" source="start" target="proc-trigger" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Times New Roman;fontSize=11;fontColor=#28253d;" />
+        <mxCell id="e-trigger-discover" edge="1" parent="1" source="proc-trigger" target="proc-discover" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Times New Roman;fontSize=11;fontColor=#28253d;" />
+        <mxCell id="e-discover-url" edge="1" parent="1" source="proc-discover" target="io-url" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Times New Roman;fontSize=11;fontColor=#28253d;" />
+        <mxCell id="e-url-dup" edge="1" parent="1" source="io-url" target="d-dup" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Times New Roman;fontSize=11;fontColor=#28253d;" />
+        <mxCell id="e-dup-extract" edge="1" parent="1" source="d-dup" target="proc-extract" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Times New Roman;fontSize=11;fontColor=#28253d;labelBackgroundColor=#ffffff;" value="False" />
+        <mxCell id="e-dup-skip" edge="1" parent="1" source="d-dup" target="ok-dup" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Times New Roman;fontSize=11;fontColor=#28253d;labelBackgroundColor=#ffffff;" value="True">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="380" y="405" />
+              <mxPoint x="380" y="530" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e-extract-complete" edge="1" parent="1" source="proc-extract" target="d-complete" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Times New Roman;fontSize=11;fontColor=#28253d;" />
+        <mxCell id="e-complete-article" edge="1" parent="1" source="d-complete" target="io-article" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Times New Roman;fontSize=11;fontColor=#28253d;labelBackgroundColor=#ffffff;" value="True" />
+        <mxCell id="e-complete-playwright" edge="1" parent="1" source="d-complete" target="proc-playwright" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Times New Roman;fontSize=11;fontColor=#28253d;labelBackgroundColor=#ffffff;" value="False">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="820" y="635" />
+              <mxPoint x="820" y="705" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e-playwright-article" edge="1" parent="1" source="proc-playwright" target="io-article" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Times New Roman;fontSize=11;fontColor=#28253d;">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="990" y="755" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e-article-store" edge="1" parent="1" source="io-article" target="proc-store" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Times New Roman;fontSize=11;fontColor=#28253d;" />
+        <mxCell id="e-store-enqueue" edge="1" parent="1" source="proc-store" target="proc-enqueue" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Times New Roman;fontSize=11;fontColor=#28253d;" />
+        <mxCell id="e-enqueue-signal" edge="1" parent="1" source="proc-enqueue" target="proc-signal" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Times New Roman;fontSize=11;fontColor=#28253d;" />
+        <mxCell id="e-signal-taglish" edge="1" parent="1" source="proc-signal" target="d-taglish" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Times New Roman;fontSize=11;fontColor=#28253d;" />
+        <mxCell id="e-taglish-vader" edge="1" parent="1" source="d-taglish" target="proc-vader" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Times New Roman;fontSize=11;fontColor=#28253d;labelBackgroundColor=#ffffff;" value="True">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="560" y="1135" />
+              <mxPoint x="560" y="1255" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e-taglish-distil" edge="1" parent="1" source="d-taglish" target="proc-distil" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Times New Roman;fontSize=11;fontColor=#28253d;labelBackgroundColor=#ffffff;" value="False">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="780" y="1135" />
+              <mxPoint x="780" y="1255" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e-vader-ner" edge="1" parent="1" source="proc-vader" target="proc-ner" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Times New Roman;fontSize=11;fontColor=#28253d;">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="480" y="1310" />
+              <mxPoint x="720" y="1310" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e-distil-ner" edge="1" parent="1" source="proc-distil" target="proc-ner" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Times New Roman;fontSize=11;fontColor=#28253d;">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="960" y="1310" />
+              <mxPoint x="720" y="1310" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e-ner-io" edge="1" parent="1" source="proc-ner" target="io-analysis" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Times New Roman;fontSize=11;fontColor=#28253d;" />
+        <mxCell id="e-io-upsert" edge="1" parent="1" source="io-analysis" target="proc-upsert" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Times New Roman;fontSize=11;fontColor=#28253d;" />
+        <mxCell id="e-upsert-ok" edge="1" parent="1" source="proc-upsert" target="ok-success" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Times New Roman;fontSize=11;fontColor=#28253d;" />
+        <mxCell id="e-ok-another" edge="1" parent="1" source="ok-success" target="d-another" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Times New Roman;fontSize=11;fontColor=#28253d;" />
+        <mxCell id="e-dupok-another" edge="1" parent="1" source="ok-dup" target="d-another" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Times New Roman;fontSize=11;fontColor=#28253d;">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="80" y="530" />
+              <mxPoint x="80" y="1775" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- LOOP / EXIT -->
+        <mxCell id="e-another-conn2" edge="1" parent="1" source="d-another" target="conn2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Times New Roman;fontSize=11;fontColor=#28253d;labelBackgroundColor=#ffffff;dashed=1;" value="True">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="200" y="1775" />
+              <mxPoint x="200" y="240" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e-conn2-url" edge="1" parent="1" source="conn2" target="io-url" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Times New Roman;fontSize=11;fontColor=#28253d;dashed=1;">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="260" y="240" />
+              <mxPoint x="260" y="295" />
+              <mxPoint x="430" y="295" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e-another-conn1" edge="1" parent="1" source="d-another" target="conn1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Times New Roman;fontSize=11;fontColor=#28253d;labelBackgroundColor=#ffffff;" value="False">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="900" y="1775" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e-conn1-end" edge="1" parent="1" source="conn1" target="end" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Times New Roman;fontSize=11;fontColor=#28253d;dashed=1;" />
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

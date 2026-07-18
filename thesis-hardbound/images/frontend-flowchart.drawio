@@ -1,0 +1,260 @@
+<mxfile host="app.diagrams.net">
+  <diagram name="Frontend Flowchart" id="frontend-flowchart-ph-vibecheck">
+    <mxGraphModel dx="1600" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1400" pageHeight="2000" background="#ffffff" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- Title -->
+        <mxCell id="title" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontFamily=Times New Roman;fontSize=14;fontStyle=1;fontColor=#28253d;" value="Program Flowchart — PH VibeCheck AI Frontend (Next.js Dashboard)" vertex="1">
+          <mxGeometry x="300" y="10" width="500" height="30" as="geometry" />
+        </mxCell>
+
+        <!-- START / END / CONNECTORS -->
+        <mxCell id="start" parent="1" style="ellipse;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;strokeColor=#28253d;" value="Start" vertex="1">
+          <mxGeometry x="500" y="50" width="100" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="end" parent="1" style="ellipse;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;strokeColor=#28253d;" value="End" vertex="1">
+          <mxGeometry x="500" y="1820" width="100" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="conn1" parent="1" style="ellipse;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;strokeColor=#28253d;" value="1" vertex="1">
+          <mxGeometry x="530" y="1720" width="40" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="conn2" parent="1" style="ellipse;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;strokeColor=#28253d;" value="2" vertex="1">
+          <mxGeometry x="680" y="200" width="40" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- HOME PAGE (hub) -->
+        <mxCell id="page-home" parent="1" style="rounded=1;whiteSpace=wrap;html=1;arcSize=50;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;strokeColor=#28253d;" value="Home Page" vertex="1">
+          <mxGeometry x="450" y="130" width="200" height="45" as="geometry" />
+        </mxCell>
+
+        <!-- NAVIGATION HUB (sequential decisions) -->
+        <mxCell id="d-home" parent="1" style="rhombus;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;strokeColor=#28253d;" value="is Home?" vertex="1">
+          <mxGeometry x="485" y="210" width="130" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="d-search" parent="1" style="rhombus;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;strokeColor=#28253d;" value="is Search?" vertex="1">
+          <mxGeometry x="485" y="320" width="130" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="d-analytics" parent="1" style="rhombus;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;strokeColor=#28253d;" value="is Analytics?" vertex="1">
+          <mxGeometry x="485" y="430" width="130" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="d-about" parent="1" style="rhombus;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;strokeColor=#28253d;" value="is About?" vertex="1">
+          <mxGeometry x="485" y="540" width="130" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- LEFT COLUMN: HOME FEED -->
+        <mxCell id="io-home-data" parent="1" style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fixedSize=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;strokeColor=#28253d;" value="KPI Summary and Latest Headlines" vertex="1">
+          <mxGeometry x="60" y="300" width="240" height="45" as="geometry" />
+        </mxCell>
+        <mxCell id="d-home-qv" parent="1" style="rhombus;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;strokeColor=#28253d;" value="is Quick View?" vertex="1">
+          <mxGeometry x="115" y="380" width="130" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="proc-home-qv" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;strokeColor=#28253d;" value="Open Quick View Modal" vertex="1">
+          <mxGeometry x="80" y="490" width="200" height="45" as="geometry" />
+        </mxCell>
+        <mxCell id="io-home-details" parent="1" style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fixedSize=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;strokeColor=#28253d;" value="Article Details and Sentiment Label" vertex="1">
+          <mxGeometry x="70" y="570" width="220" height="45" as="geometry" />
+        </mxCell>
+        <mxCell id="d-home-read" parent="1" style="rhombus;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;strokeColor=#28253d;" value="is Read Original?" vertex="1">
+          <mxGeometry x="105" y="650" width="150" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="proc-home-read" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;strokeColor=#28253d;" value="Open Publisher Website" vertex="1">
+          <mxGeometry x="80" y="760" width="200" height="45" as="geometry" />
+        </mxCell>
+        <mxCell id="ok-home" parent="1" style="ellipse;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;strokeColor=#28253d;" value="Successful Article View" vertex="1">
+          <mxGeometry x="90" y="840" width="180" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="d-home-another" parent="1" style="rhombus;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;strokeColor=#28253d;" value="is Another Article?" vertex="1">
+          <mxGeometry x="100" y="930" width="160" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- CENTER COLUMN: SEARCH -->
+        <mxCell id="page-search" parent="1" style="rounded=1;whiteSpace=wrap;html=1;arcSize=50;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;strokeColor=#28253d;" value="Search Page" vertex="1">
+          <mxGeometry x="430" y="650" width="200" height="45" as="geometry" />
+        </mxCell>
+        <mxCell id="io-search-in" parent="1" style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fixedSize=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;strokeColor=#28253d;" value="Keyword and Source Filter" vertex="1">
+          <mxGeometry x="420" y="730" width="220" height="45" as="geometry" />
+        </mxCell>
+        <mxCell id="proc-search" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;strokeColor=#28253d;" value="Fetch Matching Articles" vertex="1">
+          <mxGeometry x="430" y="810" width="200" height="45" as="geometry" />
+        </mxCell>
+        <mxCell id="d-search-found" parent="1" style="rhombus;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;strokeColor=#28253d;" value="is Results Found?" vertex="1">
+          <mxGeometry x="455" y="890" width="150" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="io-search-out" parent="1" style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fixedSize=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;strokeColor=#28253d;" value="Search Results List" vertex="1">
+          <mxGeometry x="430" y="1000" width="200" height="45" as="geometry" />
+        </mxCell>
+        <mxCell id="d-search-qv" parent="1" style="rhombus;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;strokeColor=#28253d;" value="is Quick View?" vertex="1">
+          <mxGeometry x="455" y="1080" width="150" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="proc-search-qv" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;strokeColor=#28253d;" value="Open Quick View Modal" vertex="1">
+          <mxGeometry x="430" y="1190" width="200" height="45" as="geometry" />
+        </mxCell>
+        <mxCell id="ok-search" parent="1" style="ellipse;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;strokeColor=#28253d;" value="Successful Search View" vertex="1">
+          <mxGeometry x="440" y="1270" width="180" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="d-search-another" parent="1" style="rhombus;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;strokeColor=#28253d;" value="is Another Search?" vertex="1">
+          <mxGeometry x="445" y="1360" width="170" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- RIGHT COLUMN: ANALYTICS -->
+        <mxCell id="d-trends" parent="1" style="rhombus;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;strokeColor=#28253d;" value="is Trends?" vertex="1">
+          <mxGeometry x="980" y="650" width="130" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="page-trends" parent="1" style="rounded=1;whiteSpace=wrap;html=1;arcSize=50;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;strokeColor=#28253d;" value="Trends Page" vertex="1">
+          <mxGeometry x="945" y="760" width="200" height="45" as="geometry" />
+        </mxCell>
+        <mxCell id="io-trends-in" parent="1" style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fixedSize=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;strokeColor=#28253d;" value="Period and Source Filter" vertex="1">
+          <mxGeometry x="935" y="840" width="220" height="45" as="geometry" />
+        </mxCell>
+        <mxCell id="proc-trends" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;strokeColor=#28253d;" value="Load Sentiment Timeline Chart" vertex="1">
+          <mxGeometry x="925" y="920" width="240" height="45" as="geometry" />
+        </mxCell>
+        <mxCell id="d-corr" parent="1" style="rhombus;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;strokeColor=#28253d;" value="is Correlation?" vertex="1">
+          <mxGeometry x="970" y="1000" width="150" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="page-corr" parent="1" style="rounded=1;whiteSpace=wrap;html=1;arcSize=50;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;strokeColor=#28253d;" value="Correlation Page" vertex="1">
+          <mxGeometry x="945" y="1110" width="200" height="45" as="geometry" />
+        </mxCell>
+        <mxCell id="proc-corr" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;strokeColor=#28253d;" value="Load Source Correlation Matrix" vertex="1">
+          <mxGeometry x="925" y="1190" width="240" height="45" as="geometry" />
+        </mxCell>
+        <mxCell id="d-entities" parent="1" style="rhombus;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;strokeColor=#28253d;" value="is Entities?" vertex="1">
+          <mxGeometry x="975" y="1270" width="140" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="page-entities" parent="1" style="rounded=1;whiteSpace=wrap;html=1;arcSize=50;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;strokeColor=#28253d;" value="Entities Page" vertex="1">
+          <mxGeometry x="945" y="1380" width="200" height="45" as="geometry" />
+        </mxCell>
+        <mxCell id="proc-entities" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;strokeColor=#28253d;" value="Load Entity Rankings and Sentiment" vertex="1">
+          <mxGeometry x="915" y="1460" width="260" height="45" as="geometry" />
+        </mxCell>
+        <mxCell id="ok-analytics" parent="1" style="ellipse;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;strokeColor=#28253d;" value="Successful Analytics View" vertex="1">
+          <mxGeometry x="950" y="1540" width="190" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="d-analytics-exit" parent="1" style="rhombus;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;strokeColor=#28253d;" value="is Exit?" vertex="1">
+          <mxGeometry x="980" y="1630" width="130" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- ABOUT (branch below hub) -->
+        <mxCell id="page-about" parent="1" style="rounded=1;whiteSpace=wrap;html=1;arcSize=50;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;strokeColor=#28253d;" value="About Page" vertex="1">
+          <mxGeometry x="250" y="660" width="200" height="45" as="geometry" />
+        </mxCell>
+        <mxCell id="proc-about" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;strokeColor=#28253d;" value="View System and Method Overview" vertex="1">
+          <mxGeometry x="220" y="740" width="260" height="45" as="geometry" />
+        </mxCell>
+        <mxCell id="ok-about" parent="1" style="ellipse;whiteSpace=wrap;html=1;fontFamily=Times New Roman;fontColor=#28253d;fontSize=12;fillColor=none;strokeColor=#28253d;" value="Successful About View" vertex="1">
+          <mxGeometry x="260" y="820" width="180" height="55" as="geometry" />
+        </mxCell>
+
+        <!-- EDGES: main flow -->
+        <mxCell id="e-start-home" edge="1" parent="1" source="start" target="page-home" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#28253d;fontFamily=Times New Roman;fontSize=11;" />
+        <mxCell id="e-home-dhome" edge="1" parent="1" source="page-home" target="d-home" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#28253d;" />
+        <mxCell id="e-dhome-yes" edge="1" parent="1" source="d-home" target="io-home-data" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#28253d;" value="Yes">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-dhome-no" edge="1" parent="1" source="d-home" target="d-search" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#28253d;" value="No">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-dsearch-yes" edge="1" parent="1" source="d-search" target="page-search" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#28253d;" value="Yes">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-dsearch-no" edge="1" parent="1" source="d-search" target="d-analytics" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#28253d;" value="No">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-danalytics-yes" edge="1" parent="1" source="d-analytics" target="d-trends" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#28253d;" value="Yes">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-danalytics-no" edge="1" parent="1" source="d-analytics" target="d-about" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#28253d;" value="No">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-dabout-yes" edge="1" parent="1" source="d-about" target="page-about" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#28253d;" value="Yes">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-dabout-no" edge="1" parent="1" source="d-about" target="conn1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#28253d;" value="No">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- HOME column edges -->
+        <mxCell id="e-h1" edge="1" parent="1" source="io-home-data" target="d-home-qv" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#28253d;" />
+        <mxCell id="e-h2" edge="1" parent="1" source="d-home-qv" target="proc-home-qv" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#28253d;" value="Yes" />
+        <mxCell id="e-h3" edge="1" parent="1" source="proc-home-qv" target="io-home-details" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#28253d;" />
+        <mxCell id="e-h4" edge="1" parent="1" source="io-home-details" target="d-home-read" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#28253d;" />
+        <mxCell id="e-h5" edge="1" parent="1" source="d-home-read" target="proc-home-read" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#28253d;" value="Yes" />
+        <mxCell id="e-h6" edge="1" parent="1" source="d-home-read" target="ok-home" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#28253d;" value="No">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-h7" edge="1" parent="1" source="proc-home-read" target="ok-home" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#28253d;" />
+        <mxCell id="e-h8" edge="1" parent="1" source="ok-home" target="d-home-another" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#28253d;" />
+        <mxCell id="e-h9" edge="1" parent="1" source="d-home-another" target="conn2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#28253d;dashed=1;" value="Yes" />
+        <mxCell id="e-h10" edge="1" parent="1" source="d-home-another" target="conn1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#28253d;" value="No" />
+        <mxCell id="e-h11" edge="1" parent="1" source="d-home-qv" target="ok-home" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#28253d;" value="No">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- SEARCH column edges -->
+        <mxCell id="e-s1" edge="1" parent="1" source="page-search" target="io-search-in" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#28253d;" />
+        <mxCell id="e-s2" edge="1" parent="1" source="io-search-in" target="proc-search" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#28253d;" />
+        <mxCell id="e-s3" edge="1" parent="1" source="proc-search" target="d-search-found" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#28253d;" />
+        <mxCell id="e-s4" edge="1" parent="1" source="d-search-found" target="io-search-out" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#28253d;" value="Yes" />
+        <mxCell id="e-s5" edge="1" parent="1" source="d-search-found" target="conn2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#28253d;dashed=1;" value="No">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-s6" edge="1" parent="1" source="io-search-out" target="d-search-qv" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#28253d;" />
+        <mxCell id="e-s7" edge="1" parent="1" source="d-search-qv" target="proc-search-qv" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#28253d;" value="Yes" />
+        <mxCell id="e-s8" edge="1" parent="1" source="proc-search-qv" target="ok-search" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#28253d;" />
+        <mxCell id="e-s9" edge="1" parent="1" source="d-search-qv" target="ok-search" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#28253d;" value="No" />
+        <mxCell id="e-s10" edge="1" parent="1" source="ok-search" target="d-search-another" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#28253d;" />
+        <mxCell id="e-s11" edge="1" parent="1" source="d-search-another" target="conn2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#28253d;dashed=1;" value="Yes" />
+        <mxCell id="e-s12" edge="1" parent="1" source="d-search-another" target="conn1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#28253d;" value="No" />
+
+        <!-- ANALYTICS column edges -->
+        <mxCell id="e-a1" edge="1" parent="1" source="d-trends" target="page-trends" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#28253d;" value="Yes" />
+        <mxCell id="e-a2" edge="1" parent="1" source="d-trends" target="d-corr" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#28253d;" value="No" />
+        <mxCell id="e-a3" edge="1" parent="1" source="page-trends" target="io-trends-in" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#28253d;" />
+        <mxCell id="e-a4" edge="1" parent="1" source="io-trends-in" target="proc-trends" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#28253d;" />
+        <mxCell id="e-a5" edge="1" parent="1" source="proc-trends" target="d-corr" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#28253d;" />
+        <mxCell id="e-a6" edge="1" parent="1" source="d-corr" target="page-corr" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#28253d;" value="Yes" />
+        <mxCell id="e-a7" edge="1" parent="1" source="d-corr" target="d-entities" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#28253d;" value="No" />
+        <mxCell id="e-a8" edge="1" parent="1" source="page-corr" target="proc-corr" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#28253d;" />
+        <mxCell id="e-a9" edge="1" parent="1" source="proc-corr" target="d-entities" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#28253d;" />
+        <mxCell id="e-a10" edge="1" parent="1" source="d-entities" target="page-entities" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#28253d;" value="Yes" />
+        <mxCell id="e-a11" edge="1" parent="1" source="d-entities" target="ok-analytics" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#28253d;" value="No">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-a12" edge="1" parent="1" source="page-entities" target="proc-entities" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#28253d;" />
+        <mxCell id="e-a13" edge="1" parent="1" source="proc-entities" target="ok-analytics" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#28253d;" />
+        <mxCell id="e-a14" edge="1" parent="1" source="ok-analytics" target="d-analytics-exit" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#28253d;" />
+        <mxCell id="e-a15" edge="1" parent="1" source="d-analytics-exit" target="end" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#28253d;" value="Yes" />
+        <mxCell id="e-a16" edge="1" parent="1" source="d-analytics-exit" target="conn1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#28253d;" value="No" />
+
+        <!-- ABOUT edges -->
+        <mxCell id="e-ab1" edge="1" parent="1" source="page-about" target="proc-about" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#28253d;" />
+        <mxCell id="e-ab2" edge="1" parent="1" source="proc-about" target="ok-about" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#28253d;" />
+        <mxCell id="e-ab3" edge="1" parent="1" source="ok-about" target="conn1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#28253d;">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="350" y="920" />
+              <mxPoint x="550" y="920" />
+              <mxPoint x="550" y="1740" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- CONNECTOR jumps -->
+        <mxCell id="e-c1-home" edge="1" parent="1" source="conn1" target="page-home" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#28253d;dashed=1;entryX=1;entryY=0.5;entryDx=0;entryDy=0;">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="700" y="1740" />
+              <mxPoint x="700" y="153" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e-c2-hub" edge="1" parent="1" source="conn2" target="d-home" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#28253d;dashed=1;entryX=1;entryY=0.5;entryDx=0;entryDy=0;">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

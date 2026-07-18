@@ -1,0 +1,25 @@
+Phase,Task Number,Task,In-Charge,Duration (Weeks),Start Week,End Week
+Business Understanding,T1,T1 Group Organization,Project Researchers,1,1,1
+Business Understanding,T2,T2 Project Planning,Project Researchers,1,2,2
+Business Understanding,T3,T3 Finalizing the Study Title,Project Researchers,2,3,4
+Business Understanding,T4,T4 Research Proposal Preparation,Project Manager,1,5,5
+Business Understanding,T5,T5 Define the research problem and objectives,Project Manager,1,6,6
+Business Understanding,T6,T6 Project Timeline and Task Scheduling,Project Manager,1,7,7
+Data Understanding,T7,T7 Select Philippine online news sources,Project Researchers,2,8,9
+Data Understanding,T8,T8 Collect news articles through automated web scraping,Programmer,1,10,10
+Data Understanding,T9,T9 Perform initial data exploration and analysis,Data Analyst,2,11,12
+Data Understanding,T10,T10 Examine article structures metadata and data quality,Project Manager,1,13,13
+Data Preparation,T11,T11 Clean and preprocess the collected news articles,Data Analyst/Programmer,2,14,15
+Data Preparation,T12,T12 Perform text normalization and tokenization,Programmer,1,16,16
+Data Preparation,T13,T13 Extract relevant information and prepare datasets,Programmer,2,17,18
+Data Preparation,T14,T14 Organize data for sentiment analysis and visualization,UI/UX Designer,1,19,19
+Modeling,T15,T15 Develop and integrate the hybrid sentiment classification model,Project Manager,3,20,22
+Modeling,T16,T16 Configure preprocessing and analysis pipelines,Project Manager,1,23,23
+Modeling,T17,T17 Develop the dashboard and visualization components,UI/UX Designer,2,24,25
+Evaluation,T18,T18 Validate article extraction accuracy,Data Analyst,1,26,26
+Evaluation,T19,T19 Evaluate sentiment classification performance,Data Analyst,1,27,27
+Evaluation,T20,T20 Refine model configurations and system logic,Data Analyst/Programmer,2,28,29
+Evaluation,T21,T21 Analyze and interpret system outputs for the observation period,Data Analyst/Programmer,1,30,30
+Deployment,T22,T22 Deploy the system to the operational environment,Project Researchers,1,31,31
+Deployment,T23,T23 Monitor system performance under live conditions,Data Analyst/Programmer,1,32,32
+Deployment,T24,T24 Prepare system documentation presentation and final deliverables,Project Manager,2,33,34
