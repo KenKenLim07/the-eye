@@ -1,24 +1,23 @@
-# PH Eye Documentation
+# PH VibeCheck AI — Documentation
 
-This folder contains internal documentation for the PH Eye project.
+Start here if you are browsing the repo:
 
-## What The System Does
+1. **[Root README](../README.md)** — project overview (best first read for recruiters)
+2. **[Developer ops runbook](./DEVELOPER_OPS.md)** — Docker, scrapers, backfill, portfolio freeze, troubleshooting
 
-- Scrapes news articles from supported Philippine online news sources.
-- Normalizes URLs and cleaned article text for consistent storage.
-- Runs NLP:
-  - Sentiment analysis using NLTK VADER (compound score + label).
-  - Named Entity Recognition (spaCy) to extract PERSON/ORG/GPE entities for aggregation.
-- Exposes a FastAPI backend consumed by the Next.js dashboard (trends, correlation, entity summaries, per-source article views).
+## Technical notes
 
-## Index
+| Doc | Topic |
+|-----|--------|
+| [FINAL_ACCURACY_EVALUATION.md](./FINAL_ACCURACY_EVALUATION.md) | Sentiment gold-set + manual benchmark commands |
+| [ACCURACY_EVALUATION.md](./ACCURACY_EVALUATION.md) | Earlier accuracy notes |
+| [ML_AI_INTEGRATION.md](./ML_AI_INTEGRATION.md) | How ML is wired into the backend |
+| [LAYOUT_SYSTEM.md](./LAYOUT_SYSTEM.md) | Frontend layout conventions |
+| [DATA_FLOW_DIAGRAM.md](./DATA_FLOW_DIAGRAM.md) / [IMPROVED](./DATA_FLOW_DIAGRAM_IMPROVED.md) | Data-flow diagrams |
+| [SUMMARIZATION_QUICK_START.md](./SUMMARIZATION_QUICK_START.md) | Optional summarization feature |
+| [AI_SUMMARIZATION_IMPLEMENTATION.md](./AI_SUMMARIZATION_IMPLEMENTATION.md) | Summarization implementation detail |
+| [sentiment_benchmark_labeling.md](./sentiment_benchmark_labeling.md) | Labeling notes for the n=200 sample |
+| [WINDOWS_DEFENSE_RUNBOOK.md](./WINDOWS_DEFENSE_RUNBOOK.md) | Defense / Windows runbook |
+| [BORROWED_LAPTOP_SETUP_GUIDE.md](./BORROWED_LAPTOP_SETUP_GUIDE.md) | One-off machine setup |
 
-- [ML AI Integration](./ML_AI_INTEGRATION.md)
-- [Accuracy Evaluation](./ACCURACY_EVALUATION.md)
-- [Layout System](./LAYOUT_SYSTEM.md)
-- [AI Summarization Quick Start](./SUMMARIZATION_QUICK_START.md)
-- [AI Summarization Implementation](./AI_SUMMARIZATION_IMPLEMENTATION.md)
-- [Borrowed Laptop Setup Guide](./BORROWED_LAPTOP_SETUP_GUIDE.md)
-- [Windows Defense Runbook](./WINDOWS_DEFENSE_RUNBOOK.md)
-
-Last updated: March 2026
+Last updated: July 2026
