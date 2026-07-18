@@ -10,16 +10,22 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
 from supabase import Client, create_client
 from supabase._sync.client import SupabaseException
 
+_SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
 
-TZ_PH = ZoneInfo("Asia/Manila")
+from snapshot_window import resolve_window  # noqa: E402
+
 TZ_UTC = ZoneInfo("UTC")
 
 
@@ -34,22 +40,6 @@ def get_supabase() -> Client:
         raise RuntimeError(
             "Invalid Supabase API key. Ensure SUPABASE_SERVICE_ROLE_KEY is the full service_role key."
         ) from e
-
-
-def window_bounds(period: str, include_today: bool = True) -> tuple[str, str]:
-    now_local = datetime.now(TZ_PH)
-    window_days = 30 if period == "30d" else 7
-
-    if include_today:
-        end_local = now_local.replace(hour=23, minute=59, second=59, microsecond=999999)
-        start_local = (now_local - timedelta(days=window_days - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
-    else:
-        end_local = (now_local - timedelta(days=1)).replace(hour=23, minute=59, second=59, microsecond=999999)
-        start_local = (end_local - timedelta(days=window_days - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
-
-    start_utc = start_local.astimezone(TZ_UTC)
-    end_utc = end_local.astimezone(TZ_UTC)
-    return start_utc.isoformat(), end_utc.isoformat()
 
 
 def fetch_articles_paginated(
@@ -133,9 +123,20 @@ def dedupe_latest_by_article(rows: list[dict]) -> list[dict]:
     return list(best.values())
 
 
-def compute_trends(period: str, source: Optional[str], include_today: bool) -> dict:
+def compute_trends(
+    period: str,
+    source: Optional[str],
+    include_today: bool,
+    *,
+    anchor_latest: bool = False,
+) -> dict:
     sb = get_supabase()
-    start_date_str, end_date_str = window_bounds(period, include_today=include_today)
+    start_date_str, end_date_str, note = resolve_window(
+        sb, period, include_today=include_today, anchor_latest=anchor_latest
+    )
+    if note:
+        print(f"[trends] {period}: {note}")
+        print(f"[trends] window {start_date_str} .. {end_date_str}")
 
     articles = fetch_articles_paginated(sb, start_date_str, end_date_str, source=source, limit_per_batch=1000)
 
@@ -248,18 +249,37 @@ def compute_trends(period: str, source: Optional[str], include_today: bool) -> d
     }
 
 
-def write_snapshot(period: str, source: Optional[str], include_today: bool) -> str:
+def write_snapshot(
+    period: str,
+    source: Optional[str],
+    include_today: bool,
+    *,
+    anchor_latest: bool = False,
+    skip_empty: bool = False,
+) -> Optional[str]:
     sb = get_supabase()
-    payload = compute_trends(period=period, source=source, include_today=include_today)
+    payload = compute_trends(
+        period=period,
+        source=source,
+        include_today=include_today,
+        anchor_latest=anchor_latest,
+    )
+    summary = payload.get("summary") or {}
+    timeline = payload.get("timeline") or []
+    total = int(summary.get("total_articles") or 0)
+    if skip_empty and total <= 0:
+        print(f"Skip empty trends snapshot period={period} (would overwrite with no data)")
+        return None
+
     key = snapshot_key(period, source, include_today)
     row = {
         "key": key,
         "period": period,
         "source": source,
         "include_today": include_today,
-        "computed_at": datetime.now(ZoneInfo("UTC")).isoformat(),
-        "summary": payload.get("summary") or {},
-        "timeline": payload.get("timeline") or [],
+        "computed_at": datetime.now(TZ_UTC).isoformat(),
+        "summary": summary,
+        "timeline": timeline,
     }
     sb.table("sentiment_trends_snapshots").upsert(row).execute()
     return key
@@ -270,10 +290,27 @@ def main(argv: list[str]) -> int:
     ap.add_argument("period", choices=["7d", "30d"])
     ap.add_argument("--include-today", action="store_true", default=True)
     ap.add_argument("--no-include-today", dest="include_today", action="store_false")
+    ap.add_argument(
+        "--anchor-latest",
+        action="store_true",
+        help="End the window at the newest article published_at (portfolio freeze)",
+    )
+    ap.add_argument(
+        "--skip-empty",
+        action="store_true",
+        help="Do not upsert if the computed window has zero articles",
+    )
     args = ap.parse_args(argv[1:])
 
-    key = write_snapshot(period=args.period, source=None, include_today=bool(args.include_today))
-    print(f"Wrote trends snapshot {key}")
+    key = write_snapshot(
+        period=args.period,
+        source=None,
+        include_today=bool(args.include_today),
+        anchor_latest=bool(args.anchor_latest),
+        skip_empty=bool(args.skip_empty),
+    )
+    if key:
+        print(f"Wrote trends snapshot {key}")
     return 0
 
 

@@ -13,6 +13,8 @@ import ActiveFilters from "@/components/analytics/active-filters";
 import { PH_SOURCES_WITH_ALL } from "@/lib/sources";
 import Link from "next/link";
 import { Skeleton } from "@/components/ui/skeleton";
+import { shouldUseSnapshots } from "@/lib/analytics-source";
+import { DemoDataBanner } from "@/components/demo-data-banner";
 
 interface NerEntity {
   text: string;
@@ -61,24 +63,6 @@ const inflight = new Map<string, Promise<NerSampleData>>();
 
 const snapshotsCache = new Map<string, { expires: number; data: NerSampleData }>();
 const snapshotsInflight = new Map<string, Promise<NerSampleData>>();
-
-function hasUsableBackend(): boolean {
-  // In dev, assume the backend is available at localhost (even if NEXT_PUBLIC_BACKEND_URL is unset).
-  if (process.env.NODE_ENV === "development") return true;
-
-  const url = process.env.NEXT_PUBLIC_BACKEND_URL;
-  if (!url) return false;
-
-  // Treat local-only URLs as "no backend" for hosted demos.
-  if (url.includes("localhost") || url.includes("127.0.0.1")) return false;
-  return true;
-}
-
-function shouldUseSnapshots(): boolean {
-  // Opt-in override for demo mode.
-  if (process.env.NEXT_PUBLIC_ANALYTICS_SOURCE === "supabase_snapshots") return true;
-  return !hasUsableBackend();
-}
 
 function snapshotKeyFor(period: string): string {
   // Matches backend/scripts/entity_rankings_snapshot.py
@@ -259,7 +243,7 @@ async function fetchTopEntitiesFromSnapshots(period: string, refresh = false): P
 export default function EntitiesPage() {
   const useSnapshots = shouldUseSnapshots();
   const [selectedSource, setSelectedSource] = useState("all");
-  const [selectedPeriod, setSelectedPeriod] = useState("7d");
+  const [selectedPeriod, setSelectedPeriod] = useState("30d");
   const [rows, setRows] = useState<NerEntity[]>([]);
   const [sampled, setSampled] = useState<number>(0);
   const [sampleCap, setSampleCap] = useState<number>(500);
@@ -349,6 +333,8 @@ export default function EntitiesPage() {
             Top Entities (NER + Sentiment) extracted from recent articles.
           </p>
         </div>
+
+        {useSnapshots ? <DemoDataBanner computedAt={computedAt} /> : null}
 
         <div className="space-y-3">
           <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">

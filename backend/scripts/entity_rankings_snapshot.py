@@ -5,7 +5,7 @@ import re
 import sys
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 from zoneinfo import ZoneInfo
@@ -17,10 +17,14 @@ from supabase._sync.client import SupabaseException
 
 # Allow importing backend "app" package when invoked from repo root.
 BACKEND_DIR = Path(__file__).resolve().parents[1]
+SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
 
 from app.nlp.spacy_nlp import extract_entities  # noqa: E402
+from snapshot_window import resolve_window  # noqa: E402
 
 
 ALLOWED_ENTITY_LABELS = {"PERSON", "ORG", "GPE", "NORP"}
@@ -233,21 +237,6 @@ def clean_entity_for_counting(raw_text: str, label: str) -> Optional[Tuple[str, 
     mapped = ENTITY_CANONICAL_ALIASES.get(norm_text)
     display = mapped[0] if mapped else _title_display(norm_text)
     return norm_text, canon_label, display
-
-
-def window_bounds(period: str, include_today: bool = True) -> Tuple[str, str]:
-    tz_ph = ZoneInfo("Asia/Manila")
-    now_local = datetime.now(tz_ph)
-    window_days = 30 if period == "30d" else 7
-    if include_today:
-        end_local = now_local.replace(hour=23, minute=59, second=59, microsecond=999999)
-        start_local = (now_local - timedelta(days=window_days - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
-    else:
-        end_local = (now_local - timedelta(days=1)).replace(hour=23, minute=59, second=59, microsecond=999999)
-        start_local = (end_local - timedelta(days=window_days - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
-    start_utc = start_local.astimezone(ZoneInfo("UTC"))
-    end_utc = end_local.astimezone(ZoneInfo("UTC"))
-    return start_utc.isoformat(), end_utc.isoformat()
 
 
 def get_supabase() -> Client:
@@ -463,7 +452,12 @@ def write_snapshot(
         sb.table("entity_rankings_items").insert(insert_rows).execute()
 
 
-def run_snapshot(period: str) -> None:
+def run_snapshot(
+    period: str,
+    *,
+    anchor_latest: bool = False,
+    skip_empty: bool = False,
+) -> None:
     sb = get_supabase()
     params = SnapshotParams(
         period=period,
@@ -475,9 +469,19 @@ def run_snapshot(period: str) -> None:
         max_entities=100,
     )
 
-    start_iso, end_iso = window_bounds(period, include_today=True)
+    start_iso, end_iso, note = resolve_window(
+        sb, period, include_today=True, anchor_latest=anchor_latest
+    )
+    if note:
+        print(f"[entities] {period}: {note}")
+        print(f"[entities] window {start_iso} .. {end_iso}")
+
     all_articles = fetch_articles_paginated(sb, start_iso, end_iso, source=None)
     total_available = len(all_articles)
+    if skip_empty and total_available <= 0:
+        print(f"Skip empty entity snapshot period={period} (would overwrite with no data)")
+        return
+
     total_capped = total_available if params.total_cap <= 0 else min(total_available, max(1, params.total_cap))
     capped = all_articles[:total_capped]
     if params.scan_mode == "full":
@@ -511,13 +515,34 @@ def run_snapshot(period: str) -> None:
 
 
 def main(argv: List[str]) -> int:
-    periods = ["7d", "30d"]
-    if len(argv) >= 2:
-        periods = [argv[1]]
+    import argparse
+
+    ap = argparse.ArgumentParser(description="Write entity rankings snapshots into Supabase")
+    ap.add_argument(
+        "period",
+        nargs="?",
+        choices=["7d", "30d"],
+        help="Period to write (default: both 7d and 30d)",
+    )
+    ap.add_argument(
+        "--anchor-latest",
+        action="store_true",
+        help="End the window at the newest article published_at (portfolio freeze)",
+    )
+    ap.add_argument(
+        "--skip-empty",
+        action="store_true",
+        help="Do not upsert if the computed window has zero articles",
+    )
+    args = ap.parse_args(argv[1:])
+
+    periods = [args.period] if args.period else ["7d", "30d"]
     for p in periods:
-        if p not in {"7d", "30d"}:
-            raise SystemExit("period must be '7d' or '30d'")
-        run_snapshot(p)
+        run_snapshot(
+            p,
+            anchor_latest=bool(args.anchor_latest),
+            skip_empty=bool(args.skip_empty),
+        )
     return 0
 
 

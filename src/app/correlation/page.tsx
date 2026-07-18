@@ -12,11 +12,14 @@ import AnalyticsFiltersSheet from "@/components/analytics/analytics-filters-shee
 import ActiveFilters from "@/components/analytics/active-filters";
 import { PH_SOURCES_WITH_ALL } from "@/lib/sources";
 import { Skeleton } from "@/components/ui/skeleton";
+import { shouldUseSnapshots } from "@/lib/analytics-source";
+import { DemoDataBanner } from "@/components/demo-data-banner";
 
 interface CorrelationData {
   ok: boolean;
   period: string;
   include_today: boolean;
+  computed_at?: string | null;
   sources: string[];
   matrix: Array<Array<number | null>>;
   p_values: Array<Array<number | null>>;
@@ -88,19 +91,6 @@ const PERIODS = [
 const corrCache = new Map<string, { expires: number; data: CorrelationData }>();
 const inflightRequests = new Map<string, Promise<CorrelationData>>();
 
-function hasUsableBackend(): boolean {
-  if (process.env.NODE_ENV === "development") return true;
-  const url = process.env.NEXT_PUBLIC_BACKEND_URL;
-  if (!url) return false;
-  if (url.includes("localhost") || url.includes("127.0.0.1")) return false;
-  return true;
-}
-
-function shouldUseSnapshots(): boolean {
-  if (process.env.NEXT_PUBLIC_ANALYTICS_SOURCE === "supabase_snapshots") return true;
-  return !hasUsableBackend();
-}
-
 function corrSnapshotKey(period: string): string {
   return `corr:period=${period}:sources=all:include_today=1`;
 }
@@ -109,7 +99,7 @@ async function fetchCorrelationSnapshot(period: string): Promise<CorrelationData
   const key = corrSnapshotKey(period);
   const { data, error } = await supabaseUntyped
     .from("correlation_snapshots")
-    .select("sources,matrix,p_values,period,include_today")
+    .select("sources,matrix,p_values,period,include_today,computed_at")
     .eq("key", key)
     .limit(1);
   if (error) throw error;
@@ -119,6 +109,7 @@ async function fetchCorrelationSnapshot(period: string): Promise<CorrelationData
     ok: true,
     period: row.period || period,
     include_today: row.include_today ?? true,
+    computed_at: row.computed_at ?? null,
     sources: row.sources || [],
     matrix: row.matrix || [],
     p_values: row.p_values || [],
@@ -187,7 +178,7 @@ async function fetchCorrelation(period: string, source?: string, refresh = false
 
 export default function CorrelationPage() {
   const [selectedSource, setSelectedSource] = useState("all");
-  const [selectedPeriod, setSelectedPeriod] = useState("7d");
+  const [selectedPeriod, setSelectedPeriod] = useState("30d");
   const [corr, setCorr] = useState<CorrelationData | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -223,6 +214,8 @@ export default function CorrelationPage() {
           <h1 className="u-serif text-3xl font-semibold tracking-tight">Correlation Matrix</h1>
           <p className="text-muted-foreground">Daily average sentiment correlation across sources (last 7d/30d)</p>
         </div>
+
+        {useSnapshots ? <DemoDataBanner computedAt={corr?.computed_at} /> : null}
 
         <div className="space-y-3">
           <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">

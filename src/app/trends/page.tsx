@@ -14,6 +14,8 @@ import { supabaseUntyped } from "@/lib/supabase/client";
 import AnalyticsFiltersSheet from "@/components/analytics/analytics-filters-sheet";
 import ActiveFilters from "@/components/analytics/active-filters";
 import { PH_SOURCES_WITH_ALL } from "@/lib/sources";
+import { shouldUseSnapshots } from "@/lib/analytics-source";
+import { DemoDataBanner } from "@/components/demo-data-banner";
 
 interface TrendsData {
   ok: boolean;
@@ -56,19 +58,6 @@ const COLORS = {
 const trendsCache = new Map<string, { expires: number; data: TrendsData }>();
 const inflightRequests = new Map<string, Promise<TrendsData>>();
 
-function hasUsableBackend(): boolean {
-  if (process.env.NODE_ENV === "development") return true;
-  const url = process.env.NEXT_PUBLIC_BACKEND_URL;
-  if (!url) return false;
-  if (url.includes("localhost") || url.includes("127.0.0.1")) return false;
-  return true;
-}
-
-function shouldUseSnapshots(): boolean {
-  if (process.env.NEXT_PUBLIC_ANALYTICS_SOURCE === "supabase_snapshots") return true;
-  return !hasUsableBackend();
-}
-
 function trendsSnapshotKey(period: string): string {
   return `trends:period=${period}:source=all:include_today=1`;
 }
@@ -93,7 +82,7 @@ async function fetchTrendsSnapshot(period: string): Promise<TrendsData> {
   return { ok: true, computed_at: row.computed_at ?? null, summary: row.summary, timeline: row.timeline } as TrendsData;
 }
 
-async function fetchTrends(source?: string, period: string = "7d", opts?: { refresh?: boolean; ttlMs?: number }): Promise<TrendsData> {
+async function fetchTrends(source?: string, period: string = "30d", opts?: { refresh?: boolean; ttlMs?: number }): Promise<TrendsData> {
   if (shouldUseSnapshots()) {
     const key = `trends_snap:${period}:all`;
     const now = Date.now();
@@ -239,7 +228,7 @@ export default function TrendsPage() {
   const [data, setData] = useState<TrendsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedSource, setSelectedSource] = useState("all");
-  const [selectedPeriod, setSelectedPeriod] = useState("7d");
+  const [selectedPeriod, setSelectedPeriod] = useState("30d");
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isFilterLoading, setIsFilterLoading] = useState(false);
@@ -351,9 +340,10 @@ export default function TrendsPage() {
 
             <Card>
               <CardHeader>
-                <CardTitle>30d snapshots aren’t generated yet</CardTitle>
+                <CardTitle>30d snapshot not found</CardTitle>
                 <CardDescription>
-                  This deployment is using Supabase snapshot mode. Only 7d snapshots are currently automated by cron.
+                  Portfolio snapshot mode is on, but no 30d row exists yet. Freeze both periods with{" "}
+                  <code className="text-xs">freeze_portfolio_snapshots.py</code>, or switch to 7d.
                 </CardDescription>
               </CardHeader>
               <CardContent className="flex flex-col sm:flex-row gap-2">
@@ -420,6 +410,14 @@ export default function TrendsPage() {
           <h1 className="u-serif text-3xl font-semibold tracking-tight">News Sentiment Trends</h1>
           <p className="text-muted-foreground">Analyzing sentiment patterns across Philippine news sources</p>
         </div>
+
+        {useSnapshots ? (
+          <DemoDataBanner
+            computedAt={data.computed_at}
+            dataFrom={timeline[0]?.date}
+            dataTo={timeline[timeline.length - 1]?.date}
+          />
+        ) : null}
 
         <div className="space-y-3">
           <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">

@@ -10,17 +10,23 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime
 from math import sqrt
+from pathlib import Path
 from typing import Optional
 from zoneinfo import ZoneInfo
 
 from supabase import Client, create_client
 from supabase._sync.client import SupabaseException
 
+_SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
 
-TZ_PH = ZoneInfo("Asia/Manila")
+from snapshot_window import resolve_window  # noqa: E402
+
 TZ_UTC = ZoneInfo("UTC")
 
 
@@ -35,22 +41,6 @@ def get_supabase() -> Client:
         raise RuntimeError(
             "Invalid Supabase API key. Ensure SUPABASE_SERVICE_ROLE_KEY is the full service_role key."
         ) from e
-
-
-def window_bounds(period: str, include_today: bool = True) -> tuple[str, str]:
-    now_local = datetime.now(TZ_PH)
-    window_days = 30 if period == "30d" else 7
-
-    if include_today:
-        end_local = now_local.replace(hour=23, minute=59, second=59, microsecond=999999)
-        start_local = (now_local - timedelta(days=window_days - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
-    else:
-        end_local = (now_local - timedelta(days=1)).replace(hour=23, minute=59, second=59, microsecond=999999)
-        start_local = (end_local - timedelta(days=window_days - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
-
-    start_utc = start_local.astimezone(TZ_UTC)
-    end_utc = end_local.astimezone(TZ_UTC)
-    return start_utc.isoformat(), end_utc.isoformat()
 
 
 def fetch_articles_paginated(
@@ -151,9 +141,19 @@ def dedupe_latest_by_article(rows: list[dict]) -> list[dict]:
     return list(best.values())
 
 
-def compute_correlation(period: str, include_today: bool) -> dict:
+def compute_correlation(
+    period: str,
+    include_today: bool,
+    *,
+    anchor_latest: bool = False,
+) -> dict:
     sb = get_supabase()
-    start_date_str, end_date_str = window_bounds(period, include_today=include_today)
+    start_date_str, end_date_str, note = resolve_window(
+        sb, period, include_today=include_today, anchor_latest=anchor_latest
+    )
+    if note:
+        print(f"[correlation] {period}: {note}")
+        print(f"[correlation] window {start_date_str} .. {end_date_str}")
 
     articles = fetch_articles_paginated(sb, start_date_str, end_date_str, source=None, limit_per_batch=1000)
     if not articles:
@@ -223,16 +223,31 @@ def compute_correlation(period: str, include_today: bool) -> dict:
     return {"ok": True, "period": period, "include_today": include_today, "sources": src_names, "matrix": matrix, "p_values": pvals}
 
 
-def write_snapshot(period: str, include_today: bool) -> str:
+def write_snapshot(
+    period: str,
+    include_today: bool,
+    *,
+    anchor_latest: bool = False,
+    skip_empty: bool = False,
+) -> Optional[str]:
     sb = get_supabase()
-    payload = compute_correlation(period=period, include_today=include_today)
+    payload = compute_correlation(
+        period=period,
+        include_today=include_today,
+        anchor_latest=anchor_latest,
+    )
+    sources = payload.get("sources") or []
+    if skip_empty and not sources:
+        print(f"Skip empty correlation snapshot period={period} (would overwrite with no data)")
+        return None
+
     key = snapshot_key(period, include_today)
     row = {
         "key": key,
         "period": period,
         "include_today": include_today,
-        "computed_at": datetime.now(ZoneInfo("UTC")).isoformat(),
-        "sources": payload.get("sources") or [],
+        "computed_at": datetime.now(TZ_UTC).isoformat(),
+        "sources": sources,
         "matrix": payload.get("matrix") or [],
         "p_values": payload.get("p_values") or [],
     }
@@ -245,10 +260,26 @@ def main(argv: list[str]) -> int:
     ap.add_argument("period", choices=["7d", "30d"])
     ap.add_argument("--include-today", action="store_true", default=True)
     ap.add_argument("--no-include-today", dest="include_today", action="store_false")
+    ap.add_argument(
+        "--anchor-latest",
+        action="store_true",
+        help="End the window at the newest article published_at (portfolio freeze)",
+    )
+    ap.add_argument(
+        "--skip-empty",
+        action="store_true",
+        help="Do not upsert if the computed window has no sources/data",
+    )
     args = ap.parse_args(argv[1:])
 
-    key = write_snapshot(period=args.period, include_today=bool(args.include_today))
-    print(f"Wrote correlation snapshot {key}")
+    key = write_snapshot(
+        period=args.period,
+        include_today=bool(args.include_today),
+        anchor_latest=bool(args.anchor_latest),
+        skip_empty=bool(args.skip_empty),
+    )
+    if key:
+        print(f"Wrote correlation snapshot {key}")
     return 0
 
 

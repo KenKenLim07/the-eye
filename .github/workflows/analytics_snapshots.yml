@@ -1,10 +1,14 @@
 name: Analytics Snapshots (Supabase)
 
+# Portfolio mode: scheduled writes are disabled so calendar "7d from today"
+# cannot overwrite frozen demo snapshots with empty windows after scraping stops.
+# Re-freeze manually when needed:
+#   python backend/scripts/freeze_portfolio_snapshots.py
+# Or re-enable the cron below if you resume live ingestion.
 on:
-  schedule:
-    # Every 6 hours at minute 10
-    - cron: "10 */4 * * *"
   workflow_dispatch: {}
+  # schedule:
+  #   - cron: "10 */4 * * *"
 
 concurrency:
   group: analytics-snapshots
@@ -31,11 +35,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r backend/scripts/requirements.entity_rankings_snapshot.txt
 
-      - name: Write 7d snapshots
+      - name: Write anchored 7d + 30d snapshots (portfolio-safe)
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
-          python backend/scripts/trends_snapshot.py 7d
-          python backend/scripts/correlation_snapshot.py 7d
-          python backend/scripts/entity_rankings_snapshot.py 7d
+          # Anchor to latest article + skip empty so a manual run cannot wipe good data.
+          python backend/scripts/trends_snapshot.py 7d --anchor-latest --skip-empty
+          python backend/scripts/trends_snapshot.py 30d --anchor-latest --skip-empty
+          python backend/scripts/correlation_snapshot.py 7d --anchor-latest --skip-empty
+          python backend/scripts/correlation_snapshot.py 30d --anchor-latest --skip-empty
+          python backend/scripts/entity_rankings_snapshot.py 7d --anchor-latest --skip-empty
+          python backend/scripts/entity_rankings_snapshot.py 30d --anchor-latest --skip-empty

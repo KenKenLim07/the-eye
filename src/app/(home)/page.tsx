@@ -10,6 +10,8 @@ import { formatDateTime } from "@/lib/utils/date";
 import HomeKpis from "@/components/home/home-kpis";
 import { unstable_cache } from "next/cache";
 import { PH_SOURCES } from "@/lib/sources";
+import { shouldUseSnapshots } from "@/lib/analytics-source";
+import { DemoDataBanner } from "@/components/demo-data-banner";
 
 // In production we often run without a deployed backend; force dynamic so Supabase reads happen at request-time
 // instead of being snapshotted during build (which can result in a "blank" homepage until the next revalidate).
@@ -22,6 +24,8 @@ type HomeStats = {
   last_updated: string | null;
   coverage_7d: number | null; // 0..1, null when unavailable
   sentiment_7d: { positive: number; neutral: number; negative: number; unlabeled: number; total: number } | null;
+  /** When portfolio mode anchors KPIs to the newest article instead of "now". */
+  demo_anchor_published_at?: string | null;
 };
 
 async function fetchHomeArticlesFromSupabase(limitPerSource: number): Promise<Record<string, Article[]>> {
@@ -145,9 +149,28 @@ async function fetchSentimentSplitFromTrendsSnapshot(
 }
 
 async function fetchHomeStatsFromSupabase(): Promise<HomeStats> {
-  const now = Date.now();
-  const iso24h = new Date(now - 24 * 60 * 60 * 1000).toISOString();
-  const iso7d = new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const portfolio = shouldUseSnapshots();
+
+  // Portfolio / demo: anchor "last 24h / 7d" to the newest article still in the DB,
+  // otherwise calendar-now windows are empty after scraping stops.
+  let anchorIso: string | null = null;
+  let nowMs = Date.now();
+  if (portfolio) {
+    const { data: latestRows } = await supabaseServer
+      .from("articles")
+      .select("published_at")
+      .order("published_at", { ascending: false })
+      .limit(1);
+    const latest = (latestRows?.[0]?.published_at as string | null | undefined) ?? null;
+    if (latest) {
+      anchorIso = latest;
+      const t = new Date(latest).getTime();
+      if (Number.isFinite(t)) nowMs = t;
+    }
+  }
+
+  const iso24h = new Date(nowMs - 24 * 60 * 60 * 1000).toISOString();
+  const iso7d = new Date(nowMs - 7 * 24 * 60 * 60 * 1000).toISOString();
 
   const [
     totalRes,
@@ -244,10 +267,12 @@ async function fetchHomeStatsFromSupabase(): Promise<HomeStats> {
       : null;
 
   // Weekly sentiment split is used on the home KPI.
-  // Prefer a DB-precomputed snapshot (fast + stable for Vercel demos), otherwise compute from the public cache table.
-  const sentiment_7d =
-    (await fetchSentimentSplitFromSupabase(iso7d, 12_000)) ??
-    (await fetchSentimentSplitFromTrendsSnapshot("7d"));
+  // Portfolio: prefer frozen trends snapshot. Live: compute from public cache, snapshot as fallback.
+  const sentiment_7d = portfolio
+    ? (await fetchSentimentSplitFromTrendsSnapshot("7d")) ??
+      (await fetchSentimentSplitFromSupabase(iso7d, 12_000))
+    : (await fetchSentimentSplitFromSupabase(iso7d, 12_000)) ??
+      (await fetchSentimentSplitFromTrendsSnapshot("7d"));
   return {
     total_articles,
     articles_last_24h,
@@ -255,34 +280,46 @@ async function fetchHomeStatsFromSupabase(): Promise<HomeStats> {
     last_updated,
     coverage_7d,
     sentiment_7d,
+    demo_anchor_published_at: anchorIso,
   };
 }
 
-const fetchHomeStatsCached = unstable_cache(fetchHomeStatsFromSupabase, ["home-stats-v1"], { revalidate: 30 });
+const fetchHomeStatsCached = unstable_cache(fetchHomeStatsFromSupabase, ["home-stats-v2"], { revalidate: 30 });
 const fetchHomeArticlesCached = unstable_cache(
-  async (limitPerSource: number, hasBackend: boolean) => {
-    if (hasBackend) return fetchAllArticles(limitPerSource);
-    return fetchHomeArticlesFromSupabase(limitPerSource);
+  async (limitPerSource: number, useSupabase: boolean) => {
+    if (useSupabase) return fetchHomeArticlesFromSupabase(limitPerSource);
+    return fetchAllArticles(limitPerSource);
   },
-  ["home-articles-v1"],
+  ["home-articles-v2"],
   { revalidate: 15 }
 );
 
 export default async function Home() {
   const t0 = Date.now();
+  const portfolio = shouldUseSnapshots();
   const stats = await fetchHomeStatsCached().catch((e) => {
     console.error("Home stats fetch failed:", e);
-    return { total_articles: 0, articles_last_24h: 0, articles_last_7d: 0, last_updated: null, coverage_7d: null, sentiment_7d: null } as HomeStats;
+    return {
+      total_articles: 0,
+      articles_last_24h: 0,
+      articles_last_7d: 0,
+      last_updated: null,
+      coverage_7d: null,
+      sentiment_7d: null,
+      demo_anchor_published_at: null,
+    } as HomeStats;
   });
 
   // Fetch latest articles per source using optimized single endpoint
   const PER_SOURCE_LIMIT = 10;
   const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "";
+  // Portfolio mode must never depend on a dead FastAPI — read articles from Supabase.
   const hasBackend =
+    !portfolio &&
     !!backendUrl &&
     (process.env.NODE_ENV === "development" ||
       (!backendUrl.includes("localhost") && !backendUrl.includes("127.0.0.1")));
-  const articlesBySource = await fetchHomeArticlesCached(PER_SOURCE_LIMIT, hasBackend);
+  const articlesBySource = await fetchHomeArticlesCached(PER_SOURCE_LIMIT, !hasBackend);
   const tAfterOptimized = Date.now();
 
   // Normalize backend source keys to canonical labels used in UI
@@ -410,10 +447,16 @@ export default async function Home() {
 
   const sentimentSplit7d = stats.sentiment_7d;
   const sentimentForCard = sentimentSplit7d ?? { ...sentimentSplitVisible, total: visibleArticles.length };
-  const sentimentLabel = sentimentSplit7d ? "Sentiment (7d)" : "Sentiment (visible)";
-  const sentimentSublabel = sentimentSplit7d
-    ? `Last 7d: ${stats.articles_last_7d}`
-    : `Sample: ${PER_SOURCE_LIMIT}×${canonicalOrder.length} = ${PER_SOURCE_LIMIT * canonicalOrder.length}`;
+  const sentimentLabel = portfolio
+    ? "Sentiment (demo)"
+    : sentimentSplit7d
+      ? "Sentiment (7d)"
+      : "Sentiment (visible)";
+  const sentimentSublabel = portfolio
+    ? `Demo window: ${stats.articles_last_7d} articles`
+    : sentimentSplit7d
+      ? `Last 7d: ${stats.articles_last_7d}`
+      : `Sample: ${PER_SOURCE_LIMIT}×${canonicalOrder.length} = ${PER_SOURCE_LIMIT * canonicalOrder.length}`;
 
   const coveragePct = typeof stats.coverage_7d === "number" ? Math.round(stats.coverage_7d * 100) : null;
   const t1 = Date.now();
@@ -422,7 +465,16 @@ export default async function Home() {
     topUpAndGroup: tAfterAnalysis - tAfterOptimized,
     enrichAndRenderPrep: t1 - tAfterAnalysis,
     total: t1 - t0,
+    portfolio,
+    hasBackend,
   });
+
+  const demoFrom = stats.demo_anchor_published_at
+    ? new Date(new Date(stats.demo_anchor_published_at).getTime() - 6 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+    : null;
+  const demoTo = stats.demo_anchor_published_at
+    ? stats.demo_anchor_published_at.slice(0, 10)
+    : null;
 
   return (
     <MainLayout>
@@ -432,9 +484,19 @@ export default async function Home() {
             Today in the Philippines
           </h1>
           <p className="text-sm sm:text-base text-muted-foreground mt-2 max-w-prose">
-            Headlines from top PH news sources—updated continuously, with sentiment and trends.
+            {portfolio
+              ? "Portfolio demo — headlines from a frozen Supabase snapshot of Philippine news coverage."
+              : "Headlines from top PH news sources—updated continuously, with sentiment and trends."}
           </p>
         </header>
+
+        {portfolio ? (
+          <DemoDataBanner
+            computedAt={stats.last_updated}
+            dataFrom={demoFrom}
+            dataTo={demoTo}
+          />
+        ) : null}
 
         <div>
           <HomeControlBar sources={canonicalOrder} lastUpdated={stats.last_updated} />
